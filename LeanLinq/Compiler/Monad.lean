@@ -15,7 +15,7 @@ def freshAlias : CompileM String :=
   modifyGet fun st =>
     (s!"c{st.aliasCounter}", { st with aliasCounter := st.aliasCounter + 1 })
 
-/-- Allocate a named parameter (`@p0`, `@p1`, … — SQLite/TypedSqlBuilder style)
+/-- Allocate a named parameter (`@p0`, `@p1`, … — SQLite naming style)
 for a literal value and return its placeholder. -/
 def pushParam (v : SqlValue) : CompileM String :=
   modifyGet fun st =>

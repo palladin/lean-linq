@@ -1,6 +1,6 @@
 namespace LeanLinq
 
-/-- SQL column/expression types. Milestone 1 covers the Idris-parity universe;
+/-- SQL column/expression types. Milestone 1 covers int/bool/string;
 later phases extend this to long/double/decimal/dateTime/guid + nullability. -/
 inductive SqlType where
   | int

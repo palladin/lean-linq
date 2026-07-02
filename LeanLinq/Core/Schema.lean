@@ -36,13 +36,13 @@ def SqlExpr.as (e : SqlExpr t) (name : String) : Cell name t := ⟨e⟩
 def Row.consCell (c : Cell name t) (r : Row s) : Row ((name, t) :: s) :=
   .cons c.expr r
 
-/-- Row literal: `[c["Name"].as "Name", c["Id"].as "Id"] : Row [("Name", _), ("Id", _)]`.
+/-- Row literal: `![c["Name"].as "Name", c["Id"].as "Id"] : Row [("Name", _), ("Id", _)]`.
 
-This deliberately overlaps with the `List` literal syntax; Lean resolves the
-ambiguity against the expected type (`Row _` here, `List _` for lists). Needs
-an expected type whose head is `Row`/`List` — inside `select` lambdas it always
-has one. -/
-scoped syntax (name := rowLit) "[" term,+ "]" : term
+The `![…]` bracket is deliberately distinct from the `List` literal: overloading
+plain `[…]` would break list *patterns* (`match xs with | [a] => …`) in any
+scope with LeanLinq notation open, because Lean does not backtrack syntax
+choice nodes during pattern elaboration. -/
+scoped syntax (name := rowLit) "![" term,+ "]" : term
 
 @[macro rowLit] def expandRowLit : Lean.Macro := fun stx => do
   let cells := stx[1].getSepArgs
@@ -91,7 +91,7 @@ scoped syntax:max (name := colGet) term noWs "[" term "]" : term
 @[macro colGet] def expandColGet : Lean.Macro := fun stx =>
   `(LeanLinq.Row.col $(⟨stx[0]⟩) $(⟨stx[2]⟩))
 
-/-- Positional column access (the Idris `index` equivalent). -/
+/-- Positional column access. -/
 def Row.nth : {s : Schema} → Row s → (i : Fin s.length) → SqlExpr (s.get i).2
   | _, .nil,      i        => i.elim0
   | _, .cons e _, ⟨0, _⟩   => e

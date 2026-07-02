@@ -3,8 +3,8 @@ import LeanLinq.Compiler.Expr
 
 namespace LeanLinq
 
-/-- Materialize the staged row of a derived table: every column becomes a
-`field` reference through the given alias (the Idris `mapToTuple`). -/
+/-- Materialize the staged row of a source: every column becomes a `field`
+reference through the given alias. -/
 def Row.ofAlias (alias : String) : (s : Schema) → Row s
   | [] => .nil
   | (name, t) :: s => .cons (.field t alias name) (Row.ofAlias alias s)
@@ -17,28 +17,37 @@ def Row.selectList : {s : Schema} → Row s → CompileM (List String)
       let rest ← r.selectList
       pure (s!"{item} AS {name}" :: rest)
 
-/-- Compile a query to SQL. Every combinator wraps its child as a derived
-table with a fresh alias (the Idris scheme) — no flattening in milestone 1,
-so the output shape is fully predictable. -/
-def Query.compile : {s : Schema} → Query s → CompileM String
-  | _, .fromTable t => pure s!"SELECT * FROM {t.name}"
-  | s, .whereC q p => do
-      let inner ← q.compile
+/-- Walk a comprehension spine, accumulating FROM sources and WHERE conjuncts
+until the final `yield`, then emit one flat SELECT. Subquery sources (`fromQ`)
+compile recursively into derived tables.
+
+`partial` because binder constructors force recursion on the continuation
+*applied* to a materialized row — not a structural subterm (each application
+still peels one constructor, so this always terminates at runtime). -/
+partial def Query.compileParts :
+    {s : Schema} → Query s → Array String → Array String → CompileM String
+  | _, .yield r, froms, wheres => do
+      let items ← r.selectList
+      let sel := String.intercalate ", " items
+      let fromClause :=
+        if froms.isEmpty then "" else s!" FROM {String.intercalate ", " froms.toList}"
+      let whereClause :=
+        if wheres.isEmpty then "" else s!" WHERE {String.intercalate " AND " wheres.toList}"
+      pure s!"SELECT {sel}{fromClause}{whereClause}"
+  | _, .guard b rest, froms, wheres => do
+      let w ← b.compile
+      rest.compileParts froms (wheres.push w)
+  | _, .fromT (s := s₀) t k, froms, wheres => do
       let alias ← freshAlias
-      let pred ← (p (Row.ofAlias alias s)).compile
-      pure s!"SELECT * FROM ({inner}) AS {alias} WHERE {pred}"
-  | _, .selectC (s := s₀) q f => do
-      let inner ← q.compile
+      (k (Row.ofAlias alias s₀)).compileParts (froms.push s!"{t.name} AS {alias}") wheres
+  | _, .fromQ (s := s₀) q k, froms, wheres => do
+      let sub ← q.compileParts #[] #[]
       let alias ← freshAlias
-      let items ← (f (Row.ofAlias alias s₀)).selectList
-      pure s!"SELECT {String.intercalate ", " items} FROM ({inner}) AS {alias}"
-  | _, .productC (s₁ := s₁) (s₂ := s₂) q₁ q₂ f => do
-      let inner₁ ← q₁.compile
-      let inner₂ ← q₂.compile
-      let alias₁ ← freshAlias
-      let alias₂ ← freshAlias
-      let items ← (f (Row.ofAlias alias₁ s₁) (Row.ofAlias alias₂ s₂)).selectList
-      pure s!"SELECT {String.intercalate ", " items} FROM ({inner₁}) AS {alias₁}, ({inner₂}) AS {alias₂}"
+      (k (Row.ofAlias alias s₀)).compileParts (froms.push s!"({sub}) AS {alias}") wheres
+
+/-- Compile a query to SQL text. -/
+def Query.compile (q : Query s) : CompileM String :=
+  q.compileParts #[] #[]
 
 /-- Compile a query to SQL text plus named parameters (SQLite conventions). -/
 def Query.toSql (q : Query s) : Compiled :=

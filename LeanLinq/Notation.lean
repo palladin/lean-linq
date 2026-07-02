@@ -23,6 +23,8 @@ instance : Coe Bool (SqlExpr .bool) := ⟨.boolC⟩
 scoped infix:50  " ==. " => SqlExpr.eq
 /-- SQL less-than: `a <. b` compiles to `(a < b)`. -/
 scoped infix:50  " <. "  => SqlExpr.lt
+/-- SQL greater-than, as flipped less-than: `a >. b` compiles to `(b < a)`. -/
+scoped notation:50 a:51 " >. " b:51 => SqlExpr.lt b a
 /-- SQL conjunction: `a &&. b` compiles to `(a AND b)`. -/
 scoped infixl:35 " &&. " => SqlExpr.and
 /-- SQL disjunction: `a ||. b` compiles to `(a OR b)`. -/
