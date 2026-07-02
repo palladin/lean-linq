@@ -1,0 +1,14 @@
+name = "lean-linq"
+defaultTargets = ["LeanLinq"]
+testDriver = "tests"
+
+[[lean_lib]]
+name = "LeanLinq"
+
+[[lean_lib]]
+name = "Tests"
+globs = ["Tests.+"]
+
+[[lean_exe]]
+name = "tests"
+root = "Tests.Main"
