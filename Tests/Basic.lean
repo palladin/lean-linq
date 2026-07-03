@@ -2,10 +2,10 @@ import LeanLinq
 
 /-! # Example schemas and queries
 
-The golden assertions live in `Tests.Main` (the `lake test` executable).
-(No `#guard` smoke layer: the compiler is `partial` — HOAS binders force
-recursion on applied continuations — so the kernel cannot evaluate it;
-the executable is the harness.) -/
+The golden assertions live in `Tests.Main` (the `lake test` executable);
+a couple of `#guard`s at the bottom kernel-evaluate the compiler at
+elaboration time as a smoke layer (possible because the whole pipeline,
+HOAS binders included, is total). -/
 
 open LeanLinq
 
@@ -44,7 +44,7 @@ def exCompute := Query.from' customers
 /-- Identity projection. -/
 def exSelectAll := Query.from' customers |>.select (fun c => c)
 
-/-- Stacked WHEREs nest as derived tables in pipeline style. -/
+/-- Stacked WHEREs merge into AND-ed conjuncts of one flat SELECT. -/
 def exFilterTwice := Query.from' customers
   |>.where' (fun c => c["Age"] <. 65)
   |>.where' (fun c => 18 <. c["Age"])
@@ -86,11 +86,19 @@ def exLinqTwoWhere := query! {
   select ![c["Id"].as "Id"]
 }
 
-/-- A pipeline query as a `from` source (subquery). -/
+/-- A pipeline query as a `from` source — inlined into the enclosing
+comprehension by normalization. -/
 def exLinqSub := query! {
   from c in (Query.from' customers |>.where' (fun r => 18 <. r["Age"]))
   select ![c["Name"].as "Name"]
 }
+
+/-! ## Elaboration-time smoke checks (kernel-evaluate the compiler). -/
+
+#guard exFrom.toSql.sql == "SELECT c0.Id AS Id, c0.Name AS Name, c0.Age AS Age FROM Customers AS c0"
+#guard exLinqJoin.toSql ==
+  { sql := "SELECT c0.Name AS Name, c1.OrderId AS OrderId FROM Customers AS c0, Orders AS c1 WHERE (c0.Id = c1.CustomerId)",
+    params := #[] }
 
 /-! ## Negative tests: these must NOT elaborate. -/
 

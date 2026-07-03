@@ -18,13 +18,13 @@ def Row.selectList : {s : Schema} → Row s → CompileM (List String)
       pure (s!"{item} AS {name}" :: rest)
 
 /-- Walk a comprehension spine, accumulating FROM sources and WHERE conjuncts
-until the final `yield`, then emit one flat SELECT. Subquery sources (`fromQ`)
-compile recursively into derived tables.
+until the final `yield`, then emit one flat SELECT. Queries are normalized at
+construction time (`Query.bind`), so every query is exactly one flat SELECT.
 
-`partial` because binder constructors force recursion on the continuation
-*applied* to a materialized row — not a structural subterm (each application
-still peels one constructor, so this always terminates at runtime). -/
-partial def Query.compileParts :
+Total for the same reason `Query.bind` is: `Query` is a reflexive inductive,
+so the structural inductive hypothesis covers the continuation applied to any
+materialized row. -/
+def Query.compileParts :
     {s : Schema} → Query s → Array String → Array String → CompileM String
   | _, .yield r, froms, wheres => do
       let items ← r.selectList
@@ -40,10 +40,6 @@ partial def Query.compileParts :
   | _, .fromT (s := s₀) t k, froms, wheres => do
       let alias ← freshAlias
       (k (Row.ofAlias alias s₀)).compileParts (froms.push s!"{t.name} AS {alias}") wheres
-  | _, .fromQ (s := s₀) q k, froms, wheres => do
-      let sub ← q.compileParts #[] #[]
-      let alias ← freshAlias
-      (k (Row.ofAlias alias s₀)).compileParts (froms.push s!"({sub}) AS {alias}") wheres
 
 /-- Compile a query to SQL text. -/
 def Query.compile (q : Query s) : CompileM String :=

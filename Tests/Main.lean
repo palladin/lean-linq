@@ -1,6 +1,9 @@
 import Tests.Basic
 
-/-! # Golden tests: exact SQL text + parameters for every feature. -/
+/-! # Golden tests: exact SQL text + parameters for every feature.
+
+Queries normalize at construction time, so pipeline style and comprehension
+style emit identical flat SELECTs. -/
 
 open LeanLinq
 
@@ -21,36 +24,33 @@ def check (label : String) (actual : Compiled) (sql : String)
 def allCustomerCols (a : String) : String :=
   s!"{a}.Id AS Id, {a}.Name AS Name, {a}.Age AS Age"
 
-def baseCustomers : String :=
-  s!"SELECT {allCustomerCols "c0"} FROM Customers AS c0"
-
 def main : IO UInt32 := do
   let results ← List.mapM id [
-    -- pipeline style
+    -- pipeline style (normalizes to the same flat form as comprehensions)
     check "from" exFrom.toSql
-      baseCustomers,
+      s!"SELECT {allCustomerCols "c0"} FROM Customers AS c0",
     check "select named column" exSelectName.toSql
-      s!"SELECT c1.Name AS Name FROM ({baseCustomers}) AS c1",
+      "SELECT c0.Name AS Name FROM Customers AS c0",
     check "select positional" exSelectPositional.toSql
-      s!"SELECT c1.Id AS Id FROM ({baseCustomers}) AS c1",
+      "SELECT c0.Id AS Id FROM Customers AS c0",
     check "where + select" exWhereSelect.toSql
-      s!"SELECT c2.Id AS Id, c2.Age AS Age FROM (SELECT {allCustomerCols "c1"} FROM ({baseCustomers}) AS c1 WHERE (c1.Name = @p0)) AS c2"
+      "SELECT c0.Id AS Id, c0.Age AS Age FROM Customers AS c0 WHERE (c0.Name = @p0)"
       #[("@p0", .string "Nick")],
     check "operators" exOperators.toSql
-      s!"SELECT {allCustomerCols "c1"} FROM ({baseCustomers}) AS c1 WHERE ((@p0 < c1.Age) AND (NOT (c1.Name = @p1)))"
+      s!"SELECT {allCustomerCols "c0"} FROM Customers AS c0 WHERE ((@p0 < c0.Age) AND (NOT (c0.Name = @p1)))"
       #[("@p0", .int 18), ("@p1", .string "Bob")],
     check "arithmetic + concat" exCompute.toSql
-      s!"SELECT (c1.Age + @p0) AS AgePlus, (c1.Name || @p1) AS Loud FROM ({baseCustomers}) AS c1"
+      "SELECT (c0.Age + @p0) AS AgePlus, (c0.Name || @p1) AS Loud FROM Customers AS c0"
       #[("@p0", .int 1), ("@p1", .string "!")],
     check "select all (identity)" exSelectAll.toSql
-      s!"SELECT {allCustomerCols "c1"} FROM ({baseCustomers}) AS c1",
-    check "stacked wheres" exFilterTwice.toSql
-      s!"SELECT {allCustomerCols "c2"} FROM (SELECT {allCustomerCols "c1"} FROM ({baseCustomers}) AS c1 WHERE (c1.Age < @p0)) AS c2 WHERE (@p1 < c2.Age)"
+      s!"SELECT {allCustomerCols "c0"} FROM Customers AS c0",
+    check "stacked wheres (AND-merged)" exFilterTwice.toSql
+      s!"SELECT {allCustomerCols "c0"} FROM Customers AS c0 WHERE (c0.Age < @p0) AND (@p1 < c0.Age)"
       #[("@p0", .int 65), ("@p1", .int 18)],
     check "not equal" exNotEqual.toSql
-      s!"SELECT {allCustomerCols "c1"} FROM ({baseCustomers}) AS c1 WHERE (NOT (c1.Id = @p0))"
+      s!"SELECT {allCustomerCols "c0"} FROM Customers AS c0 WHERE (NOT (c0.Id = @p0))"
       #[("@p0", .int 0)],
-    -- LINQ comprehension style: flat SELECTs
+    -- LINQ comprehension style
     check "linq where" exLinqWhere.toSql
       "SELECT c0.Name AS Name FROM Customers AS c0 WHERE (@p0 < c0.Age)"
       #[("@p0", .int 10)],
@@ -61,8 +61,8 @@ def main : IO UInt32 := do
     check "linq two wheres" exLinqTwoWhere.toSql
       "SELECT c0.Id AS Id FROM Customers AS c0 WHERE (@p0 < c0.Age) AND (c0.Name = @p1)"
       #[("@p0", .int 10), ("@p1", .string "Nick")],
-    check "linq subquery source" exLinqSub.toSql
-      s!"SELECT c2.Name AS Name FROM (SELECT {allCustomerCols "c1"} FROM ({baseCustomers}) AS c1 WHERE (@p0 < c1.Age)) AS c2"
+    check "linq subquery source (flattened)" exLinqSub.toSql
+      "SELECT c0.Name AS Name FROM Customers AS c0 WHERE (@p0 < c0.Age)"
       #[("@p0", .int 18)]
   ]
   if results.all id then

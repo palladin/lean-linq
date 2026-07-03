@@ -12,11 +12,10 @@ query! {
 ```
 
 desugars right-to-left into the binder-style `Query` constructors:
-`from x in src …` ⇒ `QuerySource.bind src (fun x => …)` (sources are tables or
-subqueries), `where p …` ⇒ `Query.guard p …`, and the final `select r` ⇒
-`Query.yield r`. Nested `from`s are cross products; queries built this way
-compile to a single flat SELECT. Clauses are newline- (or `;`-) separated,
-do-notation style.
+`from x in src …` ⇒ `QuerySource.bind src (fun x => …)` (sources are tables,
+or queries — inlined by normalization), `where p …` ⇒ `Query.guard p …`, and
+the final `select r` ⇒ `Query.yield r`. Nested `from`s are cross products.
+Clauses are newline- (or `;`-) separated, do-notation style.
 
 Token choices, learned the hard way:
 - the head must be a *reserved* token — non-reserved (`&"…"`) leading keywords

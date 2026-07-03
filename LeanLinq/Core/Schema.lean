@@ -29,6 +29,12 @@ consumed by the row-literal syntax `[e₁.as "A", e₂.as "B"]`. -/
 structure Cell (name : String) (t : SqlType) where
   expr : SqlExpr t
 
+protected def Row.default : (s : Schema) → Row s
+  | [] => .nil
+  | (_, _) :: s => .cons default (Row.default s)
+
+instance : Inhabited (Row s) := ⟨Row.default s⟩
+
 /-- Name an expression as an output column: `c["Age"].as "Age"`. -/
 def SqlExpr.as (e : SqlExpr t) (name : String) : Cell name t := ⟨e⟩
 

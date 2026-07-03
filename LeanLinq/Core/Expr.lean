@@ -22,6 +22,8 @@ inductive SqlExpr : SqlType → Type where
   | not     : SqlExpr .bool → SqlExpr .bool
   | field   : (t : SqlType) → (alias name : String) → SqlExpr t
 
+instance : Inhabited (SqlExpr t) := ⟨.field t "" ""⟩
+
 /-- Explicit literal constructors, for positions where the expected type is not
 yet known and coercions cannot fire (e.g. a literal on the left of `==.`). -/
 def SqlExpr.int (i : Int) : SqlExpr .int := .intC i

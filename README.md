@@ -53,12 +53,11 @@ core binders (exactly how C# desugars LINQ into `SelectMany`):
 | `where p` | `Query.guard p …` | a `WHERE` conjunct |
 | `select r` (last) | `Query.yield r` | the `SELECT` list |
 
-Sources are tables *or* queries (subqueries) via the `QuerySource` class. Nested `from`s are
-cross products — there is no product combinator; a join is two `from`s and a `where`.
-Comprehensions compile to a single flat SELECT.
+Sources are tables *or* queries via the `QuerySource` class. Nested `from`s are cross
+products — there is no product combinator; a join is two `from`s and a `where`.
 
-A pipeline API is also derived on top of the same binders (`from` and `where` are Lean
-keywords, hence the primes):
+A pipeline API is derived on top of the same core (`from` and `where` are Lean keywords,
+hence the primes):
 
 ```lean
 def adults := Query.from' customers
@@ -66,8 +65,11 @@ def adults := Query.from' customers
   |>.select (fun c => ![c["Name"].as "Name"])
 ```
 
-Pipeline stages wrap their input as a derived table (`(…) AS cN`), so prefer `query! {}` when
-you want minimal SQL.
+Queries **normalize at construction time** (`Query.bind`, the comprehension monad — C#'s
+`SelectMany` law): `where'` splices a conjunct, `select` replaces the projection, and a query
+used as a `from` source is inlined. Both surfaces therefore compile to the *same single flat
+SELECT* — code generation never sees anything but a spine of sources, conjuncts, and a
+projection.
 
 Row access and construction:
 
@@ -96,21 +98,22 @@ return `Bool`/`Prop`, so SQL needs its own).
 - `Schema := List (String × SqlType)`; `Row : Schema → Type` heterogeneous tuple of expressions.
 - `Query : Schema → Type` in monadic-comprehension form:
   `yield : Row s → Query s`, `guard : SqlExpr .bool → Query s → Query s`,
-  `fromT : Table s → (Row s → Query s') → Query s'`, and `fromQ` likewise for subqueries.
-  HOAS binders; illegal column references are type errors at the binding site.
-- Compiler: a `StateM` (alias counter + parameter accumulator) walk that collects the
-  comprehension spine — sources, conjuncts, projection — into one flat SELECT; `fromQ`
-  recursively compiles derived tables. (`partial`: binders force recursion on applied
-  continuations, which structural termination cannot see; the golden-test executable is the
-  harness.)
+  `fromT : Table s → (Row s → Query s') → Query s'`. HOAS binders; illegal column references
+  are type errors at the binding site. `Query.bind` normalizes all combinators onto this
+  spine, so a query is always FROM sources + WHERE conjuncts + one projection. Constructs
+  that must not flatten (DISTINCT, LIMIT, GROUP BY, set ops) will arrive as explicit
+  boundary nodes whose `bind` wraps instead of splicing.
+- Compiler: a `StateM` (alias counter + parameter accumulator) walk that renders the spine as
+  one flat SELECT. Everything is total — `Query` is a reflexive inductive, so structural
+  recursion covers HOAS continuations applied to any row — which means the kernel itself can
+  run the compiler (`#guard` tests of generated SQL at elaboration time).
 
 ## Roadmap
 
 1. ~~Core: typed GADTs, comprehension + pipeline surfaces, `query!` macro, SQLite-style
    parameterized output~~ (done)
-2. Ergonomics: `sql_table` command macro, `c.Name` dot access inside `query!`
-3. Full type universe (long/double/decimal/dateTime/guid), NULL, user-named parameters
-4. Full query surface: orderBy, distinct, limit/offset, left join, groupBy/having,
+2. Full type universe (long/double/decimal/dateTime/guid), NULL, user-named parameters
+3. Full query surface: orderBy, distinct, limit/offset, left join, groupBy/having,
    aggregates, union/intersect/except, subqueries in expressions
-5. Statements: INSERT / UPDATE / DELETE
-6. Dialects: SQLite / PostgreSQL / SQL Server, WHERE-merging into pipeline-generated subqueries
+4. Statements: INSERT / UPDATE / DELETE
+5. Dialects: SQLite / PostgreSQL / SQL Server
