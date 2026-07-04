@@ -38,10 +38,35 @@ Ill-typed queries don't compile: a misspelled column name, comparing an `int` co
 ## Building
 
 ```
-lake build                  # library
-lake test                   # golden tests: 181 cases × 3 dialects (exact SQL + parameters)
-lake exe tests --update     # regenerate Tests/golden/*.golden after intentional changes
+lake build                        # library
+lake test                         # golden tests: 181 cases × 3 dialects (exact SQL + parameters)
+lake exe tests --update           # regenerate Tests/golden/{sqlite,sqlserver,postgres}.golden
+
+docker compose up -d --wait       # PostgreSQL + SQL Server test databases
+lake exe integration              # execute all 181 cases against live SQLite/PostgreSQL/SQL Server
+lake exe integration --update     # regenerate Tests/golden/results-*.golden
 ```
+
+## Integration tests
+
+`lake exe integration` executes every registered query and statement against real
+databases: SQLite (local temp file), PostgreSQL and SQL Server (docker compose
+services, driven through `psql`/`sqlcmd` inside the containers — no local client
+installs needed). The seed dataset mirrors the classic customers/products/orders
+fixture. Parameters are inlined as dialect-escaped literals *for execution only*;
+the library itself always emits parameterized SQL.
+
+- Row results are normalized (booleans, decimal trailing zeros, datetime
+  precision, guid case, NULL sentinels, row order for unordered queries) and
+  compared against per-dialect goldens (`Tests/golden/results-{db}.golden`).
+- Statements run inside a transaction: execute, verify table state with a
+  SELECT, roll back.
+- A cross-dialect comparison then checks that all engines agree on every case,
+  modulo a small allowlist (AVG division semantics differ by engine: integer on
+  SQL Server, numeric on PostgreSQL, float on SQLite).
+- Unreachable databases are skipped with a warning: `--db sqlite,postgres`
+  selects explicitly. Note for Apple Silicon: the SQL Server image is
+  amd64-only and runs via Docker Desktop's Rosetta emulation.
 
 ## Feature surface
 

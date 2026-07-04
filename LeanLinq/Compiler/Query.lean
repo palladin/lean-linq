@@ -84,7 +84,7 @@ def Query.compileStmt : Query s → CompileM String
             | some l, none => s!"{inner} LIMIT {l}"
             | none, some o => s!"{inner} OFFSET {o}"
             | none, none => inner
-  | .groupedC (s := s₀) sp keys having? sel =>
+  | .groupedC sp keys having? sel =>
       sp.compileSpine #[] #[] #[] fun r => do
         let items ← (sel r ⟨⟩).selectList
         let ks ← compileGroupKeys (keys r)

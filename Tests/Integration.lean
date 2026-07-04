@@ -1,0 +1,318 @@
+import Tests.Queries2
+import Tests.StatementsT
+
+/-! # Integration runner
+
+Executes every registered query/statement against live databases:
+SQLite (local temp file), PostgreSQL and SQL Server (docker compose services,
+driven through `psql`/`sqlcmd` inside the containers). Parameters are inlined
+as dialect-escaped literals *for execution only* — the library itself never
+inlines. Row results are normalized and compared against
+`Tests/golden/results-{db}.golden`; regenerate with
+`lake exe integration --update`. A cross-dialect comparison then checks that
+all engines agree, modulo a known-variant allowlist (AVG division semantics).
+
+Usage: `lake exe integration [--db sqlite,postgres,mssql] [--update]` -/
+
+open LeanLinq TQ
+
+/-! ## Parameter inlining (execution only) -/
+
+/-- Test values for user-named parameters, aligned with the seed data. -/
+def bindings : List (String × SqlValue) := [
+  ("minAge", .int 18), ("maxAge", .int 65),
+  ("customerName", .string "John Doe"),
+  ("isAdult", .bool true), ("isActive", .bool true),
+  ("minPrice", .decimal "100.00"),
+  ("startDate", .dateTime "2023-01-01"),
+  ("targetId", .guid "11111111-1111-1111-1111-111111111111")
+]
+
+def sqlLiteral (db : DatabaseType) : SqlValue → String
+  | .int i => toString i
+  | .long i => toString i
+  | .double f => toString f
+  | .decimal d => d
+  | .string s => s!"'{s.replace "'" "''"}'"
+  | .bool b =>
+      match db with
+      | .postgres => if b then "true" else "false"
+      | _ => if b then "1" else "0"
+  | .dateTime s =>
+      -- PG can't type a bare literal inside EXTRACT(...); a real driver would
+      -- bind a typed timestamp parameter here.
+      match db with
+      | .postgres => s!"TIMESTAMP '{s}'"
+      | _ => s!"'{s}'"
+  | .guid g => s!"'{g}'"
+  | .null => "NULL"
+
+/-- Substitute every parameter placeholder with a literal (longest placeholder
+first, so `:p10` is not clobbered by `:p1`). Named parameters (stored with a
+`null` placeholder value) resolve from `bindings`. -/
+def inlineParams (db : DatabaseType) (c : Compiled) : String :=
+  let entries := c.params.toList.map fun (name, v) =>
+    let v := if v == SqlValue.null then
+        ((bindings.lookup ((name.toList.drop 1) |> String.ofList)).getD SqlValue.null)
+      else v
+    (name, sqlLiteral db v)
+  let entries := entries.mergeSort (fun a b => a.1.length ≥ b.1.length)
+  entries.foldl (fun sql (n, lit) => sql.replace n lit) c.sql
+
+/-! ## Schema + seed (mirrors the reference fixture's dataset) -/
+
+def seedCustomers (boolLit : Bool → String) : String :=
+  s!"INSERT INTO {"customers"} VALUES " ++
+  s!"(1, 25, 'John Doe', {boolLit true}), (2, 30, 'Jane Smith', {boolLit true}), " ++
+  s!"(3, 16, 'Minor User', {boolLit false}), (4, 65, 'Senior User', {boolLit true});"
+
+def seedProducts : String :=
+  "INSERT INTO products VALUES " ++
+  "(1, 'Laptop', 999.99, '2023-01-15 00:00:00', '11111111-1111-1111-1111-111111111111'), " ++
+  "(2, 'Mouse', 25.50, '2023-06-10 00:00:00', '22222222-2222-2222-2222-222222222222'), " ++
+  "(3, 'Discontinued', NULL, NULL, NULL);"
+
+def seedOrders : String :=
+  "INSERT INTO orders VALUES (1, 1, 1, 500), (2, 1, 2, 150), (3, 2, 1, 300), (4, 4, 2, 75);"
+
+def setupSql : DatabaseType → String
+  | .sqlite =>
+      "DROP TABLE IF EXISTS orders; DROP TABLE IF EXISTS products; DROP TABLE IF EXISTS customers;
+CREATE TABLE customers (\"Id\" INTEGER PRIMARY KEY, \"Age\" INTEGER, \"Name\" TEXT, \"IsActive\" INTEGER);
+CREATE TABLE products (\"Id\" INTEGER PRIMARY KEY, \"ProductName\" TEXT, \"Price\" REAL, \"CreatedDate\" TEXT, \"UniqueId\" TEXT);
+CREATE TABLE orders (\"Id\" INTEGER PRIMARY KEY, \"CustomerId\" INTEGER, \"ProductId\" INTEGER, \"Amount\" INTEGER);
+" ++ seedCustomers (fun b => if b then "1" else "0") ++ seedProducts ++ seedOrders
+  | .postgres =>
+      "DROP TABLE IF EXISTS orders; DROP TABLE IF EXISTS products; DROP TABLE IF EXISTS customers;
+CREATE TABLE customers (\"Id\" INT PRIMARY KEY, \"Age\" INT, \"Name\" VARCHAR(255), \"IsActive\" BOOLEAN);
+CREATE TABLE products (\"Id\" INT PRIMARY KEY, \"ProductName\" VARCHAR(255), \"Price\" DECIMAL(18,2), \"CreatedDate\" TIMESTAMP, \"UniqueId\" UUID);
+CREATE TABLE orders (\"Id\" INT PRIMARY KEY, \"CustomerId\" INT, \"ProductId\" INT, \"Amount\" INT);
+" ++ seedCustomers (fun b => if b then "true" else "false") ++ seedProducts ++ seedOrders
+  | .sqlServer =>
+      "DROP TABLE IF EXISTS [orders]; DROP TABLE IF EXISTS [products]; DROP TABLE IF EXISTS [customers];
+CREATE TABLE [customers] ([Id] INT PRIMARY KEY, [Age] INT, [Name] NVARCHAR(255), [IsActive] BIT);
+CREATE TABLE [products] ([Id] INT PRIMARY KEY, [ProductName] NVARCHAR(255), [Price] DECIMAL(18,2), [CreatedDate] DATETIME2, [UniqueId] UNIQUEIDENTIFIER);
+CREATE TABLE [orders] ([Id] INT PRIMARY KEY, [CustomerId] INT, [ProductId] INT, [Amount] INT);
+" ++ seedCustomers (fun b => if b then "1" else "0") ++ seedProducts ++ seedOrders
+
+/-! ## CLI bridges -/
+
+def mssqlPassword := "Test123!Strong"
+
+/-- Run SQL through the dialect's CLI client; returns (success, stdout). -/
+def execSql (db : DatabaseType) (sqliteFile : String) (sql : String)
+    (database : String := "testdb") : IO (Bool × String) := do
+  let (cmd, args) :=
+    match db with
+    | .sqlite =>
+        ("sqlite3", #["-batch", "-cmd", ".separator \"\\t\"", "-cmd", ".nullvalue NULL",
+                      sqliteFile, sql])
+    | .postgres =>
+        ("docker", #["compose", "exec", "-T", "postgres", "psql", "-X",
+                     "-U", "testuser", "-d", database, "-v", "ON_ERROR_STOP=1",
+                     "-At", "-F", "\t", "-P", "null=NULL", "-c", sql])
+    | .sqlServer =>
+        ("docker", #["compose", "exec", "-T", "mssql",
+                     "/opt/mssql-tools18/bin/sqlcmd", "-C", "-S", "localhost",
+                     "-U", "sa", "-P", mssqlPassword, "-d", database,
+                     "-h", "-1", "-s", "\t", "-W", "-b",
+                     "-Q", s!"SET NOCOUNT ON; {sql}"])
+  let out ← IO.Process.output { cmd, args }
+  pure (out.exitCode == 0, if out.exitCode == 0 then out.stdout else out.stdout ++ out.stderr)
+
+def probe (db : DatabaseType) (sqliteFile : String) : IO Bool := do
+  match db with
+  | .sqlite => pure true
+  | .sqlServer =>
+      -- also creates testdb on first contact
+      let (ok, _) ← execSql db sqliteFile
+        "IF DB_ID('testdb') IS NULL CREATE DATABASE testdb" (database := "master")
+      pure ok
+  | .postgres =>
+      let (ok, _) ← execSql db sqliteFile "SELECT 1"
+      pure ok
+
+/-! ## Output normalization -/
+
+def isDigits (s : List Char) : Bool := !s.isEmpty && s.all (·.isDigit)
+
+def looksNumeric (s : String) : Bool :=
+  let cs := match s.toList with
+    | '-' :: rest => rest
+    | cs => cs
+  !cs.isEmpty && cs.all (fun c => c.isDigit || c == '.') &&
+    (cs.filter (· == '.')).length ≤ 1
+
+def trimTrailingZeros (s : String) : String :=
+  if s.contains '.' then
+    let t := (s.toList.reverse.dropWhile (· == '0')).reverse
+    let t := if t.getLast? == some '.' then t.dropLast else t
+    String.ofList t
+  else s
+
+def looksDateTime (s : String) : Bool :=
+  let cs := s.toList
+  s.length ≥ 19 && isDigits (cs.take 4) && cs[4]? == some '-' && cs[7]? == some '-' &&
+    (cs[10]? == some ' ' || cs[10]? == some 'T') && cs[13]? == some ':'
+
+def looksGuid (s : String) : Bool :=
+  s.length == 36 &&
+    (s.toList.zipIdx.all fun (c, i) =>
+      if i == 8 || i == 13 || i == 18 || i == 23 then c == '-' else c.isHexDigit)
+
+def normCell (raw : String) : String :=
+  let s := raw
+  if s == "NULL" then "NULL"
+  else if s == "t" || s == "true" || s == "True" then "1"
+  else if s == "f" || s == "false" || s == "False" then "0"
+  else if looksDateTime s then ((s.toList.take 19).map fun c => if c == 'T' then ' ' else c) |> String.ofList
+  else if looksNumeric s then trimTrailingZeros s
+  else if looksGuid s then s.toLower
+  else s
+
+/-- psql prints command tags (`BEGIN`, `INSERT 0 1`, …) even in tuples-only
+mode when `-c` contains multiple statements; drop them. -/
+def isCommandTag (l : String) : Bool :=
+  l == "BEGIN" || l == "ROLLBACK" || l == "COMMIT" || l == "SET" ||
+  (l.startsWith "INSERT " && isDigits ((l.toList.drop 7).filter (· != ' '))) ||
+  (l.startsWith "UPDATE " && isDigits (l.toList.drop 7)) ||
+  (l.startsWith "DELETE " && isDigits (l.toList.drop 7))
+
+def normalizeOutput (sql : String) (out : String) : String :=
+  let lines := (out.splitOn "\n").map (fun l => (l.toList.filter (· != '\r')) |> String.ofList)
+  let rows := lines.filter (fun l => l ≠ "" && !isCommandTag l)
+  let rows := rows.map fun l => String.intercalate "," ((l.splitOn "\t").map normCell)
+  let ordered := (sql.splitOn " ORDER BY ").length > 1
+  let rows := if ordered then rows else rows.mergeSort (fun a b => a ≤ b)
+  String.intercalate "|" rows
+
+/-! ## Case execution -/
+
+/-- Cases whose output depends on the current time: execute-only. -/
+def skipResults : List String := ["DateTimeNow", "DateTimeFunctionsInSelect"]
+
+/-- Cases where engines legitimately disagree (AVG: integer division on SQL
+Server, numeric on PostgreSQL, float on SQLite); excluded from the
+cross-dialect comparison, still checked against their per-dialect golden. -/
+def crossDialectAllowlist : List String := [
+  "AvgPrices", "AvgExpensivePrices", "FromSelectAvg", "FromGroupByAvgSelect",
+  "FromGroupByDecimalAggregatesSelect", "FromGroupByDecimalAvgSelect",
+  "FromSelectDecimalArithmetic",
+  -- ORDER BY COUNT(*) DESC where every count ties: tie order is
+  -- engine-specific
+  "FromGroupByMultipleOrderBySelect"
+]
+
+/-- Statement cases verify table state inside a rolled-back transaction. -/
+def stmtVerifyTable (name : String) : String :=
+  if name == "InsertWithNewColumns" || name == "UpdateWithNewColumns" ||
+     name == "InsertWithNewColumnsNull" || name == "UpdateSetNewColumnsNull"
+  then "products" else "customers"
+
+def stmtBatch (db : DatabaseType) (name : String) (stmt : String) : String :=
+  let table := stmtVerifyTable name
+  let verify :=
+    match db with
+    | .sqlServer => s!"SELECT * FROM [{table}] ORDER BY [Id]"
+    | _ => s!"SELECT * FROM \"{table}\" ORDER BY \"Id\""
+  match db with
+  | .sqlServer => s!"BEGIN TRAN; {stmt}; {verify}; ROLLBACK TRAN;"
+  | _ => s!"BEGIN; {stmt}; {verify}; ROLLBACK;"
+
+structure CaseResult where
+  name : String
+  result : String       -- normalized rows, "<executed>", or "ERROR: …"
+  isError : Bool
+
+def runCase (db : DatabaseType) (sqliteFile : String) (isStmt : Bool)
+    (name : String) (compiled : Compiled) : IO CaseResult := do
+  let sql := inlineParams db compiled
+  let batch := if isStmt then stmtBatch db name sql else sql
+  let (ok, out) ← execSql db sqliteFile batch
+  if !ok then
+    return { name, result := s!"ERROR: {out.replace "\n" " | "}", isError := true }
+  if skipResults.contains name then
+    return { name, result := "<executed>", isError := false }
+  -- statements: verification SELECT is ordered
+  let sqlForOrder := if isStmt then batch else sql
+  return { name, result := normalizeOutput sqlForOrder out, isError := false }
+
+def dialects : List (String × DatabaseType) :=
+  [("sqlite", .sqlite), ("postgres", .postgres), ("mssql", .sqlServer)]
+
+def goldenPath (dn : String) : String := s!"Tests/golden/results-{dn}.golden"
+
+def main (args : List String) : IO UInt32 := do
+  let update := args.contains "--update"
+  let selected :=
+    match args.idxOf? "--db" with
+    | some i =>
+      match args[i+1]? with
+      | some csv => csv.splitOn ","
+      | none => dialects.map Prod.fst
+    | none => dialects.map Prod.fst
+  let allNamed : List (Bool × String × (DatabaseType → Compiled)) :=
+    queryCases.map (fun (n, f) => (false, n, f)) ++
+    statementCases.map (fun (n, f) => (true, n, f))
+  let sqliteFile ← do
+    let tmp := s!"/tmp/leanlinq-integration.db"
+    if ← System.FilePath.pathExists tmp then IO.FS.removeFile tmp
+    pure tmp
+  let mut failures := 0
+  let mut collected : List (String × List CaseResult) := []
+  for (dn, db) in dialects do
+    unless selected.contains dn do continue
+    unless (← probe db sqliteFile) do
+      IO.eprintln s!"[{dn}] unreachable — skipped (is `docker compose up -d --wait` running?)"
+      continue
+    let (ok, out) ← execSql db sqliteFile (setupSql db)
+    unless ok do
+      IO.eprintln s!"[{dn}] schema setup FAILED: {out}"
+      failures := failures + 1
+      continue
+    let mut results : List CaseResult := []
+    for (isStmt, name, f) in allNamed do
+      let r ← runCase db sqliteFile isStmt name (f db)
+      if r.isError then
+        failures := failures + 1
+        IO.eprintln s!"EXEC FAIL [{dn}] {name}: {r.result}"
+      results := results ++ [r]
+    collected := collected ++ [(dn, results)]
+    let lines := results.map fun r => s!"{r.name}\t{r.result}"
+    if update then
+      if results.any (·.isError) then
+        IO.eprintln s!"[{dn}] not updating golden: run had execution errors"
+      else
+        IO.FS.writeFile (goldenPath dn) (String.intercalate "\n" lines ++ "\n")
+        IO.println s!"updated {goldenPath dn} ({lines.length} cases)"
+    else
+      let expected := (← IO.FS.lines (goldenPath dn)).toList.filter (· ≠ "")
+      if expected.length != lines.length then
+        IO.eprintln s!"[{dn}] golden has {expected.length} lines, expected {lines.length} — run --update"
+        failures := failures + 1
+      let mut passed := 0
+      for (got, want) in lines.zip expected do
+        if got == want then
+          passed := passed + 1
+        else
+          failures := failures + 1
+          IO.eprintln s!"FAIL [{dn}]\n  want: {want}\n   got: {got}"
+      IO.println s!"[{dn}] {passed}/{lines.length} cases match golden"
+  -- cross-dialect comparison against the first dialect that ran
+  match collected with
+  | (refName, refResults) :: rest =>
+    for (dn, results) in rest do
+      for ab in refResults.zip results do
+        let (a, b) := ab
+        if a.name == b.name && !crossDialectAllowlist.contains a.name &&
+           !skipResults.contains a.name && !a.isError && !b.isError &&
+           a.result != b.result then
+          failures := failures + 1
+          IO.eprintln s!"CROSS-DIALECT MISMATCH {a.name}: [{refName}] {a.result} ≠ [{dn}] {b.result}"
+  | [] => IO.eprintln "no dialect ran"
+  if failures == 0 then
+    IO.println "integration: all green"
+    return 0
+  else
+    IO.eprintln s!"integration: {failures} failures"
+    return 1

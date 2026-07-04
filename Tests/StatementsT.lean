@@ -32,11 +32,11 @@ def InsertWithNullInt := customers.insert
 def InsertWithNewColumns := products.insert
   |>.value "Id" 200 |>.value "ProductName" "Test Product"
   |>.value "Price" 99.99
-  |>.value "CreatedDate" (SqlExpr.dt "2024-08-18")
+  |>.value "CreatedDate" (SqlExpr.dt "2024-08-18 00:00:00")
   |>.value "UniqueId" (SqlExpr.gd "12345678-1234-1234-1234-123456789012")
 def UpdateWithNewColumns := products.update
   |>.set "Price" 119.99
-  |>.set "CreatedDate" (SqlExpr.dt "2024-12-25")
+  |>.set "CreatedDate" (SqlExpr.dt "2024-12-25 00:00:00")
   |>.set "UniqueId" (SqlExpr.gd "87654321-4321-4321-4321-210987654321")
   |>.where' (fun p => p["Id"] ==. 100)
 def InsertWithNewColumnsNull := products.insert

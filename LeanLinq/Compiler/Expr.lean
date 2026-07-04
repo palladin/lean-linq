@@ -22,6 +22,15 @@ def DateUnit.strftimeFmt : DateUnit → String
 def DateUnit.upperName : DateUnit → String
   | .day => "DAY" | .month => "MONTH" | .year => "YEAR"
 
+/-- Whether a boolean expression is a *predicate* (comparison/logic/…) as
+opposed to a BIT-like value (column, parameter, literal, CASE). T-SQL has no
+first-class booleans: comparing a predicate requires converting it to a value
+first (`CASE WHEN p THEN 1 ELSE 0 END`). -/
+def SqlExpr.isPredicate : SqlExpr t → Bool
+  | .cmp .. | .and .. | .or .. | .not .. | .isNull .. | .isNotNull ..
+  | .like .. | .inList .. | .inSub .. => true
+  | _ => false
+
 mutual
 
 /-- Render an expression to SQL text for the ambient dialect, allocating a
@@ -44,7 +53,16 @@ def SqlExpr.compile : SqlExpr t → CompileM String
   | .concat a b    => do
       let tok := if (← read) == .sqlServer then "+" else "||"
       return s!"({← a.compile} {tok} {← b.compile})"
-  | .cmp op a b    => return s!"({← a.compile} {op.token} {← b.compile})"
+  | .cmp (t := t₀) op a b => do
+      let sa ← a.compile
+      let sb ← b.compile
+      -- SQL Server: predicates are not values; convert before comparing.
+      let wrap (e : SqlExpr t₀) (s : String) : String :=
+        if t₀ == .bool && e.isPredicate then s!"CASE WHEN {s} THEN 1 ELSE 0 END" else s
+      if (← read) == .sqlServer then
+        return s!"({wrap a sa} {op.token} {wrap b sb})"
+      else
+        return s!"({sa} {op.token} {sb})"
   | .and a b       => return s!"({← a.compile} AND {← b.compile})"
   | .or a b        => return s!"({← a.compile} OR {← b.compile})"
   | .not a         => return s!"(NOT {← a.compile})"

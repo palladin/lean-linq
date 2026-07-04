@@ -1,0 +1,29 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: testdb
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpass
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d testdb"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    # amd64-only image; on Apple Silicon this runs via Docker Desktop's
+    # Rosetta emulation. Use `lake exe integration --db sqlite,postgres`
+    # to skip it locally if needed.
+    platform: linux/amd64
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Test123!Strong"
+      MSSQL_PID: Express
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -U sa -P 'Test123!Strong' -Q 'SELECT 1' -b"]
+      interval: 3s
+      timeout: 10s
+      retries: 40
+      start_period: 20s

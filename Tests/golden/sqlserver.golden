@@ -87,7 +87,7 @@ FromSelectMin	SELECT MIN([a0].[Amount]) FROM [orders] [a0]
 FromSelectMax	SELECT MAX([a0].[Amount]) FROM [orders] [a0]	
 ParameterAsIntParam	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @minAge)	@minAge=null
 ParameterAsStringParam	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age] FROM [customers] [a0] WHERE ([a0].[Name] = @customerName)	@customerName=null
-ParameterAsBoolParam	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age] FROM [customers] [a0] WHERE (([a0].[Age] > @p0) = @isAdult)	@p0=int 18; @isAdult=null
+ParameterAsBoolParam	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age] FROM [customers] [a0] WHERE (CASE WHEN ([a0].[Age] > @p0) THEN 1 ELSE 0 END = @isAdult)	@p0=int 18; @isAdult=null
 BoolColumnDirectComparison	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[IsActive] = @isActive)	@isActive=null
 BoolColumnLiteralTrue	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[IsActive] = @p0)	@p0=bool true
 BoolColumnLiteralFalse	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[IsActive] = @p0)	@p0=bool false
@@ -175,7 +175,7 @@ UpdateSetNullMixed	UPDATE [customers] SET [Name] = @p0, [Age] = NULL	@p0=string 
 UpdateSetNullWhere	UPDATE [customers] SET [Name] = NULL WHERE ([Id] = @p0)	@p0=long 200
 InsertWithNull	INSERT INTO [customers] ([Id], [Name], [Age]) VALUES (@p0, NULL, @p1)	@p0=long 202; @p1=int 25
 InsertWithNullInt	INSERT INTO [customers] ([Id], [Name], [Age]) VALUES (@p0, @p1, NULL)	@p0=long 203; @p1=string "John"
-InsertWithNewColumns	INSERT INTO [products] ([Id], [ProductName], [Price], [CreatedDate], [UniqueId]) VALUES (@p0, @p1, @p2, @p3, @p4)	@p0=long 200; @p1=string "Test Product"; @p2=decimal 99.99; @p3=dateTime "2024-08-18"; @p4=guid "12345678-1234-1234-1234-123456789012"
-UpdateWithNewColumns	UPDATE [products] SET [Price] = @p0, [CreatedDate] = @p1, [UniqueId] = @p2 WHERE ([Id] = @p3)	@p0=decimal 119.99; @p1=dateTime "2024-12-25"; @p2=guid "87654321-4321-4321-4321-210987654321"; @p3=long 100
+InsertWithNewColumns	INSERT INTO [products] ([Id], [ProductName], [Price], [CreatedDate], [UniqueId]) VALUES (@p0, @p1, @p2, @p3, @p4)	@p0=long 200; @p1=string "Test Product"; @p2=decimal 99.99; @p3=dateTime "2024-08-18 00:00:00"; @p4=guid "12345678-1234-1234-1234-123456789012"
+UpdateWithNewColumns	UPDATE [products] SET [Price] = @p0, [CreatedDate] = @p1, [UniqueId] = @p2 WHERE ([Id] = @p3)	@p0=decimal 119.99; @p1=dateTime "2024-12-25 00:00:00"; @p2=guid "87654321-4321-4321-4321-210987654321"; @p3=long 100
 InsertWithNewColumnsNull	INSERT INTO [products] ([Id], [ProductName], [Price], [CreatedDate], [UniqueId]) VALUES (@p0, @p1, NULL, NULL, NULL)	@p0=long 201; @p1=string "Null Test"
 UpdateSetNewColumnsNull	UPDATE [products] SET [Price] = NULL, [CreatedDate] = NULL, [UniqueId] = NULL WHERE ([Id] = @p0)	@p0=long 101
