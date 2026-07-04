@@ -620,6 +620,9 @@ def oracles : List (String × OCase) := [
   ("FromSelectDistinctMultipleColumns", o
     ((customers.orderBy' (·.name ≤ ·.name)
       |>.select fun c => [c.name, ci c.age]).eraseDups)),
+  ("FromOrderByLimitDistinct", o
+    (((customers.orderBy' (·.name ≤ ·.name) |>.take 2
+      |>.select fun c => [c.name]).eraseDups).orderBy' (fun a b => a ≤ b))),
   -- set operations (UNION/INTERSECT/EXCEPT deduplicate)
   ("Union", u
     (((customers.where' (·.age > 30) |>.select fun c => [ci c.id, c.name]) ++

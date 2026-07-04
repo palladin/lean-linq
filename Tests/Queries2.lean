@@ -229,6 +229,15 @@ def FromSelectDistinctMultipleColumns := Query.from' customers
   |>.orderBy (fun c => [c["Name"].asc])
   |>.select (fun c => ![c["Name"].as "Name", c["Age"].as "Age"]) |>.distinct
 
+/-- DISTINCT over a boundary query (LIMIT): dedupe applies *after* the limit,
+so the limited query becomes a derived table under SELECT DISTINCT. -/
+def FromOrderByLimitDistinct := Query.from' customers
+  |>.select (fun c => ![c["Name"].as "Name"])
+  |>.orderBy (fun r => [r["Name"].asc])
+  |>.limit 2
+  |>.distinct
+  |>.orderBy (fun r => [r["Name"].asc])
+
 def UnionQ :=
   (Query.from' customers
     |>.where' (fun c => c["Age"] >. 30)
@@ -382,6 +391,7 @@ def queryCases : List (String × (DatabaseType → Compiled)) := [
   ("FromSelectDistinctWhere", q FromSelectDistinctWhere),
   ("FromSelectDistinctOrderBy", q FromSelectDistinctOrderBy),
   ("FromSelectDistinctMultipleColumns", q FromSelectDistinctMultipleColumns),
+  ("FromOrderByLimitDistinct", q FromOrderByLimitDistinct),
   ("Union", q UnionQ), ("Intersect", q IntersectQ), ("Except", q ExceptQ)
 ]
 

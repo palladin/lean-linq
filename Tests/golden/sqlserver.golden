@@ -159,6 +159,7 @@ FromSelectDistinct	SELECT DISTINCT [a0].[Name] AS [Name] FROM [customers] [a0]
 FromSelectDistinctWhere	SELECT DISTINCT [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @p0)	@p0=int 18
 FromSelectDistinctOrderBy	SELECT DISTINCT [a0].[Name] AS [Name] FROM [customers] [a0] ORDER BY [a0].[Name] ASC	
 FromSelectDistinctMultipleColumns	SELECT DISTINCT [a0].[Name] AS [Name], [a0].[Age] AS [Age] FROM [customers] [a0] ORDER BY [a0].[Name] ASC	
+FromOrderByLimitDistinct	SELECT [a2].[Name] AS [Name] FROM (SELECT DISTINCT [a1].[Name] AS [Name] FROM (SELECT [a0].[Name] AS [Name] FROM [customers] [a0] ORDER BY [a0].[Name] ASC OFFSET 0 ROWS FETCH NEXT 2 ROWS ONLY) [a1]) [a2] ORDER BY [a2].[Name] ASC	
 Union	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) UNION SELECT [a1].[Id] AS [Id], [a1].[Name] AS [Name] FROM [customers] [a1] WHERE ([a1].[Name] = @p1)	@p0=int 30; @p1=string "Alice"
 Intersect	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) INTERSECT SELECT [a1].[Id] AS [Id], [a1].[Name] AS [Name] FROM [customers] [a1] WHERE ([a1].[Name] = @p1)	@p0=int 25; @p1=string "John"
 Except	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] EXCEPT SELECT [a1].[Id] AS [Id], [a1].[Name] AS [Name] FROM [customers] [a1] WHERE ([a1].[Age] < @p0)	@p0=int 18

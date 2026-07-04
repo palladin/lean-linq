@@ -51,22 +51,57 @@ def compileGroupKeys (ks : List KeyExpr) : CompileM String := do
   let items ← ks.mapM (·.expr.compile)
   return String.intercalate ", " items
 
+/-- The clauses accumulated while walking a spine, plus statement-level
+modifiers. No string inspection anywhere: DISTINCT is a fact about the
+statement being assembled, not a rewrite of its text. -/
+structure StmtAcc where
+  froms : Array (Bool × String) := #[]   -- (isJoin, rendered source)
+  wheres : Array String := #[]
+  orders : Array String := #[]
+  distinct : Bool := false
+
+/-- Does the statement produced for this spine carry an ORDER BY clause?
+Purely structural: continuations are applied to a default row (the spine's
+shape does not depend on row values). ORDER BY inside a derived table
+(`fromQ`) does not count — it belongs to the inner statement. -/
+def SpineQ.hasOrder : SpineQ s → Bool
+  | .yield _ => false
+  | .guard _ rest => rest.hasOrder
+  | .order _ _ => true
+  | .fromT _ f => (f default).hasOrder
+  | .joinT _ _ _ f => (f default).hasOrder
+  | .fromQ _ f => (f default).hasOrder
+
+/-- Does the statement produced for this query end with an ORDER BY clause
+(needed by SQL Server, whose OFFSET/FETCH requires one)? -/
+def Query.hasOrderBy : Query s → Bool
+  | .spine sp => sp.hasOrder
+  | .distinctC q => q.hasOrderBy
+  | .limitC q _ _ => q.hasOrderBy
+  | .groupedC sp _ _ _ => sp.hasOrder
+  | .setOpC .. => false
+
 mutual
 
-/-- Compile a full query. Boundary clauses (ORDER BY, DISTINCT, LIMIT, set
-ops, GROUP BY) decorate the statement produced by the spine underneath. -/
+/-- Compile a full query. Boundary clauses (DISTINCT, LIMIT, set ops,
+GROUP BY) decorate the statement produced by the spine underneath. -/
 def Query.compileStmt : Query s → CompileM String
-  | .spine sp => sp.compileSpine #[] #[] #[] Row.defaultSelect
-  | .distinctC q => do
-      let inner ← q.compileStmt
-      return if inner.startsWith "SELECT " then
-        "SELECT DISTINCT " ++ (inner.drop "SELECT ".length)
-      else inner
+  | .spine sp => sp.compileSpine {} Row.defaultSelect
+  -- spines assemble with the DISTINCT flag …
+  | .distinctC (.spine sp) => sp.compileSpine { distinct := true } Row.defaultSelect
+  -- … other boundary queries become a derived table under a distinct SELECT
+  -- (structural recursion forbids `asSpine` here: it can wrap `q`, producing
+  -- a larger term)
+  | .distinctC (s := s₀) q => do
+      let sub ← q.compileStmt
+      let alias ← freshAlias
+      let (sel, _) ← Row.defaultSelect (Row.ofAlias alias s₀)
+      return s!"SELECT DISTINCT {sel} FROM ({sub}) {← quote alias}"
   | .limitC q lim? off? => do
       let inner ← q.compileStmt
       match (← read) with
       | .sqlServer =>
-          let ob := if (inner.splitOn " ORDER BY ").length > 1 then "" else " ORDER BY (SELECT NULL)"
+          let ob := if q.hasOrderBy then "" else " ORDER BY (SELECT NULL)"
           let offN := off?.getD 0
           let fetch := match lim? with
             | some l => s!" FETCH NEXT {l} ROWS ONLY"
@@ -85,7 +120,7 @@ def Query.compileStmt : Query s → CompileM String
             | none, some o => s!"{inner} OFFSET {o}"
             | none, none => inner
   | .groupedC sp keys having? sel =>
-      sp.compileSpine #[] #[] #[] fun r => do
+      sp.compileSpine {} fun r => do
         let items ← (sel r ⟨⟩).selectList
         let ks ← compileGroupKeys (keys r)
         let hv ← match having? with
@@ -101,42 +136,45 @@ def Query.compileStmt : Query s → CompileM String
 WHERE conjuncts until the final `yield`, then assemble one flat SELECT via
 the projection callback (which also supplies a statement tail, e.g.
 `GROUP BY … HAVING …`). -/
-def SpineQ.compileSpine : SpineQ s → Array (Bool × String) → Array String →
-    Array String → (Row s → CompileM (String × String)) → CompileM String
-  | .yield r, froms, wheres, orders, k => do
+def SpineQ.compileSpine : SpineQ s → StmtAcc →
+    (Row s → CompileM (String × String)) → CompileM String
+  | .yield r, acc, k => do
       let (sel, tail) ← k r
+      let head := if acc.distinct then "SELECT DISTINCT" else "SELECT"
       let orderClause :=
-        if orders.isEmpty then ""
-        else s!" ORDER BY {String.intercalate ", " orders.toList}"
-      return s!"SELECT {sel}{renderFroms froms}{renderWheres wheres}{tail}{orderClause}"
-  | .guard b rest, froms, wheres, orders, k => do
+        if acc.orders.isEmpty then ""
+        else s!" ORDER BY {String.intercalate ", " acc.orders.toList}"
+      return s!"{head} {sel}{renderFroms acc.froms}{renderWheres acc.wheres}{tail}{orderClause}"
+  | .guard b rest, acc, k => do
       let w ← b.compile
-      rest.compileSpine froms (wheres.push w) orders k
-  | .order ks rest, froms, wheres, orders, k => do
+      rest.compileSpine { acc with wheres := acc.wheres.push w } k
+  | .order ks rest, acc, k => do
       let rendered ← compileOrderKeys ks
-      rest.compileSpine froms wheres (orders.push rendered) k
-  | .fromT (s := s₀) t f, froms, wheres, orders, k => do
+      rest.compileSpine { acc with orders := acc.orders.push rendered } k
+  | .fromT (s := s₀) t f, acc, k => do
       let alias ← freshAlias
       let item := s!"{← quote t.name} {← quote alias}"
-      (f (Row.ofAlias alias s₀)).compileSpine (froms.push (false, item)) wheres orders k
-  | .joinT (s := s₀) kind t on' f, froms, wheres, orders, k => do
+      (f (Row.ofAlias alias s₀)).compileSpine
+        { acc with froms := acc.froms.push (false, item) } k
+  | .joinT (s := s₀) kind t on' f, acc, k => do
       let alias ← freshAlias
       let row := Row.ofAlias alias s₀
       let onStr ← (on' row).compile
       let item := s!"{kind.token} {← quote t.name} {← quote alias} ON {onStr}"
-      (f row).compileSpine (froms.push (true, item)) wheres orders k
-  | .fromQ (s := s₀) q f, froms, wheres, orders, k => do
+      (f row).compileSpine { acc with froms := acc.froms.push (true, item) } k
+  | .fromQ (s := s₀) q f, acc, k => do
       let sub ← q.compileStmt
       let alias ← freshAlias
       let item := s!"({sub}) {← quote alias}"
-      (f (Row.ofAlias alias s₀)).compileSpine (froms.push (false, item)) wheres orders k
+      (f (Row.ofAlias alias s₀)).compileSpine
+        { acc with froms := acc.froms.push (false, item) } k
 
 end
 
 /-- Compile a scalar aggregate query. -/
 def ScalarQuery.compile : ScalarQuery t → CompileM String
-  | .countQ sp => sp.compileSpine #[] #[] #[] fun _ => pure ("COUNT(*)", "")
-  | .aggQ op sp => sp.compileSpine #[] #[] #[] fun r =>
+  | .countQ sp => sp.compileSpine {} fun _ => pure ("COUNT(*)", "")
+  | .aggQ op sp => sp.compileSpine {} fun r =>
       match r with
       | .cons e .nil => do return (s!"{op.token}({← e.compile})", "")
 
