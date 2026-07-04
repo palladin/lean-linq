@@ -31,6 +31,19 @@ def adults := Query.from' customers
 --   params := #[(":p0", .int 18)] }
 ```
 
+The same query in `query!` comprehension syntax — both surfaces normalize to *identical* SQL:
+
+```lean
+def adults' := query! {
+  from c in customers
+  where 18 <. c["Age"]
+  orderBy c["Name"].asc
+  select ![c["Id"].as "Id", c["Name"].as "Name"]
+}
+
+#eval adults.toSql .sqlite == adults'.toSql .sqlite   -- true
+```
+
 Ill-typed queries don't compile: a misspelled column name, comparing an `int` column to a
 `string`, or adding two `string` columns are all elaboration errors.
 

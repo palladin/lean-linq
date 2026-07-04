@@ -11,6 +11,9 @@ testDriver = "tests"
 name = "LeanLinq"
 
 [[lean_lib]]
+name = "Playground"
+
+[[lean_lib]]
 name = "Tests"
 globs = ["Tests.+"]
 
