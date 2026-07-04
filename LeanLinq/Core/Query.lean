@@ -45,7 +45,8 @@ inductive Query : Schema → Type where
   | distinctC : {s : Schema} → Query s → Query s
   | limitC : {s : Schema} → Query s → Option Nat → Option Nat → Query s
   | groupedC : {s s' : Schema} → SpineQ s → (Row s → List KeyExpr) →
-      Option (Row s → SqlExpr .bool) → (Row s → Agg → Row s') → Query s'
+      Option (Row s → SqlExpr .bool) → Option (Row s → List OrderKey) →
+      (Row s → Agg → Row s') → Query s'
   | setOpC : {s : Schema} → SetOp → Query s → Query s → Query s
 
 end
@@ -169,12 +170,29 @@ def groupYieldQ (ks : List KeyExpr) (hv : Option (SqlExpr .bool)) (r : Row s) :
 /-- `SELECT DISTINCT`. -/
 def distinct (q : Query s) : Query s := .distinctC q
 
-/-- `LIMIT`/`OFFSET` (rendered per dialect; SQL Server uses OFFSET/FETCH). -/
+/-- `LIMIT`/`OFFSET` (rendered per dialect; SQL Server uses OFFSET/FETCH).
+Applying it to an already-limited query wraps that query as a derived table —
+stacking two LIMIT clauses on one statement is not valid SQL. -/
 def limitOffset (q : Query s) (limit? offset? : Option Nat) : Query s :=
-  .limitC q limit? offset?
+  match q with
+  | .limitC .. => .limitC (.spine (.fromQ q (fun r => .yield r))) limit? offset?
+  | _ => .limitC q limit? offset?
 
-def limit (q : Query s) (n : Nat) : Query s := q.limitOffset (some n) none
-def offset (q : Query s) (n : Nat) : Query s := q.limitOffset none (some n)
+/-- `LIMIT n`. Chaining onto a pending `offset` merges into one clause
+(`q.offset 10 |>.limit 5` ⇒ `LIMIT 5 OFFSET 10`); onto an existing limit it
+wraps (`LIMIT` of a `LIMIT` via a derived table). -/
+def limit (q : Query s) (n : Nat) : Query s :=
+  match q with
+  | .limitC q' none off? => .limitC q' (some n) off?
+  | _ => q.limitOffset (some n) none
+
+/-- `OFFSET n`. Chaining onto a pending `limit` merges into one clause
+(`q.limit 5 |>.offset 10` ⇒ `LIMIT 5 OFFSET 10`); onto an existing offset it
+wraps. -/
+def offset (q : Query s) (n : Nat) : Query s :=
+  match q with
+  | .limitC q' lim? none => .limitC q' lim? (some n)
+  | _ => q.limitOffset none (some n)
 
 def union (q₁ q₂ : Query s) : Query s := .setOpC .union q₁ q₂
 def intersect (q₁ q₂ : Query s) : Query s := .setOpC .intersect q₁ q₂
@@ -188,10 +206,11 @@ structure GroupedQuery (s : Schema) where
   query : Query s
   keys : Row s → List KeyExpr
   having? : Option (Row s → SqlExpr .bool) := none
+  orderKeys? : Option (Row s → List OrderKey) := none
 
 /-- `GROUP BY` one or more keys: `q.groupBy (fun c => [c["Age"].key])`. -/
 def Query.groupBy (q : Query s) (keys : Row s → List KeyExpr) : GroupedQuery s :=
-  ⟨q, keys, none⟩
+  ⟨q, keys, none, none⟩
 
 /-- `HAVING` over the grouped rows; the `Agg` token builds aggregates:
 `g.having (fun c a => 1 <. a.count)`. -/
@@ -199,10 +218,17 @@ def GroupedQuery.having (g : GroupedQuery s)
     (p : Row s → Agg → SqlExpr .bool) : GroupedQuery s :=
   { g with having? := some (fun r => p r ⟨⟩) }
 
+/-- Aggregate-aware `ORDER BY` on a grouped query, before its `select`:
+`g.orderBy (fun o a => [(a.sum o["Amount"]).desc, (a.count).asc])` — renders
+inside the grouped statement (`… GROUP BY … HAVING … ORDER BY SUM(…) DESC`). -/
+def GroupedQuery.orderBy (g : GroupedQuery s)
+    (ks : Row s → Agg → List OrderKey) : GroupedQuery s :=
+  { g with orderKeys? := some (fun r => ks r ⟨⟩) }
+
 /-- Grouped projection over keys and aggregates:
 `g.select (fun c a => ![c["Age"].as "Age", (a.count).as "Cnt"])`. -/
 def GroupedQuery.select (g : GroupedQuery s) (f : Row s → Agg → Row s') : Query s' :=
-  .groupedC g.query.asAggregableSpine g.keys g.having? f
+  .groupedC g.query.asAggregableSpine g.keys g.having? g.orderKeys? f
 
 /-- A query returning a single scalar value (COUNT/SUM/AVG/MIN/MAX). -/
 inductive ScalarQuery : SqlType → Type where

@@ -79,7 +79,7 @@ def Query.hasOrderBy : Query s → Bool
   | .spine sp => sp.hasOrder
   | .distinctC q => q.hasOrderBy
   | .limitC q _ _ => q.hasOrderBy
-  | .groupedC sp _ _ _ => sp.hasOrder
+  | .groupedC sp _ _ ord? _ => sp.hasOrder || ord?.isSome
   | .setOpC .. => false
 
 mutual
@@ -120,7 +120,7 @@ def Query.compileStmt : Query s → CompileM String
             | some l, none => s!"{inner} LIMIT {l}"
             | none, some o => s!"{inner} OFFSET {o}"
             | none, none => inner
-  | .groupedC sp keys having? sel =>
+  | .groupedC sp keys having? orderKeys? sel =>
       sp.compileSpine {} fun r => do
         let items ← (sel r ⟨⟩).selectList
         let ks ← compileGroupKeys (keys r)
@@ -129,7 +129,12 @@ def Query.compileStmt : Query s → CompileM String
           | some h => do
               let hs ← (h r).compile
               pure s!" HAVING {hs}"
-        return (String.intercalate ", " items, s!" GROUP BY {ks}{hv}")
+        let ob ← match orderKeys? with
+          | none => pure ""
+          | some oks => do
+              let rendered ← compileOrderKeys (oks r)
+              pure s!" ORDER BY {rendered}"
+        return (String.intercalate ", " items, s!" GROUP BY {ks}{hv}{ob}")
   | .setOpC op a b => do
       return s!"{← a.compileStmt} {op.token} {← b.compileStmt}"
 

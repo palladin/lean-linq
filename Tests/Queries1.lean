@@ -248,27 +248,27 @@ def JoinFusionWithWhere := Query.from' customers
 
 def FromGroupByOrderBySelect := Query.from' orders
   |>.groupBy (fun o => [o["CustomerId"].key])
+  |>.orderBy (fun o a => [(a.sum o["Amount"]).desc])
   |>.select (fun o a => ![o["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "TotalAmount"])
-  |>.orderBy (fun r => [r["TotalAmount"].desc])
 def FromGroupByOrderByMultipleSelect := Query.from' orders
   |>.groupBy (fun o => [o["CustomerId"].key])
+  |>.orderBy (fun o a => [(a.sum o["Amount"]).desc, (a.count).asc])
   |>.select (fun o a => ![o["CustomerId"].as "CustomerId",
                           (a.sum o["Amount"]).as "TotalAmount", (a.count).as "OrderCount"])
-  |>.orderBy (fun r => [r["TotalAmount"].desc, r["OrderCount"].asc])
 def FromGroupByOrderByThreeKeysSelect := Query.from' orders
   |>.groupBy (fun o => [o["CustomerId"].key])
+  |>.orderBy (fun o a => [(a.sum o["Amount"]).desc, (a.count).asc, o["CustomerId"].asc])
   |>.select (fun o a => ![o["CustomerId"].as "CustomerId",
                           (a.sum o["Amount"]).as "TotalAmount", (a.count).as "OrderCount"])
-  |>.orderBy (fun r => [r["TotalAmount"].desc, r["OrderCount"].asc, r["CustomerId"].asc])
 def FromGroupByMultipleOrderBySelect := Query.from' customers
   |>.groupBy (fun c => [c["Age"].key, c["Name"].key])
+  |>.orderBy (fun _ a => [(a.count).desc])
   |>.select (fun c a => ![c["Age"].as "Age", c["Name"].as "Name", (a.count).as "Count"])
-  |>.orderBy (fun r => [r["Count"].desc])
 def FromGroupByHavingOrderBySelect := Query.from' orders
   |>.groupBy (fun o => [o["CustomerId"].key])
   |>.having (fun _ a => a.count >. 1)
+  |>.orderBy (fun o a => [(a.sum o["Amount"]).desc])
   |>.select (fun o a => ![o["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "TotalAmount"])
-  |>.orderBy (fun r => [r["TotalAmount"].desc])
 def ComplexJoinWhereGroupByHavingOrderBySelect := Query.from' customers
   |>.innerJoin orders (fun c o => c["Id"] ==. o["CustomerId"])
       (fun c o => ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age",
@@ -276,19 +276,19 @@ def ComplexJoinWhereGroupByHavingOrderBySelect := Query.from' customers
   |>.where' (fun r => r["Age"] >=. 18 &&. r["Amount"] >. 50)
   |>.groupBy (fun r => [r["Id"].key, r["Name"].key])
   |>.having (fun r a => a.count >. 2 &&. a.sum r["Amount"] >. 500)
+  |>.orderBy (fun r a => [(a.sum r["Amount"]).desc, (a.count).asc])
   |>.select (fun r a => ![r["Id"].as "CustomerId", r["Name"].as "CustomerName",
                           (a.count).as "TotalOrders", (a.sum r["Amount"]).as "TotalSpent",
                           (a.sum r["Amount"] / a.count).as "AvgOrderValue"])
-  |>.orderBy (fun r => [r["TotalSpent"].desc, r["TotalOrders"].asc])
 def ComplexLeftJoinWhereGroupByOrderBySelect := Query.from' customers
   |>.leftJoin orders (fun c o => c["Id"] ==. o["CustomerId"])
       (fun c o => ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age",
                     o["Amount"].as "Amount"])
   |>.where' (fun r => r["Age"] >=. 21)
   |>.groupBy (fun r => [r["Id"].key, r["Name"].key])
+  |>.orderBy (fun r a => [(a.sum r["Amount"]).desc, r["Name"].asc])
   |>.select (fun r a => ![r["Id"].as "CustomerId", r["Name"].as "CustomerName",
                           (a.count).as "OrderCount", (a.sum r["Amount"]).as "TotalSpent"])
-  |>.orderBy (fun r => [r["TotalSpent"].desc, r["CustomerName"].asc])
 def FromGroupByMinMaxSelect := Query.from' orders
   |>.groupBy (fun o => [o["CustomerId"].key])
   |>.select (fun o a => ![o["CustomerId"].as "CustomerId",

@@ -229,6 +229,18 @@ def FromSelectDistinctMultipleColumns := Query.from' customers
   |>.orderBy (fun c => [c["Name"].asc])
   |>.select (fun c => ![c["Name"].as "Name", c["Age"].as "Age"]) |>.distinct
 
+/-- Chained limit/offset must merge into one clause, not stack two LIMITs. -/
+def LimitThenOffset := Query.from' customers
+  |>.orderBy (fun c => [c["Id"].asc]) |>.select (fun c => c)
+  |>.limit 3 |>.offset 1
+def OffsetThenLimit := Query.from' customers
+  |>.orderBy (fun c => [c["Id"].asc]) |>.select (fun c => c)
+  |>.offset 1 |>.limit 2
+/-- Re-limiting a limited query wraps it as a derived table. -/
+def LimitThenLimit := Query.from' customers
+  |>.orderBy (fun c => [c["Id"].asc]) |>.select (fun c => c)
+  |>.limit 3 |>.limit 2
+
 /-- DISTINCT over a boundary query (LIMIT): dedupe applies *after* the limit,
 so the limited query becomes a derived table under SELECT DISTINCT. -/
 def FromOrderByLimitDistinct := Query.from' customers
@@ -446,6 +458,8 @@ def queryCases : List (String × (DatabaseType → CompiledSql)) := [
   ("FromSelectDistinctOrderBy", q FromSelectDistinctOrderBy),
   ("FromSelectDistinctMultipleColumns", q FromSelectDistinctMultipleColumns),
   ("FromOrderByLimitDistinct", q FromOrderByLimitDistinct),
+  ("LimitThenOffset", q LimitThenOffset), ("OffsetThenLimit", q OffsetThenLimit),
+  ("LimitThenLimit", q LimitThenLimit),
   ("Union", q UnionQ), ("Intersect", q IntersectQ), ("Except", q ExceptQ),
   ("LinqJoin", q LinqJoin), ("LinqLeftJoin", q LinqLeftJoin),
   ("LinqOrderBy", q LinqOrderBy), ("LinqGroupBy", q LinqGroupBy),

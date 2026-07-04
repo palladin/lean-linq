@@ -620,6 +620,12 @@ def oracles : List (String × OCase) := [
   ("FromSelectDistinctMultipleColumns", o
     ((customers.orderBy' (·.name ≤ ·.name)
       |>.select fun c => [c.name, ci c.age]).eraseDups)),
+  ("LimitThenOffset", o
+    (customers.orderBy' (·.id ≤ ·.id) |>.drop 1 |>.take 3 |>.select custRow)),
+  ("OffsetThenLimit", o
+    (customers.orderBy' (·.id ≤ ·.id) |>.drop 1 |>.take 2 |>.select custRow)),
+  ("LimitThenLimit", o
+    (customers.orderBy' (·.id ≤ ·.id) |>.take 3 |>.take 2 |>.select custRow)),
   ("FromOrderByLimitDistinct", o
     (((customers.orderBy' (·.name ≤ ·.name) |>.take 2
       |>.select fun c => [c.name]).eraseDups).orderBy' (fun a b => a ≤ b))),

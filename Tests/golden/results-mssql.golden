@@ -160,6 +160,9 @@ FromSelectDistinctWhere	Jane Smith|John Doe|Senior User
 FromSelectDistinctOrderBy	Jane Smith|John Doe|Minor User|Senior User
 FromSelectDistinctMultipleColumns	Jane Smith,30|John Doe,25|Minor User,16|Senior User,65
 FromOrderByLimitDistinct	Jane Smith|John Doe
+LimitThenOffset	2,30,Jane Smith,1|3,16,Minor User,0|4,65,Senior User,1
+OffsetThenLimit	2,30,Jane Smith,1|3,16,Minor User,0
+LimitThenLimit	1,25,John Doe,1|2,30,Jane Smith,1
 Union	4,Senior User
 Intersect	
 Except	1,John Doe|2,Jane Smith|4,Senior User
