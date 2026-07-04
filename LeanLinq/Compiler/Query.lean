@@ -218,11 +218,11 @@ def ScalarQuery.toSql (sq : ScalarQuery t) (db : DatabaseType := .sqlite) : Comp
 /-- `e IN (subquery)` — the subquery must project exactly one column of the
 same type. Stored as a staged compilation action (see `SubQuery`). -/
 def SqlExpr.inQuery (e : SqlExpr t) (q : Query [(n, t)]) : SqlExpr .bool :=
-  .inSub e q.compileStmt
+  .inSub e ⟨q.compileStmt⟩
 
 /-- Embed a scalar aggregate query as an expression:
 `c["Age"] >. (customers' |>.select … |>.avg).embed`. -/
 def ScalarQuery.embed (sq : ScalarQuery t) : SqlExpr t :=
-  .scalarSub t sq.compile
+  .scalarSub ⟨sq.compile⟩
 
 end LeanLinq

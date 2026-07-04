@@ -68,8 +68,8 @@ inductive SqlExpr : SqlType → Type where
   -- rejects nested `List (SqlExpr t)` with a local index; the homogeneous
   -- surface is `SqlExpr.inValues`.
   | inList : SqlExpr t → List ((u : SqlType) × SqlExpr u) → SqlExpr .bool
-  | inSub : SqlExpr t → SubQuery → SqlExpr .bool
-  | scalarSub (t : SqlType) : SubQuery → SqlExpr t
+  | inSub : SqlExpr t → SubQuery t → SqlExpr .bool
+  | scalarSub : SubQuery t → SqlExpr t
   | caseWhen : SqlExpr .bool → SqlExpr t → SqlExpr t → SqlExpr t
   -- aggregates (meaningful in grouped selects / HAVING / scalar queries)
   | aggE (op : AggOp) : SqlExpr t → SqlExpr t

@@ -70,8 +70,8 @@ def SqlExpr.compile : SqlExpr t → CompileM String
   | .isNotNull e   => return s!"{← e.compile} IS NOT NULL"
   | .like e p      => return s!"{← e.compile} LIKE {← p.compile}"
   | .inList e es   => return s!"{← e.compile} IN ({String.intercalate ", " (← SqlExpr.compileList es)})"
-  | .inSub e sub   => return s!"{← e.compile} IN ({← sub})"
-  | .scalarSub _ sub => return s!"({← sub})"
+  | .inSub e sub   => return s!"{← e.compile} IN ({← sub.compile})"
+  | .scalarSub sub => return s!"({← sub.compile})"
   | .caseWhen c a b =>
       return s!"CASE WHEN {← c.compile} THEN {← a.compile} ELSE {← b.compile} END"
   | .aggE op e     => return s!"{op.token}({← e.compile})"

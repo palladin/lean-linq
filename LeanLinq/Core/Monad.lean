@@ -11,12 +11,18 @@ structure CompileState where
 /-- Compilation reads the target dialect and threads `CompileState`. -/
 abbrev CompileM := ReaderT DatabaseType (StateM CompileState)
 
-/-- A staged subquery: expressions embed subqueries as their *compilation
-action* rather than their AST. This breaks the `SqlExpr`/`Query` cycle that
-would otherwise violate strict positivity through the HOAS binders
-(`Row → Query` puts `Query` occurrences inside `Row`'s expression fields,
-to the left of an arrow). -/
-def SubQuery := CompileM String
+/-- A staged subquery producing a single column of type `t`: expressions
+embed subqueries as their *compilation action* rather than their AST. This
+breaks the `SqlExpr`/`Query` cycle that would otherwise violate strict
+positivity through the HOAS binders (`Row → Query` puts `Query` occurrences
+inside `Row`'s expression fields, to the left of an arrow).
+
+The index is a phantom carrying the erased query's column type, so the
+type-match between a subquery and the expression it embeds into is visible
+in the AST, not just enforced at the smart constructors
+(`SqlExpr.inQuery` / `ScalarQuery.embed` — the only intended producers). -/
+structure SubQuery (t : SqlType) where
+  compile : CompileM String
 
 /-- Allocate a fresh source alias: `a0`, `a1`, … -/
 def freshAlias : CompileM String := fun _ =>
