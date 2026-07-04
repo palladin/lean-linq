@@ -79,15 +79,15 @@ def UpdateStmt.compile (u : UpdateStmt s) : CompileM String := do
 def DeleteStmt.compile (d : DeleteStmt s) : CompileM String := do
   return s!"DELETE FROM {← quote d.table.name}{← whereClause d.where?}"
 
-def InsertStmt.toSql (i : InsertStmt s) (db : DatabaseType := .sqlite) : Compiled :=
+def InsertStmt.toSql (i : InsertStmt s) (db : DatabaseType := .sqlite) : CompiledSql :=
   let (sql, st) := Id.run ((i.compile.run db).run {})
   { sql, params := st.params }
 
-def UpdateStmt.toSql (u : UpdateStmt s) (db : DatabaseType := .sqlite) : Compiled :=
+def UpdateStmt.toSql (u : UpdateStmt s) (db : DatabaseType := .sqlite) : CompiledSql :=
   let (sql, st) := Id.run ((u.compile.run db).run {})
   { sql, params := st.params }
 
-def DeleteStmt.toSql (d : DeleteStmt s) (db : DatabaseType := .sqlite) : Compiled :=
+def DeleteStmt.toSql (d : DeleteStmt s) (db : DatabaseType := .sqlite) : CompiledSql :=
   let (sql, st) := Id.run ((d.compile.run db).run {})
   { sql, params := st.params }
 

@@ -20,7 +20,7 @@ abbrev OrdersS : Schema :=
 def orders : Table OrdersS := ⟨"orders"⟩
 
 /-- Registry helpers: compile a query/scalar/statement per dialect. -/
-def q (query : Query s) : DatabaseType → Compiled := fun db => query.toSql db
-def sq (s : ScalarQuery t) : DatabaseType → Compiled := fun db => s.toSql db
+def q (query : Query s) : DatabaseType → CompiledSql := fun db => query.toSql db
+def sq (s : ScalarQuery t) : DatabaseType → CompiledSql := fun db => s.toSql db
 
 end TQ

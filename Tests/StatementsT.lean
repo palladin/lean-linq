@@ -46,12 +46,12 @@ def UpdateSetNewColumnsNull := products.update
   |>.setNull "Price" |>.setNull "CreatedDate" |>.setNull "UniqueId"
   |>.where' (fun p => p["Id"] ==. 101)
 
-def si (i : InsertStmt s) : DatabaseType → Compiled := fun db => i.toSql db
-def su (u : UpdateStmt s) : DatabaseType → Compiled := fun db => u.toSql db
-def sd (d : DeleteStmt s) : DatabaseType → Compiled := fun db => d.toSql db
+def si (i : InsertStmt s) : DatabaseType → CompiledSql := fun db => i.toSql db
+def su (u : UpdateStmt s) : DatabaseType → CompiledSql := fun db => u.toSql db
+def sd (d : DeleteStmt s) : DatabaseType → CompiledSql := fun db => d.toSql db
 
 /-- The statement registry: name ↦ per-dialect compilation. -/
-def statementCases : List (String × (DatabaseType → Compiled)) := [
+def statementCases : List (String × (DatabaseType → CompiledSql)) := [
   ("InsertBasic", si InsertBasic), ("UpdateBasic", su UpdateBasic),
   ("UpdateMultiple", su UpdateMultiple), ("UpdateConditional", su UpdateConditional),
   ("DeleteBasic", sd DeleteBasic), ("DeleteConditional", sd DeleteConditional),

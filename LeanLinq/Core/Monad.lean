@@ -54,7 +54,7 @@ def refParam (name : String) : CompileM String := fun db =>
 
 /-- The result of compiling a query or statement: SQL text plus its named
 parameters (auto parameters carry their values, user-named ones `null`). -/
-structure Compiled where
+structure CompiledSql where
   sql : String
   params : Array (String × SqlValue)
   deriving Repr, BEq

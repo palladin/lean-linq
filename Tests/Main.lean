@@ -27,11 +27,11 @@ def renderValue : SqlValue → String
   | .guid g => s!"guid {g.quote}"
   | .null => "null"
 
-def renderLine (name : String) (c : Compiled) : String :=
+def renderLine (name : String) (c : CompiledSql) : String :=
   let ps := String.intercalate "; " (c.params.toList.map fun (n, v) => s!"{n}={renderValue v}")
   s!"{name}\t{c.sql}\t{ps}"
 
-def allCases : List (String × (DatabaseType → Compiled)) :=
+def allCases : List (String × (DatabaseType → CompiledSql)) :=
   queryCases ++ statementCases
 
 def main (args : List String) : IO UInt32 := do

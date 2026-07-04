@@ -51,7 +51,7 @@ def sqlLiteral (db : DatabaseType) : SqlValue → String
 /-- Substitute every parameter placeholder with a literal (longest placeholder
 first, so `:p10` is not clobbered by `:p1`). Named parameters (stored with a
 `null` placeholder value) resolve from `bindings`. -/
-def inlineParams (db : DatabaseType) (c : Compiled) : String :=
+def inlineParams (db : DatabaseType) (c : CompiledSql) : String :=
   let entries := c.params.toList.map fun (name, v) =>
     let v := if v == SqlValue.null then
         ((bindings.lookup ((name.toList.drop 1) |> String.ofList)).getD SqlValue.null)
@@ -230,7 +230,7 @@ structure CaseResult where
   isError : Bool
 
 def runCase (db : DatabaseType) (sqliteFile : String) (isStmt : Bool)
-    (name : String) (compiled : Compiled) : IO CaseResult := do
+    (name : String) (compiled : CompiledSql) : IO CaseResult := do
   let sql := inlineParams db compiled
   let batch := if isStmt then stmtBatch db name sql else sql
   let (ok, out) ← execSql db sqliteFile batch
@@ -256,7 +256,7 @@ def main (args : List String) : IO UInt32 := do
       | some csv => csv.splitOn ","
       | none => dialects.map Prod.fst
     | none => dialects.map Prod.fst
-  let allNamed : List (Bool × String × (DatabaseType → Compiled)) :=
+  let allNamed : List (Bool × String × (DatabaseType → CompiledSql)) :=
     queryCases.map (fun (n, f) => (false, n, f)) ++
     statementCases.map (fun (n, f) => (true, n, f))
   let sqliteFile ← do

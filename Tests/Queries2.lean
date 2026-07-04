@@ -317,7 +317,7 @@ def LinqLimitOffset := query! {
 }
 
 /-- The full query registry: name ↦ per-dialect compilation. -/
-def queryCases : List (String × (DatabaseType → Compiled)) := [
+def queryCases : List (String × (DatabaseType → CompiledSql)) := [
   ("From", q From), ("FromStatic", q FromStatic), ("FromSelect", q FromSelect),
   ("FromSelectSingle", q FromSelectSingle), ("FromSelectExpression", q FromSelectExpression),
   ("FromWhereInt", q FromWhereInt), ("FromWhereString", q FromWhereString),

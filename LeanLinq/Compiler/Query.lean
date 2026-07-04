@@ -194,20 +194,20 @@ def ScalarQuery.compile : ScalarQuery t → CompileM String
       match r with
       | .cons e .nil => do return (s!"{op.token}({← e.compile})", "")
 
-private def runCompile (m : CompileM String) (db : DatabaseType) : Compiled :=
+private def runCompile (m : CompileM String) (db : DatabaseType) : CompiledSql :=
   let (sql, st) := Id.run ((m.run db).run {})
   { sql, params := st.params }
 
 /-- Compile a query to SQL text plus named parameters for the given dialect. -/
-def Query.toSql (q : Query s) (db : DatabaseType := .sqlite) : Compiled :=
+def Query.toSql (q : Query s) (db : DatabaseType := .sqlite) : CompiledSql :=
   runCompile q.compileStmt db
 
-def Query.toSqlite (q : Query s) : Compiled := q.toSql .sqlite
-def Query.toSqlServer (q : Query s) : Compiled := q.toSql .sqlServer
-def Query.toPostgres (q : Query s) : Compiled := q.toSql .postgres
+def Query.toSqlite (q : Query s) : CompiledSql := q.toSql .sqlite
+def Query.toSqlServer (q : Query s) : CompiledSql := q.toSql .sqlServer
+def Query.toPostgres (q : Query s) : CompiledSql := q.toSql .postgres
 
 /-- Compile a scalar query for the given dialect. -/
-def ScalarQuery.toSql (sq : ScalarQuery t) (db : DatabaseType := .sqlite) : Compiled :=
+def ScalarQuery.toSql (sq : ScalarQuery t) (db : DatabaseType := .sqlite) : CompiledSql :=
   runCompile sq.compile db
 
 /-- `e IN (subquery)` — the subquery must project exactly one column of the
