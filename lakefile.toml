@@ -1,4 +1,9 @@
 name = "lean-linq"
+version = "0.1.0"
+description = "Type-safe, deeply-embedded SQL query DSL for Lean 4 — LINQ-style pipelines and query! comprehensions compiling to parameterized SQL for SQLite, PostgreSQL, and SQL Server"
+keywords = ["sql", "linq", "dsl", "database", "query-builder"]
+homepage = "https://github.com/palladin/lean-linq"
+license = "MIT"
 defaultTargets = ["LeanLinq"]
 testDriver = "tests"
 

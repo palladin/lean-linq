@@ -34,6 +34,10 @@ def adults := Query.from' customers
 Ill-typed queries don't compile: a misspelled column name, comparing an `int` column to a
 `string`, or adding two `string` columns are all elaboration errors.
 
+**Scope**: lean-linq compiles queries to `CompiledSql` (SQL text + parameter bindings) for a
+database driver to execute — it does not ship a driver. The docker-based integration harness
+executes every case against live databases for testing, not production use.
+
 ## Building
 
 ```
@@ -168,6 +172,24 @@ query! {
 Every pipeline test case has a comprehension twin (Tests/QueriesC.lean), so both surfaces
 are exercised by the full test stack.
 
+## Statements
+
+INSERT / UPDATE / DELETE use the same name-checked, typed column machinery:
+
+```lean
+customers.insert
+  |>.value "Id" 200 |>.value "Name" "John Doe" |>.valueNull "Age"
+-- INSERT INTO "Customers" ("Id", "Name", "Age") VALUES (:p0, :p1, NULL)
+
+customers.update
+  |>.setWith "Age" (fun c => c["Age"] + 1)
+  |>.where' (fun c => c["Id"] ==. 200)
+-- UPDATE "Customers" SET "Age" = ("Age" + :p0) WHERE ("Id" = :p1)
+
+customers.delete |>.where' (fun c => c["Age"] <. 18)
+-- DELETE FROM "Customers" WHERE ("Age" < :p0)
+```
+
 ## Rows and operators
 
 Row access and construction:
@@ -211,7 +233,12 @@ return `Bool`/`Prop`, so SQL needs its own).
 ## Status
 
 Core, full query surface (joins, grouping, aggregates, set ops, subqueries),
-statements, and the three dialects are implemented, with a 355-case × 3-dialect
+statements, and the three dialects are implemented, with a 358-case × 3-dialect
 golden suite (both surfaces), an executable in-memory oracle, and live 3-engine
-integration tests. Possible next steps: executing queries against a live
-connection, richer HAVING/ORDER BY over aggregates, and window functions.
+integration tests.
+
+Known limitations: no driver layer (compile-only, by design); the `double`
+type is implemented but not exercised by the test models (the reference suite
+has the same hole); trailing `orderBy` after `distinct`/`limit` is pipeline-only
+(the comprehension fuses ordering before them). Possible next steps: a driver /
+FFI execution layer, EXISTS/NOT IN, window functions, CTEs.
