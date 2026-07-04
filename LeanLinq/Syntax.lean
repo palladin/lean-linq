@@ -16,21 +16,23 @@ query! {
 }
 ```
 
-Clauses desugar right-to-left onto the spine constructors:
+Clauses desugar right-to-left into a `SpineQ`-valued fold — each clause's
+terminal shape (`Terminal.plain` vs `.grouped`) is known statically at
+expansion, so grouping discipline is enforced by the index, not at run time:
 - `from x in src` ⇒ `QuerySource.bind src (fun x => …)` (tables, or queries —
-  inlined by normalization);
-- `join x in t on p` / `leftJoin x in t on p` ⇒ `Query.joinOn` (fuse into the
+  plain-spine queries inline, others become derived tables);
+- `join x in t on p` / `leftJoin x in t on p` ⇒ `SpineQ.joinT` (fuse into the
   same flat statement);
-- `where p` ⇒ `Query.guard p …` (a WHERE conjunct);
-- `orderBy k, …` ⇒ `Query.orderWith` (spine ORDER BY — may reference
-  aggregates when grouped);
+- `where p` ⇒ `SpineQ.guard p …` (a WHERE conjunct);
+- `orderBy k, …` ⇒ `SpineQ.order` (spine ORDER BY — may reference aggregates
+  when grouped);
 - `groupBy k, … into a` + optional `having p` turn the final `select r` into
-  a grouped terminal (`Query.groupYieldQ`); `into a` *binds* the aggregate
+  the grouped terminal (`SpineQ.groupYield`); `into a` *binds* the aggregate
   token (C#'s `group … into g`), so `a.count`/`a.sum e`/… are in scope only
   in the clauses after the grouping;
-- plain `select r` ⇒ `Query.yield r`;
-- trailing `distinct` / `limit n [offset m]` / `offset n` decorate the
-  finished query.
+- plain `select r` ⇒ `SpineQ.yield r`;
+- the fold wraps into `Query.spine`, and trailing `distinct` /
+  `limit n [offset m]` / `offset n` decorate the finished query.
 
 Clauses are newline- (or `;`-) separated, do-notation style. Join sources and
 limit/offset amounts parse at `term:max` (parenthesize anything compound).
@@ -74,20 +76,21 @@ private def sepTerms (stx : Syntax) : Syntax.TSepArray `term "," :=
   .ofElems (stx.getSepArgs.map (⟨·⟩))
 
 /-- Fold the leading clauses (from/join/where/orderBy) right-to-left over the
-terminal. -/
+terminal. The fold is `SpineQ`-valued: each clause's terminal shape is known
+statically at expansion, so no run-time grouped/plain dispatch is needed. -/
 private def foldLeading (acc : Term) (c : Syntax) : MacroM Term := do
   if c.isOfKind ``sqlFrom then
     `(LeanLinq.QuerySource.bind $(⟨c[3]⟩) (fun $(⟨c[1]⟩) => $acc))
   else if c.isOfKind ``sqlJoin then
-    `(LeanLinq.Query.joinOn LeanLinq.JoinKind.inner $(⟨c[3]⟩)
+    `(LeanLinq.SpineQ.joinT LeanLinq.JoinKind.inner $(⟨c[3]⟩)
         (fun $(⟨c[1]⟩) => $(⟨c[5]⟩)) (fun $(⟨c[1]⟩) => $acc))
   else if c.isOfKind ``sqlLeftJoin then
-    `(LeanLinq.Query.joinOn LeanLinq.JoinKind.left $(⟨c[3]⟩)
+    `(LeanLinq.SpineQ.joinT LeanLinq.JoinKind.left $(⟨c[3]⟩)
         (fun $(⟨c[1]⟩) => $(⟨c[5]⟩)) (fun $(⟨c[1]⟩) => $acc))
   else if c.isOfKind ``sqlWhere then
-    `(LeanLinq.Query.guard $(⟨c[1]⟩) $acc)
+    `(LeanLinq.SpineQ.guard $(⟨c[1]⟩) $acc)
   else if c.isOfKind ``sqlOrderBy then
-    `(LeanLinq.Query.orderWith [$(sepTerms c[1]),*] $acc)
+    `(LeanLinq.SpineQ.order [$(sepTerms c[1]),*] $acc)
   else
     Macro.throwErrorAt c "unexpected clause before `select` (allowed: from, join, leftJoin, where, orderBy, groupBy, having)"
 
@@ -122,7 +125,7 @@ private def expandClauses (clauses : List Syntax) : MacroM Term := do
         match pre.find? (·.isOfKind ``sqlHaving) with
         | some h => Macro.throwErrorAt h "`having` requires a `groupBy … into …` clause"
         | none => do
-          let terminal ← `(LeanLinq.Query.yield $selRow)
+          let terminal ← `(LeanLinq.SpineQ.yield $selRow)
           pre.foldrM (fun c acc => foldLeading acc c) terminal
       | some gi => do
         let g := pre[gi]!
@@ -144,13 +147,14 @@ private def expandClauses (clauses : List Syntax) : MacroM Term := do
         let hv ← match havings with
           | [] => `(Option.none)
           | h :: _ => `(Option.some $(⟨h[1]⟩))
-        let terminal ← `(LeanLinq.Query.groupYieldQ [$(sepTerms g[1]),*] $hv $selRow)
+        let terminal ← `(LeanLinq.SpineQ.groupYield [$(sepTerms g[1]),*] $hv $selRow)
         let grouped ← orderBys.foldrM (fun c acc => foldLeading acc c) terminal
         -- `into a` binds the aggregate token over having/orderBy/select
         let binder : Ident := ⟨g[3]⟩
         let withBinder ← `((fun ($binder : LeanLinq.Agg) => $grouped) LeanLinq.Agg.mk)
         before.foldrM (fun c acc => foldLeading acc c) withBinder
-    post.foldlM applyTrailing core
+    let coreQ ← `(LeanLinq.Query.spine $core)
+    post.foldlM applyTrailing coreQ
 
 @[macro sqlQuery] def expandQuery : Lean.Macro := fun stx =>
   expandClauses stx[2].getSepArgs.toList

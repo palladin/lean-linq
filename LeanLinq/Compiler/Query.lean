@@ -64,14 +64,17 @@ structure StmtAcc where
 Purely structural: continuations are applied to a default row (the spine's
 shape does not depend on row values). ORDER BY inside a derived table
 (`fromQ`) does not count — it belongs to the inner statement. -/
-def SpineQ.hasOrder : SpineQ s → Bool
+def SpineQ.hasOrder : SpineQ g s → Bool
   | .yield _ => false
   | .groupYield .. => false
   | .guard _ rest => rest.hasOrder
   | .order _ _ => true
-  | .fromT _ f => (f default).hasOrder
-  | .joinT _ _ _ f => (f default).hasOrder
-  | .fromQ _ f => (f default).hasOrder
+  | .fromT (g := .plain) _ f => (f default).hasOrder
+  | .fromT (g := .grouped) _ f => (f default).hasOrder
+  | .joinT (g := .plain) _ _ _ f => (f default).hasOrder
+  | .joinT (g := .grouped) _ _ _ f => (f default).hasOrder
+  | .fromQ (g := .plain) _ f => (f default).hasOrder
+  | .fromQ (g := .grouped) _ f => (f default).hasOrder
 
 /-- Does the statement produced for this query end with an ORDER BY clause
 (needed by SQL Server, whose OFFSET/FETCH requires one)? -/
@@ -142,7 +145,7 @@ def Query.compileStmt : Query s → CompileM String
 WHERE conjuncts until the final `yield`, then assemble one flat SELECT via
 the projection callback (which also supplies a statement tail, e.g.
 `GROUP BY … HAVING …`). -/
-def SpineQ.compileSpine : SpineQ s → StmtAcc →
+def SpineQ.compileSpine : SpineQ g s → StmtAcc →
     (Row s → CompileM (String × String)) → CompileM String
   | .yield r, acc, k => do
       let (sel, tail) ← k r
