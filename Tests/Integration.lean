@@ -1,5 +1,6 @@
 import Tests.Queries2
 import Tests.StatementsT
+import Tests.Oracle
 
 /-! # Integration runner
 
@@ -120,17 +121,23 @@ def execSql (db : DatabaseType) (sqliteFile : String) (sql : String)
   let out ← IO.Process.output { cmd, args }
   pure (out.exitCode == 0, if out.exitCode == 0 then out.stdout else out.stdout ++ out.stderr)
 
+/-- Check a dialect is reachable. Also catches spawn failures (missing
+`sqlite3` or `docker` binary), which otherwise throw instead of skipping. -/
 def probe (db : DatabaseType) (sqliteFile : String) : IO Bool := do
-  match db with
-  | .sqlite => pure true
-  | .sqlServer =>
-      -- also creates testdb on first contact
-      let (ok, _) ← execSql db sqliteFile
-        "IF DB_ID('testdb') IS NULL CREATE DATABASE testdb" (database := "master")
-      pure ok
-  | .postgres =>
-      let (ok, _) ← execSql db sqliteFile "SELECT 1"
-      pure ok
+  try
+    match db with
+    | .sqlite =>
+        let out ← IO.Process.output { cmd := "sqlite3", args := #["--version"] }
+        pure (out.exitCode == 0)
+    | .sqlServer =>
+        -- also creates testdb on first contact
+        let (ok, _) ← execSql db sqliteFile
+          "IF DB_ID('testdb') IS NULL CREATE DATABASE testdb" (database := "master")
+        pure ok
+    | .postgres =>
+        let (ok, _) ← execSql db sqliteFile "SELECT 1"
+        pure ok
+  catch _ => pure false
 
 /-! ## Output normalization -/
 
@@ -191,16 +198,14 @@ def normalizeOutput (sql : String) (out : String) : String :=
 /-- Cases whose output depends on the current time: execute-only. -/
 def skipResults : List String := ["DateTimeNow", "DateTimeFunctionsInSelect"]
 
-/-- Cases where engines legitimately disagree (AVG: integer division on SQL
-Server, numeric on PostgreSQL, float on SQLite); excluded from the
-cross-dialect comparison, still checked against their per-dialect golden. -/
+/-- Cases where engines legitimately disagree; excluded from the
+cross-dialect comparison and the oracle, still checked against their
+per-dialect golden. `FromSelectAvg`: AVG over integers is integer division on
+SQL Server (256) but exact on PostgreSQL/SQLite (256.25).
+`FromGroupByMultipleOrderBySelect`: ORDER BY COUNT(*) DESC where every count
+ties, so order is engine-specific. -/
 def crossDialectAllowlist : List String := [
-  "AvgPrices", "AvgExpensivePrices", "FromSelectAvg", "FromGroupByAvgSelect",
-  "FromGroupByDecimalAggregatesSelect", "FromGroupByDecimalAvgSelect",
-  "FromSelectDecimalArithmetic",
-  -- ORDER BY COUNT(*) DESC where every count ties: tie order is
-  -- engine-specific
-  "FromGroupByMultipleOrderBySelect"
+  "FromSelectAvg", "FromGroupByMultipleOrderBySelect"
 ]
 
 /-- Statement cases verify table state inside a rolled-back transaction. -/
@@ -263,7 +268,10 @@ def main (args : List String) : IO UInt32 := do
   for (dn, db) in dialects do
     unless selected.contains dn do continue
     unless (← probe db sqliteFile) do
-      IO.eprintln s!"[{dn}] unreachable — skipped (is `docker compose up -d --wait` running?)"
+      let hint :=
+        if db == DatabaseType.sqlite then "is the `sqlite3` CLI installed?"
+        else "is `docker compose up -d --wait` running?"
+      IO.eprintln s!"[{dn}] unreachable — skipped ({hint})"
       continue
     let (ok, out) ← execSql db sqliteFile (setupSql db)
     unless ok do
@@ -278,6 +286,16 @@ def main (args : List String) : IO UInt32 := do
         IO.eprintln s!"EXEC FAIL [{dn}] {name}: {r.result}"
       results := results ++ [r]
     collected := collected ++ [(dn, results)]
+    -- in-memory oracle: independently-derived expected rows
+    for r in results do
+      if !r.isError && r.result != "<executed>" then
+        match Oracle.oracles.lookup r.name with
+        | some oc =>
+            let want := Oracle.render oc
+            if want != r.result then
+              failures := failures + 1
+              IO.eprintln s!"ORACLE MISMATCH [{dn}] {r.name}\n  oracle: {want}\n  engine: {r.result}"
+        | none => pure ()
     let lines := results.map fun r => s!"{r.name}\t{r.result}"
     if update then
       if results.any (·.isError) then

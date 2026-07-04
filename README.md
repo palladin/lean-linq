@@ -1,5 +1,9 @@
 # lean-linq
 
+[![CI](https://github.com/palladin/lean-linq/actions/workflows/ci.yml/badge.svg)](https://github.com/palladin/lean-linq/actions/workflows/ci.yml)
+[![Lean 4](https://img.shields.io/badge/Lean-v4.31.0-blue)](https://leanprover.github.io/)
+[![dialects](https://img.shields.io/badge/SQL-SQLite%20%7C%20PostgreSQL%20%7C%20SQL%20Server-informational)](#integration-tests)
+
 A type-safe, deeply-embedded SQL query DSL for Lean 4 — language-integrated queries built
 from intrinsically-typed GADTs and HOAS binders: schemas index the types of queries and rows,
 so only well-formed SQL elaborates.
@@ -58,15 +62,22 @@ the library itself always emits parameterized SQL.
 
 - Row results are normalized (booleans, decimal trailing zeros, datetime
   precision, guid case, NULL sentinels, row order for unordered queries) and
-  compared against per-dialect goldens (`Tests/golden/results-{db}.golden`).
+  checked three ways: against an **in-memory oracle** (`Tests/Oracle.lean` —
+  independently-derived expected rows for every deterministic case), against
+  per-dialect goldens (`Tests/golden/results-{db}.golden`), and across
+  engines.
 - Statements run inside a transaction: execute, verify table state with a
   SELECT, roll back.
 - A cross-dialect comparison then checks that all engines agree on every case,
   modulo a small allowlist (AVG division semantics differ by engine: integer on
   SQL Server, numeric on PostgreSQL, float on SQLite).
 - Unreachable databases are skipped with a warning: `--db sqlite,postgres`
-  selects explicitly. Note for Apple Silicon: the SQL Server image is
-  amd64-only and runs via Docker Desktop's Rosetta emulation.
+  selects explicitly.
+- Prerequisites: the `sqlite3` CLI (ships with macOS and GitHub runners;
+  `apt-get install sqlite3` on minimal Linux) and docker compose v2. The SQL
+  Server image is amd64-only: on Apple Silicon it runs via Docker Desktop's
+  Rosetta emulation; on ARM Linux (no Rosetta) skip it with
+  `--db sqlite,postgres`.
 
 ## Feature surface
 
