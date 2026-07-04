@@ -1,21 +1,126 @@
 import LeanLinq.Core.Expr
-import LeanLinq.Compiler.Monad
 
 namespace LeanLinq
 
-/-- Render an expression to SQL text, allocating a named parameter for every
-literal (never inlining values into the SQL string). -/
+def ArithOp.token : ArithOp → String
+  | .add => "+" | .sub => "-" | .mul => "*" | .div => "/"
+
+def CmpOp.token : CmpOp → String
+  | .eq => "=" | .ne => "<>" | .lt => "<" | .le => "<=" | .gt => ">" | .ge => ">="
+
+def AggOp.token : AggOp → String
+  | .sum => "SUM" | .avg => "AVG" | .min => "MIN" | .max => "MAX"
+
+def DateUnit.token : DateUnit → String
+  | .day => "day" | .month => "month" | .year => "year"
+
+/-- `strftime` format string for a date part (SQLite). -/
+def DateUnit.strftimeFmt : DateUnit → String
+  | .day => "%d" | .month => "%m" | .year => "%Y"
+
+/-- `EXTRACT` field name (PostgreSQL) / part function (SQL Server). -/
+def DateUnit.upperName : DateUnit → String
+  | .day => "DAY" | .month => "MONTH" | .year => "YEAR"
+
+mutual
+
+/-- Render an expression to SQL text for the ambient dialect, allocating a
+named parameter for every literal (never inlining values). -/
 def SqlExpr.compile : SqlExpr t → CompileM String
   | .intC i        => pushParam (.int i)
-  | .boolC b       => pushParam (.bool b)
+  | .longC i       => pushParam (.long i)
+  | .doubleC f     => pushParam (.double f)
+  | .decimalC d    => pushParam (.decimal d)
   | .stringC s     => pushParam (.string s)
-  | .plus a b      => return s!"({← a.compile} + {← b.compile})"
-  | .concat a b    => return s!"({← a.compile} || {← b.compile})"
-  | .eq a b        => return s!"({← a.compile} = {← b.compile})"
-  | .lt a b        => return s!"({← a.compile} < {← b.compile})"
+  | .boolC b       => pushParam (.bool b)
+  | .dateTimeC s   => pushParam (.dateTime s)
+  | .guidC g       => pushParam (.guid g)
+  | .nullC _       => pure "NULL"
+  | .param _ name  => refParam name
+  | .field _ alias name => do
+      if alias.isEmpty then quote name
+      else return s!"{← quote alias}.{← quote name}"
+  | .arith op a b  => return s!"({← a.compile} {op.token} {← b.compile})"
+  | .concat a b    => do
+      let tok := if (← read) == .sqlServer then "+" else "||"
+      return s!"({← a.compile} {tok} {← b.compile})"
+  | .cmp op a b    => return s!"({← a.compile} {op.token} {← b.compile})"
   | .and a b       => return s!"({← a.compile} AND {← b.compile})"
   | .or a b        => return s!"({← a.compile} OR {← b.compile})"
   | .not a         => return s!"(NOT {← a.compile})"
-  | .field _ alias name => pure s!"{alias}.{name}"
+  | .isNull e      => return s!"{← e.compile} IS NULL"
+  | .isNotNull e   => return s!"{← e.compile} IS NOT NULL"
+  | .like e p      => return s!"{← e.compile} LIKE {← p.compile}"
+  | .inList e es   => return s!"{← e.compile} IN ({String.intercalate ", " (← SqlExpr.compileList es)})"
+  | .inSub e sub   => return s!"{← e.compile} IN ({← sub})"
+  | .scalarSub _ sub => return s!"({← sub})"
+  | .caseWhen c a b =>
+      return s!"CASE WHEN {← c.compile} THEN {← a.compile} ELSE {← b.compile} END"
+  | .aggE op e     => return s!"{op.token}({← e.compile})"
+  | .countAll      => pure "COUNT(*)"
+  | .abs e         => return s!"ABS({← e.compile})"
+  | .round e digits => do
+      let p ← pushParam (.int digits)
+      return s!"ROUND({← e.compile}, {p})"
+  | .ceiling e     => do
+      let name := match (← read) with
+        | .sqlite => "CEIL"
+        | _ => "CEILING"
+      return s!"{name}({← e.compile})"
+  | .floor e       => return s!"FLOOR({← e.compile})"
+  | .substring e start len => do
+      let name := if (← read) == .sqlite then "SUBSTR" else "SUBSTRING"
+      let p1 ← pushParam (.int start)
+      let p2 ← pushParam (.int len)
+      return s!"{name}({← e.compile}, {p1}, {p2})"
+  | .upper e       => return s!"UPPER({← e.compile})"
+  | .lower e       => return s!"LOWER({← e.compile})"
+  | .trim e        => return s!"TRIM({← e.compile})"
+  | .length e      => do
+      let name := if (← read) == .sqlServer then "LEN" else "LENGTH"
+      return s!"{name}({← e.compile})"
+  | .now           =>
+      return match (← read) with
+        | .sqlServer => "GETDATE()"
+        | .sqlite => "datetime('now')"
+        | .postgres => "NOW()"
+  | .datePart u e  => do
+      let x ← e.compile
+      return match (← read) with
+        | .sqlServer => s!"{u.upperName}({x})"
+        | .sqlite => s!"CAST(strftime('{u.strftimeFmt}', {x}) AS INTEGER)"
+        | .postgres => s!"EXTRACT({u.upperName} FROM {x})"
+  | .dateAdd u e n => do
+      let x ← e.compile
+      match (← read) with
+      | .sqlServer => do
+          let p ← pushParam (.int n)
+          return s!"DATEADD({u.token}, {p}, {x})"
+      | .sqlite =>
+          let amount := if n ≥ 0 then s!"+{n}" else toString n
+          return s!"datetime({x}, '{amount} {u.token}')"
+      | .postgres =>
+          return s!"({x} + INTERVAL '{n} {u.token}')"
+  | .dateDiff u a b => do
+      let x ← a.compile
+      let y ← b.compile
+      return match (← read) with
+        | .sqlServer => s!"DATEDIFF({u.token}, {x}, {y})"
+        | .sqlite =>
+          match u with
+          | .day => s!"CAST((julianday({y}) - julianday({x})) AS INTEGER)"
+          | .month => s!"CAST(((CAST(strftime('%Y', {y}) AS INTEGER) - CAST(strftime('%Y', {x}) AS INTEGER)) * 12 + (CAST(strftime('%m', {y}) AS INTEGER) - CAST(strftime('%m', {x}) AS INTEGER))) AS INTEGER)"
+          | .year => s!"CAST((CAST(strftime('%Y', {y}) AS INTEGER) - CAST(strftime('%Y', {x}) AS INTEGER)) AS INTEGER)"
+        | .postgres =>
+          match u with
+          | .day => s!"EXTRACT(DAY FROM ({y} - {x}))"
+          | .month => s!"(EXTRACT(YEAR FROM {y}) - EXTRACT(YEAR FROM {x})) * 12 + (EXTRACT(MONTH FROM {y}) - EXTRACT(MONTH FROM {x}))"
+          | .year => s!"(EXTRACT(YEAR FROM {y}) - EXTRACT(YEAR FROM {x}))"
+
+def SqlExpr.compileList : List ((u : SqlType) × SqlExpr u) → CompileM (List String)
+  | [] => pure []
+  | ⟨_, e⟩ :: es => return (← e.compile) :: (← SqlExpr.compileList es)
+
+end
 
 end LeanLinq

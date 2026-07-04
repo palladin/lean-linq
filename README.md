@@ -25,11 +25,11 @@ def customerOrders := query! {
   select ![c["Name"].as "Name", o["OrderId"].as "OrderId"]
 }
 
-#eval customerOrders.toSql
--- { sql := "SELECT c0.Name AS Name, c1.OrderId AS OrderId
---           FROM Customers AS c0, Orders AS c1
---           WHERE (c0.Id = c1.CustomerId) AND (@p0 < c0.Age)",
---   params := #[("@p0", .int 18)] }
+#eval customerOrders.toSql .sqlite
+-- { sql := "SELECT \"a0\".\"Name\" AS \"Name\", \"a1\".\"OrderId\" AS \"OrderId\"
+--           FROM \"Customers\" \"a0\", \"Orders\" \"a1\"
+--           WHERE (\"a0\".\"Id\" = \"a1\".\"CustomerId\") AND (:p0 < \"a0\".\"Age\")",
+--   params := #[(":p0", .int 18)] }
 ```
 
 Ill-typed queries don't compile: a misspelled column name, comparing an `int` column to a
@@ -38,9 +38,32 @@ Ill-typed queries don't compile: a misspelled column name, comparing an `int` co
 ## Building
 
 ```
-lake build   # library
-lake test    # golden tests (exact SQL text + parameters)
+lake build                  # library
+lake test                   # golden tests: 181 cases × 3 dialects (exact SQL + parameters)
+lake exe tests --update     # regenerate Tests/golden/*.golden after intentional changes
 ```
+
+## Feature surface
+
+- **Types**: int, long, double, decimal, string, bool, dateTime, guid; NULL via
+  `isNull`/`isNotNull`, `setNull`/`valueNull` in statements.
+- **Expressions**: `+ - * /` (numeric), `++` (concat), `==. !=. <. <=. >. >=.`,
+  `&&. ||. !.`, `like`, `inValues`, `inQuery` (subquery), `caseWhen`,
+  named parameters (`SqlExpr.param`), `abs`/`round`/`ceiling`/`floor`,
+  `substring`/`upper`/`lower`/`trim`/`length`,
+  `now`/`year`/`month`/`day`/`addDays`/`addMonths`/`addYears`/`diffDays`/`diffMonths`/`diffYears`.
+- **Queries**: `from'`/`where'`/`select`, `innerJoin`/`leftJoin` (fuse into one
+  statement), `orderBy` (multi-key, fuses), `distinct`, `limitOffset`,
+  `groupBy`/`having`/grouped `select` with aggregates (`a.count`, `a.sum`, …),
+  scalar queries (`count`/`sum`/`avg`/`min`/`max`, embeddable via `.embed`),
+  `union`/`intersect`/`except`.
+- **Statements**: `t.insert |>.value …`, `t.update |>.set/.setWith/.setNull |>.where' …`,
+  `t.delete |>.where' …`.
+- **Dialects**: SQLite (`"x"`, `:p0`, `LIMIT/OFFSET`), SQL Server (`[x]`, `@p0`,
+  `OFFSET…FETCH`, `GETDATE`/`DATEADD`/`DATEDIFF`/`LEN`, `+` concat), PostgreSQL
+  (`"x"`, `:p0`, `EXTRACT`/`INTERVAL`/`NOW()`): `q.toSql .sqlite`,
+  `.toSqlServer`, `.toPostgres`. Every SQLite golden is parse-validated against
+  a real SQLite database.
 
 ## The comprehension syntax
 
@@ -65,11 +88,12 @@ def adults := Query.from' customers
   |>.select (fun c => ![c["Name"].as "Name"])
 ```
 
-Queries **normalize at construction time** (`Query.bind`, the comprehension monad — C#'s
-`SelectMany` law): `where'` splices a conjunct, `select` replaces the projection, and a query
-used as a `from` source is inlined. Both surfaces therefore compile to the *same single flat
-SELECT* — code generation never sees anything but a spine of sources, conjuncts, and a
-projection.
+Queries **normalize at construction time** (`Query.bind`, the comprehension monad):
+`where'` splices a conjunct, `select` replaces the projection, joins extend the FROM clause,
+`orderBy` attaches to the statement, and a query used as a `from` source is inlined. Both
+surfaces compile to the same flat SELECT. Clauses that must not be spliced through —
+DISTINCT, LIMIT/OFFSET, GROUP BY/HAVING, set operations — are *boundary nodes*: binding over
+them wraps the query as a derived table, which is exactly SQL's semantics.
 
 Row access and construction:
 
@@ -96,24 +120,22 @@ return `Bool`/`Prop`, so SQL needs its own).
 
 - `SqlType` universe; `SqlExpr : SqlType → Type` GADT — ill-typed SQL is unrepresentable.
 - `Schema := List (String × SqlType)`; `Row : Schema → Type` heterogeneous tuple of expressions.
-- `Query : Schema → Type` in monadic-comprehension form:
-  `yield : Row s → Query s`, `guard : SqlExpr .bool → Query s → Query s`,
-  `fromT : Table s → (Row s → Query s') → Query s'`. HOAS binders; illegal column references
-  are type errors at the binding site. `Query.bind` normalizes all combinators onto this
-  spine, so a query is always FROM sources + WHERE conjuncts + one projection. Constructs
-  that must not flatten (DISTINCT, LIMIT, GROUP BY, set ops) will arrive as explicit
-  boundary nodes whose `bind` wraps instead of splicing.
+- Two-level query algebra: `SpineQ` (the comprehension spine: `yield`/`guard`/`fromT`/
+  `joinT`/`order`/`fromQ`) and `Query` (boundary nodes: `distinct`, `limit`, grouped
+  selects, set ops). Separate inductives so the statement ↔ spine compiler recursion is
+  structural. HOAS binders; illegal column references are type errors at the binding site.
+- Subqueries inside expressions (`inQuery`, `.embed`) are stored as *staged compilation
+  actions*, not ASTs — a mutual `SqlExpr`/`Query` block would violate strict positivity
+  through the HOAS binders (`Row → Query` puts `Query` inside `Row`'s expression fields,
+  left of an arrow).
 - Compiler: a `StateM` (alias counter + parameter accumulator) walk that renders the spine as
   one flat SELECT. Everything is total — `Query` is a reflexive inductive, so structural
   recursion covers HOAS continuations applied to any row — which means the kernel itself can
   run the compiler (`#guard` tests of generated SQL at elaboration time).
 
-## Roadmap
+## Status
 
-1. ~~Core: typed GADTs, comprehension + pipeline surfaces, `query!` macro, SQLite-style
-   parameterized output~~ (done)
-2. Full type universe (long/double/decimal/dateTime/guid), NULL, user-named parameters
-3. Full query surface: orderBy, distinct, limit/offset, left join, groupBy/having,
-   aggregates, union/intersect/except, subqueries in expressions
-4. Statements: INSERT / UPDATE / DELETE
-5. Dialects: SQLite / PostgreSQL / SQL Server
+Core, full query surface (joins, grouping, aggregates, set ops, subqueries),
+statements, and the three dialects are implemented, with a 181-case × 3-dialect
+golden test suite. Possible next steps: executing queries against a live
+connection, richer HAVING/ORDER BY over aggregates, and window functions.

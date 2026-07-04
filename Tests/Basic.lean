@@ -95,9 +95,10 @@ def exLinqSub := query! {
 
 /-! ## Elaboration-time smoke checks (kernel-evaluate the compiler). -/
 
-#guard exFrom.toSql.sql == "SELECT c0.Id AS Id, c0.Name AS Name, c0.Age AS Age FROM Customers AS c0"
+#guard exFrom.toSql.sql ==
+  "SELECT \"a0\".\"Id\" AS \"Id\", \"a0\".\"Name\" AS \"Name\", \"a0\".\"Age\" AS \"Age\" FROM \"Customers\" \"a0\""
 #guard exLinqJoin.toSql ==
-  { sql := "SELECT c0.Name AS Name, c1.OrderId AS OrderId FROM Customers AS c0, Orders AS c1 WHERE (c0.Id = c1.CustomerId)",
+  { sql := "SELECT \"a0\".\"Name\" AS \"Name\", \"a1\".\"OrderId\" AS \"OrderId\" FROM \"Customers\" \"a0\", \"Orders\" \"a1\" WHERE (\"a0\".\"Id\" = \"a1\".\"CustomerId\")",
     params := #[] }
 
 /-! ## Negative tests: these must NOT elaborate. -/

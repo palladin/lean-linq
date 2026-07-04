@@ -1,10 +1,11 @@
 import LeanLinq.Core.Types
+import LeanLinq.Core.Monad
 import LeanLinq.Core.Expr
 import LeanLinq.Core.Schema
 import LeanLinq.Core.Table
 import LeanLinq.Core.Query
 import LeanLinq.Notation
 import LeanLinq.Syntax
-import LeanLinq.Compiler.Monad
 import LeanLinq.Compiler.Expr
 import LeanLinq.Compiler.Query
+import LeanLinq.Statements

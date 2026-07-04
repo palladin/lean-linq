@@ -1,0 +1,181 @@
+From	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0"	
+FromStatic	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0"	
+FromSelect	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0"	
+FromSelectSingle	SELECT "a0"."Age" AS "Age" FROM "customers" "a0"	
+FromSelectExpression	SELECT ("a0"."Id" * :p0) AS "Calc", ("a0"."Name" || :p1) AS "Label" FROM "customers" "a0"	:p0=long 100; :p1=string " - Customer"
+FromWhereInt	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Age" > :p0)	:p0=int 18
+FromWhereString	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Name" = :p0)	:p0=string "John"
+FromWhereMultiple	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE (("a0"."Age" > :p0) AND ("a0"."Name" <> :p1))	:p0=int 18; :p1=string "Admin"
+FromWhereOr	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ((("a0"."Age" > :p0) AND ("a0"."Age" < :p1)) OR ("a0"."Name" = :p2))	:p0=int 18; :p1=int 65; :p2=string "VIP"
+FromWhereAnd	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE (("a0"."Age" > :p0) AND ("a0"."Name" = :p1))	:p0=int 18; :p1=string "John"
+FromOrderByAsc	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" ORDER BY "a0"."Name" ASC	
+FromOrderByDesc	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" ORDER BY "a0"."Age" DESC	
+FromWhereSelect	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE ("a0"."Age" >= :p0)	:p0=int 21
+FromWhereAndSelect	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE (("a0"."Age" >= :p0) AND ("a0"."Name" <> :p1))	:p0=int 21; :p1=string ""
+FromWhereOrderBy	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE (("a0"."Age" > :p0) AND ("a0"."Name" <> :p1)) ORDER BY "a0"."Age" ASC	:p0=int 21; :p1=string ""
+FromSelectOrderBy	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", ("a0"."Age" + :p0) AS "AgePlus" FROM "customers" "a0" ORDER BY "a0"."Name" ASC	:p0=int 5
+FromWhereSelectOrderBy	SELECT ("a0"."Id" + :p1) AS "IdPlus", ("a0"."Name" || :p2) AS "Loud" FROM "customers" "a0" WHERE ("a0"."Age" > :p0) ORDER BY "a0"."Name" ASC	:p0=int 18; :p1=long 1; :p2=string "!"
+FromWhereOrderBySelect	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", ("a0"."Age" + :p2) AS "AgePlus" FROM "customers" "a0" WHERE (("a0"."Age" > :p0) AND ("a0"."Name" <> :p1)) ORDER BY "a0"."Age" ASC	:p0=int 21; :p1=string ""; :p2=int 10
+FromWhereOrderBySelectNamed	SELECT "a0"."Id" AS "CustomerId", ("a0"."Name" || :p2) AS "CustomerInfo", ("a0"."Age" + :p3) AS "AdjustedAge" FROM "customers" "a0" WHERE (("a0"."Age" >= :p0) AND ("a0"."Name" <> :p1)) ORDER BY "a0"."Name" ASC	:p0=int 21; :p1=string ""; :p2=string " (Customer)"; :p3=int 5
+FromWhereSelectNamed	SELECT "a0"."Id" AS "OriginalId", ("a0"."Id" * :p1) AS "ModifiedId", "a0"."Name" AS "CustomerName" FROM "customers" "a0" WHERE ("a0"."Age" > :p0)	:p0=int 18; :p1=long 100
+FromProductWhereSelect	SELECT "a0"."Id" AS "Id", "a0"."ProductName" AS "ProductName" FROM "products" "a0" WHERE ("a0"."ProductName" <> :p0)	:p0=string "Discontinued"
+FromWhereSelectParameterized	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE (("a0"."Age" >= :minAge) AND ("a0"."Age" <= :maxAge))	:minAge=null; :maxAge=null
+FromWhereFusionTwo	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Age" > :p0) AND ("a0"."Name" <> :p1)	:p0=int 18; :p1=string "Admin"
+FromWhereFusionThree	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Age" > :p0) AND ("a0"."Name" <> :p1) AND ("a0"."Age" < :p2)	:p0=int 18; :p1=string "Admin"; :p2=int 65
+FromWhereFusionWithSelect	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE ("a0"."Age" >= :p0) AND ("a0"."Name" <> :p1)	:p0=int 21; :p1=string ""
+FromWhereFusionWithOrderBy	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Age" > :p0) AND ("a0"."Name" <> :p1) ORDER BY "a0"."Name" ASC	:p0=int 18; :p1=string "Admin"
+FromOrderByThenBy	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" ORDER BY "a0"."Name" ASC, "a0"."Age" ASC	
+FromOrderByThenByDescending	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" ORDER BY "a0"."Name" ASC, "a0"."Age" DESC	
+FromOrderByDescendingThenBy	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" ORDER BY "a0"."Age" DESC, "a0"."Name" ASC	
+FromOrderByMultiple	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" ORDER BY "a0"."Name" ASC, "a0"."Age" DESC, "a0"."Id" ASC	
+FromWhereOrderByThenBy	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Age" > :p0) ORDER BY "a0"."Name" ASC, "a0"."Age" DESC	:p0=int 18
+FromOrderByThenBySelect	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" ORDER BY "a0"."Name" ASC, "a0"."Age" ASC	
+FromWhereIsNull	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE "a0"."Name" IS NULL	
+FromWhereIsNotNull	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE "a0"."Name" IS NOT NULL	
+FromWhereIsNullInt	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE "a0"."Age" IS NULL	
+FromWhereIsNotNullInt	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE "a0"."Age" IS NOT NULL	
+FromWhereIsNullCombined	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Name" IS NULL AND "a0"."Age" IS NOT NULL)	
+FromWhereAgeGreaterThanSum	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Age" > (SELECT SUM("a1"."Age") FROM "customers" "a1"))	
+SumAges	SELECT SUM("a0"."Age") FROM "customers" "a0"	
+CountCustomers	SELECT COUNT(*) FROM "customers" "a0"	
+CountActiveCustomers	SELECT COUNT(*) FROM "customers" "a0" WHERE ("a0"."Age" >= :p0)	:p0=int 18
+SumPrices	SELECT SUM("a0"."Price") FROM "products" "a0"	
+AvgPrices	SELECT AVG("a0"."Price") FROM "products" "a0"	
+MinPrice	SELECT MIN("a0"."Price") FROM "products" "a0"	
+MaxPrice	SELECT MAX("a0"."Price") FROM "products" "a0"	
+SumExpensivePrices	SELECT SUM("a0"."Price") FROM "products" "a0" WHERE ("a0"."Price" > :p0)	:p0=decimal 100.0
+AvgExpensivePrices	SELECT AVG("a0"."Price") FROM "products" "a0" WHERE ("a0"."Price" > :p0)	:p0=decimal 100.0
+FromWhereAgeGreaterThanAverageAge	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Age" > (SELECT SUM("a1"."Age") FROM "customers" "a1"))	
+FromWhereAgeIn	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE "a0"."Age" IN (:p0, :p1, :p2, :p3)	:p0=int 18; :p1=int 21; :p2=int 25; :p3=int 30
+FromWhereAgeInSubquery	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE "a0"."Age" IN (SELECT "a1"."Age" AS "Age" FROM "customers" "a1" WHERE ("a1"."Name" = :p0))	:p0=string "VIP"
+FromWhereAgeInSubqueryWithClosure	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE "a0"."Age" IN (SELECT "a1"."Age" AS "Age" FROM "customers" "a1" WHERE ("a1"."Name" = ("a0"."Name" || :p0)))	:p0=string "_VIP"
+FromSubquery	SELECT "a0"."Id" AS "Id", ("a0"."Age" + :p0) AS "NewAge" FROM "customers" "a0"	:p0=int 1
+FromWhereSelectWhereFromNested	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE ("a0"."Age" > :p0) AND ("a0"."Id" > :p1)	:p0=int 18; :p1=long 100
+FromWhereSelectWhereNested	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE ("a0"."Age" > :p0) AND ("a0"."Id" > :p1)	:p0=int 18; :p1=long 100
+FromGroupBySelect	SELECT "a0"."Age" AS "Age", COUNT(*) AS "Count" FROM "customers" "a0" GROUP BY "a0"."Age"	
+FromGroupByMultipleSelect	SELECT "a0"."Age" AS "Age", "a0"."Name" AS "Name", COUNT(*) AS "Count" FROM "customers" "a0" GROUP BY "a0"."Age", "a0"."Name"	
+FromGroupByHavingSelect	SELECT "a0"."Age" AS "Age", COUNT(*) AS "Count" FROM "customers" "a0" GROUP BY "a0"."Age" HAVING (COUNT(*) > :p0)	:p0=int 1
+FromWhereGroupBySelect	SELECT "a0"."Age" AS "Age", COUNT(*) AS "Count" FROM "customers" "a0" WHERE ("a0"."Age" >= :p0) GROUP BY "a0"."Age"	:p0=int 18
+InnerJoinBasic	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a1"."Id" AS "OrderId", "a1"."Amount" AS "Amount" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId")	
+InnerJoinWithSelect	SELECT "a0"."Name" AS "CustomerName", "a1"."Amount" AS "OrderAmount" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId")	
+InnerJoinWithWhere	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a0"."Age" AS "Age", "a1"."Id" AS "OrderId", "a1"."Amount" AS "Amount" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") WHERE ("a0"."Age" >= :p0) AND ("a1"."Amount" > :p1)	:p0=int 18; :p1=int 100
+InnerJoinWithOrderBy	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a1"."Id" AS "OrderId", "a1"."Amount" AS "Amount" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") ORDER BY "a0"."Name" ASC	
+LeftJoinBasic	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a1"."Id" AS "OrderId", "a1"."Amount" AS "Amount" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId")	
+LeftJoinWithSelect	SELECT ("a0"."Name" || :p0) AS "CustomerInfo", "a1"."Amount" AS "OrderAmount" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId")	:p0=string " (Customer)"
+LeftJoinWithWhere	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a0"."Age" AS "Age", "a1"."Id" AS "OrderId", "a1"."Amount" AS "OrderAmount" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") WHERE ("a0"."Age" >= :p0) AND ("a0"."Age" < :p1)	:p0=int 21; :p1=int 65
+LeftJoinWithOrderBy	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a1"."Id" AS "OrderId", "a1"."Amount" AS "Amount" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") ORDER BY "a0"."Name" ASC, "a1"."Amount" DESC	
+InnerJoinWithGroupBy	SELECT "a0"."Id" AS "CustomerId", "a0"."Name" AS "CustomerName", SUM("a1"."Amount") AS "TotalAmount" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") GROUP BY "a0"."Id", "a0"."Name"	
+LeftJoinWithAggregates	SELECT "a0"."Id" AS "CustomerId", COUNT(*) AS "OrderCount", SUM("a1"."Amount") AS "TotalSpent" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") GROUP BY "a0"."Id"	
+MultipleInnerJoinsFusion	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a1"."ProductId" AS "OrderProductId", "a2"."ProductName" AS "ProductName" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") INNER JOIN "products" "a2" ON ("a1"."ProductId" = "a2"."Id")	
+MixedJoinTypesFusion	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a1"."ProductId" AS "OrderProductId", "a2"."ProductName" AS "ProductName" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") LEFT JOIN "products" "a2" ON ("a1"."ProductId" = "a2"."Id")	
+JoinFusionWithWhere	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a1"."Amount" AS "Amount", "a2"."ProductName" AS "ProductName" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") INNER JOIN "products" "a2" ON ("a1"."ProductId" = "a2"."Id") WHERE ("a0"."Age" >= :p0) AND ("a1"."Amount" > :p1)	:p0=int 18; :p1=int 100
+FromGroupByOrderBySelect	SELECT "a1"."CustomerId" AS "CustomerId", "a1"."TotalAmount" AS "TotalAmount" FROM (SELECT "a0"."CustomerId" AS "CustomerId", SUM("a0"."Amount") AS "TotalAmount" FROM "orders" "a0" GROUP BY "a0"."CustomerId") "a1" ORDER BY "a1"."TotalAmount" DESC	
+FromGroupByOrderByMultipleSelect	SELECT "a1"."CustomerId" AS "CustomerId", "a1"."TotalAmount" AS "TotalAmount", "a1"."OrderCount" AS "OrderCount" FROM (SELECT "a0"."CustomerId" AS "CustomerId", SUM("a0"."Amount") AS "TotalAmount", COUNT(*) AS "OrderCount" FROM "orders" "a0" GROUP BY "a0"."CustomerId") "a1" ORDER BY "a1"."TotalAmount" DESC, "a1"."OrderCount" ASC	
+FromGroupByOrderByThreeKeysSelect	SELECT "a1"."CustomerId" AS "CustomerId", "a1"."TotalAmount" AS "TotalAmount", "a1"."OrderCount" AS "OrderCount" FROM (SELECT "a0"."CustomerId" AS "CustomerId", SUM("a0"."Amount") AS "TotalAmount", COUNT(*) AS "OrderCount" FROM "orders" "a0" GROUP BY "a0"."CustomerId") "a1" ORDER BY "a1"."TotalAmount" DESC, "a1"."OrderCount" ASC, "a1"."CustomerId" ASC	
+FromGroupByMultipleOrderBySelect	SELECT "a1"."Age" AS "Age", "a1"."Name" AS "Name", "a1"."Count" AS "Count" FROM (SELECT "a0"."Age" AS "Age", "a0"."Name" AS "Name", COUNT(*) AS "Count" FROM "customers" "a0" GROUP BY "a0"."Age", "a0"."Name") "a1" ORDER BY "a1"."Count" DESC	
+FromGroupByHavingOrderBySelect	SELECT "a1"."CustomerId" AS "CustomerId", "a1"."TotalAmount" AS "TotalAmount" FROM (SELECT "a0"."CustomerId" AS "CustomerId", SUM("a0"."Amount") AS "TotalAmount" FROM "orders" "a0" GROUP BY "a0"."CustomerId" HAVING (COUNT(*) > :p0)) "a1" ORDER BY "a1"."TotalAmount" DESC	:p0=int 1
+ComplexJoinWhereGroupByHavingOrderBySelect	SELECT "a2"."CustomerId" AS "CustomerId", "a2"."CustomerName" AS "CustomerName", "a2"."TotalOrders" AS "TotalOrders", "a2"."TotalSpent" AS "TotalSpent", "a2"."AvgOrderValue" AS "AvgOrderValue" FROM (SELECT "a0"."Id" AS "CustomerId", "a0"."Name" AS "CustomerName", COUNT(*) AS "TotalOrders", SUM("a1"."Amount") AS "TotalSpent", (SUM("a1"."Amount") / COUNT(*)) AS "AvgOrderValue" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") WHERE (("a0"."Age" >= :p0) AND ("a1"."Amount" > :p1)) GROUP BY "a0"."Id", "a0"."Name" HAVING ((COUNT(*) > :p2) AND (SUM("a1"."Amount") > :p3))) "a2" ORDER BY "a2"."TotalSpent" DESC, "a2"."TotalOrders" ASC	:p0=int 18; :p1=int 50; :p2=int 2; :p3=int 500
+ComplexLeftJoinWhereGroupByOrderBySelect	SELECT "a2"."CustomerId" AS "CustomerId", "a2"."CustomerName" AS "CustomerName", "a2"."OrderCount" AS "OrderCount", "a2"."TotalSpent" AS "TotalSpent" FROM (SELECT "a0"."Id" AS "CustomerId", "a0"."Name" AS "CustomerName", COUNT(*) AS "OrderCount", SUM("a1"."Amount") AS "TotalSpent" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") WHERE ("a0"."Age" >= :p0) GROUP BY "a0"."Id", "a0"."Name") "a2" ORDER BY "a2"."TotalSpent" DESC, "a2"."CustomerName" ASC	:p0=int 21
+FromGroupByMinMaxSelect	SELECT "a0"."CustomerId" AS "CustomerId", MIN("a0"."Amount") AS "MinAmount", MAX("a0"."Amount") AS "MaxAmount", COUNT(*) AS "OrderCount" FROM "orders" "a0" GROUP BY "a0"."CustomerId"	
+FromGroupByAvgSelect	SELECT "a0"."CustomerId" AS "CustomerId", AVG("a0"."Amount") AS "AvgAmount", COUNT(*) AS "OrderCount" FROM "orders" "a0" GROUP BY "a0"."CustomerId"	
+FromGroupByDecimalAggregatesSelect	SELECT "a0"."ProductName" AS "ProductName", SUM("a0"."Price") AS "TotalPrice", AVG("a0"."Price") AS "AvgPrice", MIN("a0"."Price") AS "MinPrice", MAX("a0"."Price") AS "MaxPrice", COUNT(*) AS "ProductCount" FROM "products" "a0" GROUP BY "a0"."ProductName"	
+FromGroupByDecimalSumSelect	SELECT "a0"."ProductName" AS "ProductName", SUM("a0"."Price") AS "TotalPrice" FROM "products" "a0" GROUP BY "a0"."ProductName"	
+FromGroupByDecimalAvgSelect	SELECT "a0"."ProductName" AS "ProductName", AVG("a0"."Price") AS "AvgPrice" FROM "products" "a0" GROUP BY "a0"."ProductName"	
+FromSelectSum	SELECT SUM("a0"."Amount") FROM "orders" "a0"	
+FromSelectAvg	SELECT AVG("a0"."Amount") FROM "orders" "a0"	
+FromSelectMin	SELECT MIN("a0"."Amount") FROM "orders" "a0"	
+FromSelectMax	SELECT MAX("a0"."Amount") FROM "orders" "a0"	
+ParameterAsIntParam	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE ("a0"."Age" > :minAge)	:minAge=null
+ParameterAsStringParam	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age" FROM "customers" "a0" WHERE ("a0"."Name" = :customerName)	:customerName=null
+ParameterAsBoolParam	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a0"."Age" AS "Age" FROM "customers" "a0" WHERE (("a0"."Age" > :p0) = :isAdult)	:p0=int 18; :isAdult=null
+BoolColumnDirectComparison	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a0"."Age" AS "Age", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."IsActive" = :isActive)	:isActive=null
+BoolColumnLiteralTrue	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a0"."Age" AS "Age", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."IsActive" = :p0)	:p0=bool true
+BoolColumnLiteralFalse	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a0"."Age" AS "Age", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."IsActive" = :p0)	:p0=bool false
+CaseStringExpression	SELECT "a0"."Id" AS "Id", CASE WHEN ("a0"."Age" > :p0) THEN :p1 ELSE :p2 END AS "AgeGroup" FROM "customers" "a0"	:p0=int 18; :p1=string "Adult"; :p2=string "Minor"
+CaseIntExpression	SELECT "a0"."Id" AS "Id", CASE WHEN ("a0"."Age" > :p0) THEN :p1 ELSE :p2 END AS "IsSenior" FROM "customers" "a0"	:p0=int 65; :p1=int 1; :p2=int 0
+CaseBoolExpression	SELECT "a0"."Id" AS "Id", CASE WHEN ("a0"."Age" > :p0) THEN "a0"."IsActive" ELSE :p1 END AS "ActiveAdult" FROM "customers" "a0"	:p0=int 18; :p1=bool false
+CaseInWhere	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE (CASE WHEN ("a0"."Age" > :p0) THEN :p1 ELSE :p2 END = :p3)	:p0=int 18; :p1=string "Adult"; :p2=string "Minor"; :p3=string "Adult"
+LikeWildcard	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE "a0"."Name" LIKE :p0	:p0=string "Jo%"
+LikeSingleChar	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE "a0"."Name" LIKE :p0	:p0=string "J_n"
+LikeBothWildcards	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE "a0"."Name" LIKE :p0	:p0=string "%o_n%"
+LikeExact	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE "a0"."Name" LIKE :p0	:p0=string "John"
+AbsColumn	SELECT "a0"."Id" AS "Id", ABS("a0"."Age") AS "AbsAge" FROM "customers" "a0"	
+AbsInWhere	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a0"."Age" AS "Age" FROM "customers" "a0" WHERE (ABS("a0"."Age") > :p0)	:p0=int 30
+AbsExpression	SELECT "a0"."Id" AS "Id", ABS(("a0"."Age" - :p0)) AS "AbsDiff" FROM "customers" "a0"	:p0=int 50
+AbsParameter	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a0"."Age" AS "Age" FROM "customers" "a0" WHERE (ABS("a0"."Age") > ABS(:minAge))	:minAge=null
+FromWhereDecimalComparison	SELECT "a0"."Id" AS "Id", "a0"."ProductName" AS "ProductName", "a0"."Price" AS "Price", "a0"."CreatedDate" AS "CreatedDate", "a0"."UniqueId" AS "UniqueId" FROM "products" "a0" WHERE ("a0"."Price" > :p0)	:p0=decimal 100.50
+FromSelectDecimalArithmetic	SELECT "a0"."ProductName" AS "ProductName", ("a0"."Price" * :p0) AS "Marked", ("a0"."Price" + :p1) AS "Plus", ("a0"."Price" - :p2) AS "Minus" FROM "products" "a0"	:p0=decimal 1.1; :p1=decimal 10.0; :p2=decimal 5.0
+FromWhereDecimalIsNull	SELECT "a0"."Id" AS "Id", "a0"."ProductName" AS "ProductName", "a0"."Price" AS "Price", "a0"."CreatedDate" AS "CreatedDate", "a0"."UniqueId" AS "UniqueId" FROM "products" "a0" WHERE "a0"."Price" IS NULL	
+FromWhereDecimalIsNotNull	SELECT "a0"."Id" AS "Id", "a0"."ProductName" AS "ProductName", "a0"."Price" AS "Price", "a0"."CreatedDate" AS "CreatedDate", "a0"."UniqueId" AS "UniqueId" FROM "products" "a0" WHERE "a0"."Price" IS NOT NULL	
+CaseDecimalExpression	SELECT "a0"."ProductName" AS "ProductName", CASE WHEN ("a0"."Price" > :p0) THEN :p1 ELSE CASE WHEN ("a0"."Price" > :p2) THEN :p3 ELSE :p4 END END AS "ExpensiveFlag" FROM "products" "a0"	:p0=decimal 1000.0; :p1=string "Expensive"; :p2=decimal 100.0; :p3=string "Moderate"; :p4=string "Cheap"
+ParameterAsDecimalParam	SELECT "a0"."Id" AS "Id", "a0"."ProductName" AS "ProductName", "a0"."Price" AS "Price", "a0"."CreatedDate" AS "CreatedDate", "a0"."UniqueId" AS "UniqueId" FROM "products" "a0" WHERE ("a0"."Price" > :minPrice)	:minPrice=null
+FromWhereCreatedDateComparison	SELECT "a0"."Id" AS "Id", "a0"."ProductName" AS "ProductName", "a0"."Price" AS "Price", "a0"."CreatedDate" AS "CreatedDate", "a0"."UniqueId" AS "UniqueId" FROM "products" "a0" WHERE ("a0"."CreatedDate" > :p0)	:p0=dateTime "2024-01-01"
+FromWhereCreatedDateIsNull	SELECT "a0"."Id" AS "Id", "a0"."ProductName" AS "ProductName", "a0"."Price" AS "Price", "a0"."CreatedDate" AS "CreatedDate", "a0"."UniqueId" AS "UniqueId" FROM "products" "a0" WHERE "a0"."CreatedDate" IS NULL	
+FromWhereCreatedDateIsNotNull	SELECT "a0"."Id" AS "Id", "a0"."ProductName" AS "ProductName", "a0"."Price" AS "Price", "a0"."CreatedDate" AS "CreatedDate", "a0"."UniqueId" AS "UniqueId" FROM "products" "a0" WHERE "a0"."CreatedDate" IS NOT NULL	
+FromSelectCreatedDateMinMax	SELECT "a0"."ProductName" AS "ProductName", "a0"."CreatedDate" AS "EarliestDate", "a0"."CreatedDate" AS "LatestDate" FROM "products" "a0"	
+CaseDateTimeExpression	SELECT "a0"."ProductName" AS "ProductName", CASE WHEN ("a0"."CreatedDate" < :p0) THEN :p1 ELSE CASE WHEN ("a0"."CreatedDate" < :p2) THEN :p3 ELSE :p4 END END AS "Age" FROM "products" "a0"	:p0=dateTime "2020-01-01"; :p1=string "Old"; :p2=dateTime "2024-01-01"; :p3=string "Recent"; :p4=string "New"
+ParameterAsDateTimeParam	SELECT "a0"."Id" AS "Id", "a0"."ProductName" AS "ProductName", "a0"."Price" AS "Price", "a0"."CreatedDate" AS "CreatedDate", "a0"."UniqueId" AS "UniqueId" FROM "products" "a0" WHERE ("a0"."CreatedDate" > :startDate)	:startDate=null
+FromWhereUniqueIdEquals	SELECT "a0"."Id" AS "Id", "a0"."ProductName" AS "ProductName", "a0"."Price" AS "Price", "a0"."CreatedDate" AS "CreatedDate", "a0"."UniqueId" AS "UniqueId" FROM "products" "a0" WHERE ("a0"."UniqueId" = :p0)	:p0=guid "12345678-1234-1234-1234-123456789012"
+FromWhereUniqueIdNotEquals	SELECT "a0"."Id" AS "Id", "a0"."ProductName" AS "ProductName", "a0"."Price" AS "Price", "a0"."CreatedDate" AS "CreatedDate", "a0"."UniqueId" AS "UniqueId" FROM "products" "a0" WHERE ("a0"."UniqueId" <> :p0)	:p0=guid "00000000-0000-0000-0000-000000000000"
+FromWhereUniqueIdIsNull	SELECT "a0"."Id" AS "Id", "a0"."ProductName" AS "ProductName", "a0"."Price" AS "Price", "a0"."CreatedDate" AS "CreatedDate", "a0"."UniqueId" AS "UniqueId" FROM "products" "a0" WHERE "a0"."UniqueId" IS NULL	
+FromWhereUniqueIdIsNotNull	SELECT "a0"."Id" AS "Id", "a0"."ProductName" AS "ProductName", "a0"."Price" AS "Price", "a0"."CreatedDate" AS "CreatedDate", "a0"."UniqueId" AS "UniqueId" FROM "products" "a0" WHERE "a0"."UniqueId" IS NOT NULL	
+CaseGuidExpression	SELECT "a0"."ProductName" AS "ProductName", CASE WHEN ("a0"."UniqueId" = :p0) THEN :p1 ELSE :p2 END AS "Status" FROM "products" "a0"	:p0=guid "00000000-0000-0000-0000-000000000000"; :p1=string "Empty"; :p2=string "HasId"
+ParameterAsGuidParam	SELECT "a0"."Id" AS "Id", "a0"."ProductName" AS "ProductName", "a0"."Price" AS "Price", "a0"."CreatedDate" AS "CreatedDate", "a0"."UniqueId" AS "UniqueId" FROM "products" "a0" WHERE ("a0"."UniqueId" = :targetId)	:targetId=null
+StringSubstring	SELECT SUBSTR("a0"."ProductName", :p0, :p1) AS "Sub" FROM "products" "a0"	:p0=int 1; :p1=int 5
+StringUpper	SELECT UPPER("a0"."ProductName") AS "Upper" FROM "products" "a0"	
+StringLower	SELECT LOWER("a0"."ProductName") AS "Lower" FROM "products" "a0"	
+StringTrim	SELECT TRIM("a0"."ProductName") AS "Trimmed" FROM "products" "a0"	
+StringLength	SELECT LENGTH("a0"."ProductName") AS "Len" FROM "products" "a0"	
+StringFunctionsInWhere	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE ((UPPER("a0"."Name") = :p0) AND (LENGTH("a0"."Name") > :p1))	:p0=string "JOHN"; :p1=int 3
+StringFunctionsInSelect	SELECT "a0"."Id" AS "Id", UPPER("a0"."Name") AS "UpperName", LOWER("a0"."Name") AS "LowerName", TRIM("a0"."Name") AS "TrimmedName", LENGTH("a0"."Name") AS "NameLength", SUBSTR("a0"."Name", :p0, :p1) AS "FirstThree" FROM "customers" "a0"	:p0=int 1; :p1=int 3
+DateTimeNow	SELECT datetime('now') AS "Now" FROM "products" "a0"	
+DateTimeYear	SELECT CAST(strftime('%Y', "a0"."CreatedDate") AS INTEGER) AS "Year" FROM "products" "a0"	
+DateTimeMonth	SELECT CAST(strftime('%m', "a0"."CreatedDate") AS INTEGER) AS "Month" FROM "products" "a0"	
+DateTimeDay	SELECT CAST(strftime('%d', "a0"."CreatedDate") AS INTEGER) AS "Day" FROM "products" "a0"	
+DateTimeAddDays	SELECT datetime("a0"."CreatedDate", '+30 day') AS "Plus30" FROM "products" "a0"	
+DateTimeAddMonths	SELECT datetime("a0"."CreatedDate", '+6 month') AS "Plus6M" FROM "products" "a0"	
+DateTimeAddYears	SELECT datetime("a0"."CreatedDate", '+1 year') AS "Plus1Y" FROM "products" "a0"	
+DateTimeDiffDays	SELECT CAST((julianday(:p0) - julianday("a0"."CreatedDate")) AS INTEGER) AS "Diff" FROM "products" "a0"	:p0=dateTime "2025-01-01"
+DateTimeDiffMonths	SELECT CAST(((CAST(strftime('%Y', :p0) AS INTEGER) - CAST(strftime('%Y', "a0"."CreatedDate") AS INTEGER)) * 12 + (CAST(strftime('%m', :p0) AS INTEGER) - CAST(strftime('%m', "a0"."CreatedDate") AS INTEGER))) AS INTEGER) AS "Diff" FROM "products" "a0"	:p0=dateTime "2025-01-01"
+DateTimeDiffYears	SELECT CAST((CAST(strftime('%Y', :p0) AS INTEGER) - CAST(strftime('%Y', "a0"."CreatedDate") AS INTEGER)) AS INTEGER) AS "Diff" FROM "products" "a0"	:p0=dateTime "2025-01-01"
+DateTimeFunctionsInWhere	SELECT "a0"."Id" AS "Id", "a0"."CreatedDate" AS "CreatedDate" FROM "products" "a0" WHERE ((CAST(strftime('%Y', "a0"."CreatedDate") AS INTEGER) = :p0) AND (CAST(strftime('%m', "a0"."CreatedDate") AS INTEGER) > :p1))	:p0=int 2024; :p1=int 6
+DateTimeFunctionsInSelect	SELECT "a0"."Id" AS "Id", CAST(strftime('%Y', "a0"."CreatedDate") AS INTEGER) AS "CreatedYear", CAST(strftime('%m', "a0"."CreatedDate") AS INTEGER) AS "CreatedMonth", CAST(strftime('%d', "a0"."CreatedDate") AS INTEGER) AS "CreatedDay", datetime("a0"."CreatedDate", '+7 day') AS "NextWeek", datetime("a0"."CreatedDate", '+1 month') AS "NextMonth", CAST((julianday(datetime('now')) - julianday("a0"."CreatedDate")) AS INTEGER) AS "DaysAgo" FROM "products" "a0"	
+DecimalRound	SELECT ROUND("a0"."Price", :p0) AS "Rounded" FROM "products" "a0"	:p0=int 2
+DecimalCeiling	SELECT CEIL("a0"."Price") AS "Ceil" FROM "products" "a0"	
+DecimalFloor	SELECT FLOOR("a0"."Price") AS "Floor" FROM "products" "a0"	
+MathFunctionsInWhere	SELECT "a0"."Id" AS "Id", "a0"."Price" AS "Price" FROM "products" "a0" WHERE ((ROUND("a0"."Price", :p0) > :p1) AND (CEIL("a0"."Price") < :p2))	:p0=int 0; :p1=decimal 100.0; :p2=decimal 1000.0
+MathFunctionsInSelect	SELECT "a0"."Id" AS "Id", "a0"."Price" AS "OriginalPrice", ROUND("a0"."Price", :p0) AS "RoundedPrice", CEIL("a0"."Price") AS "CeilingPrice", FLOOR("a0"."Price") AS "FloorPrice" FROM "products" "a0"	:p0=int 2
+FromLimitOffset	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" ORDER BY "a0"."Id" ASC LIMIT 5 OFFSET 10	
+FromSelectLimitOffset	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" ORDER BY "a0"."Id" ASC LIMIT 3 OFFSET 5	
+FromWhereLimitOffset	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Age" > :p0) ORDER BY "a0"."Id" ASC LIMIT 10	:p0=int 18
+FromWhereSelectLimitOffset	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a0"."Age" AS "Age" FROM "customers" "a0" WHERE ("a0"."Age" >= :p0) ORDER BY "a0"."Id" ASC LIMIT 5 OFFSET 15	:p0=int 21
+FromOrderByLimitOffset	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" ORDER BY "a0"."Name" ASC LIMIT 10 OFFSET 5	
+FromWhereOrderByLimitOffset	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Age" > :p0) ORDER BY "a0"."Age" DESC LIMIT 20 OFFSET 10	:p0=int 18
+FromWhereOrderBySelectLimitOffset	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a0"."Age" AS "Age" FROM "customers" "a0" WHERE ("a0"."Name" <> :p0) ORDER BY "a0"."Name" ASC, "a0"."Age" DESC LIMIT 5	:p0=string ""
+FromLimitOffsetOnly	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" ORDER BY "a0"."Id" ASC LIMIT 10	
+FromOffsetOnly	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" ORDER BY "a0"."Id" ASC LIMIT -1 OFFSET 5	
+FromLimitOffsetWithoutOrderBy	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" LIMIT 10	
+FromSelectDistinct	SELECT DISTINCT "a0"."Name" AS "Name" FROM "customers" "a0"	
+FromSelectDistinctWhere	SELECT DISTINCT "a0"."Name" AS "Name" FROM "customers" "a0" WHERE ("a0"."Age" > :p0)	:p0=int 18
+FromSelectDistinctOrderBy	SELECT DISTINCT "a0"."Name" AS "Name" FROM "customers" "a0" ORDER BY "a0"."Name" ASC	
+FromSelectDistinctMultipleColumns	SELECT DISTINCT "a0"."Name" AS "Name", "a0"."Age" AS "Age" FROM "customers" "a0" ORDER BY "a0"."Name" ASC	
+Union	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE ("a0"."Age" > :p0) UNION SELECT "a1"."Id" AS "Id", "a1"."Name" AS "Name" FROM "customers" "a1" WHERE ("a1"."Name" = :p1)	:p0=int 30; :p1=string "Alice"
+Intersect	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE ("a0"."Age" > :p0) INTERSECT SELECT "a1"."Id" AS "Id", "a1"."Name" AS "Name" FROM "customers" "a1" WHERE ("a1"."Name" = :p1)	:p0=int 25; :p1=string "John"
+Except	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" EXCEPT SELECT "a1"."Id" AS "Id", "a1"."Name" AS "Name" FROM "customers" "a1" WHERE ("a1"."Age" < :p0)	:p0=int 18
+InsertBasic	INSERT INTO "customers" ("Id", "Age", "Name") VALUES (:p0, :p1, :p2)	:p0=long 200; :p1=int 25; :p2=string "John Doe"
+UpdateBasic	UPDATE "customers" SET "Age" = :p0 WHERE ("Id" = :p1)	:p0=int 26; :p1=long 200
+UpdateMultiple	UPDATE "customers" SET "Age" = :p0, "Name" = :p1 WHERE ("Id" = :p2)	:p0=int 27; :p1=string "John Smith"; :p2=long 200
+UpdateConditional	UPDATE "customers" SET "Age" = ("Age" + :p0) WHERE (("Age" >= :p1) AND ("Name" <> :p2))	:p0=int 1; :p1=int 18; :p2=string "Admin"
+DeleteBasic	DELETE FROM "customers" WHERE ("Id" = :p0)	:p0=long 200
+DeleteConditional	DELETE FROM "customers" WHERE (("Age" < :p0) OR ("Name" = :p1))	:p0=int 18; :p1=string "Temp"
+DeleteAll	DELETE FROM "customers"	
+UpdateSetNull	UPDATE "customers" SET "Name" = NULL	
+UpdateSetNullInt	UPDATE "customers" SET "Age" = NULL	
+UpdateSetNullMixed	UPDATE "customers" SET "Name" = :p0, "Age" = NULL	:p0=string "John"
+UpdateSetNullWhere	UPDATE "customers" SET "Name" = NULL WHERE ("Id" = :p0)	:p0=long 200
+InsertWithNull	INSERT INTO "customers" ("Id", "Name", "Age") VALUES (:p0, NULL, :p1)	:p0=long 202; :p1=int 25
+InsertWithNullInt	INSERT INTO "customers" ("Id", "Name", "Age") VALUES (:p0, :p1, NULL)	:p0=long 203; :p1=string "John"
+InsertWithNewColumns	INSERT INTO "products" ("Id", "ProductName", "Price", "CreatedDate", "UniqueId") VALUES (:p0, :p1, :p2, :p3, :p4)	:p0=long 200; :p1=string "Test Product"; :p2=decimal 99.99; :p3=dateTime "2024-08-18"; :p4=guid "12345678-1234-1234-1234-123456789012"
+UpdateWithNewColumns	UPDATE "products" SET "Price" = :p0, "CreatedDate" = :p1, "UniqueId" = :p2 WHERE ("Id" = :p3)	:p0=decimal 119.99; :p1=dateTime "2024-12-25"; :p2=guid "87654321-4321-4321-4321-210987654321"; :p3=long 100
+InsertWithNewColumnsNull	INSERT INTO "products" ("Id", "ProductName", "Price", "CreatedDate", "UniqueId") VALUES (:p0, :p1, NULL, NULL, NULL)	:p0=long 201; :p1=string "Null Test"
+UpdateSetNewColumnsNull	UPDATE "products" SET "Price" = NULL, "CreatedDate" = NULL, "UniqueId" = NULL WHERE ("Id" = :p0)	:p0=long 101
