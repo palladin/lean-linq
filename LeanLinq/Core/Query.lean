@@ -25,6 +25,13 @@ inductive SpineQ : Schema → Type where
   -- flat statement (SQL Server in particular forbids ORDER BY inside a
   -- derived table).
   | order : {s : Schema} → List OrderKey → SpineQ s → SpineQ s
+  -- A *grouped* terminal (the `groupBy`/`having`/`select` tail of a
+  -- comprehension): GROUP BY keys, optional HAVING, and the grouped
+  -- projection — all plain expressions over the rows bound earlier in the
+  -- spine. Spines ending here are boundary-like: `Query.bind` wraps them as
+  -- derived tables instead of splicing (see `hasGroupYield`).
+  | groupYield : {s : Schema} → List KeyExpr → Option (SqlExpr .bool) →
+      Row s → SpineQ s
 
 /-- A full query: a spine, or a spine decorated by *boundary* clauses that
 `Query.bind` must not splice through (ORDER BY, DISTINCT, LIMIT/OFFSET,
@@ -66,15 +73,42 @@ def bind : SpineQ s → (Row s → SpineQ s') → SpineQ s'
   | .joinT j t on' f, k => .joinT j t on' (fun r => (f r).bind k)
   | .fromQ q f,       k => .fromQ q (fun r => (f r).bind k)
   | .order ks rest,   k => .order ks (rest.bind k)
+  -- Unreachable through the public API: `Query.bind` wraps any spine that
+  -- `hasGroupYield` as a whole derived table *before* descending, because a
+  -- grouped terminal cannot be spliced through without losing its GROUP BY
+  -- (and wrapping mid-spine would strand the FROM context outside). This
+  -- arm exists only for totality.
+  | .groupYield g h r, k => .fromQ (.spine (.groupYield g h r)) k
+
+/-- Does this spine end in a grouped terminal? Purely structural
+(continuations applied to a default row); `fromQ` contents are a sealed
+inner statement and do not count. -/
+def hasGroupYield : SpineQ s → Bool
+  | .yield _ => false
+  | .groupYield .. => true
+  | .guard _ rest => rest.hasGroupYield
+  | .order _ rest => rest.hasGroupYield
+  | .fromT _ f => (f default).hasGroupYield
+  | .joinT _ _ _ f => (f default).hasGroupYield
+  | .fromQ _ f => (f default).hasGroupYield
 
 end SpineQ
 
+/-- View a query as a spine suitable for *extending* (binding more clauses
+onto it): grouped spines must not be spliced through, so they wrap as a
+derived table, like boundary queries. -/
+def Query.asAggregableSpine (q : Query s) : SpineQ s :=
+  let sp := q.asSpine
+  if sp.hasGroupYield then .fromQ q (fun r => .yield r) else sp
+
 namespace Query
 
-/-- Monadic bind — the normalization workhorse: spines splice, boundary
-queries wrap as derived tables. -/
+/-- Monadic bind — the normalization workhorse: spines splice; boundary
+queries and grouped spines wrap as derived tables. The *continuation* uses
+plain `asSpine`: a grouped terminal produced by the continuation (the
+`query!` groupBy tail) belongs spliced under the sources being bound. -/
 def bind (q : Query s) (k : Row s → Query s') : Query s' :=
-  .spine (q.asSpine.bind (fun r => (k r).asSpine))
+  .spine (q.asAggregableSpine.bind (fun r => (k r).asSpine))
 
 /-- The final projection of a comprehension (`select` clause of `query!`). -/
 def yield (r : Row s) : Query s := .spine (.yield r)
@@ -89,31 +123,48 @@ def from' (t : Table s) : Query s := .spine (.fromT t (fun r => .yield r))
 /-- `WHERE p` (named `where'` because `where` is a Lean keyword). Splices the
 predicate into the query's own WHERE clause. -/
 def where' (q : Query s) (p : Row s → SqlExpr .bool) : Query s :=
-  .spine (q.asSpine.bind fun r => .guard (p r) (.yield r))
+  .spine (q.asAggregableSpine.bind fun r => .guard (p r) (.yield r))
 
 /-- `SELECT f`: project each row into a new schema, replacing the query's
 projection in place. -/
 def select (q : Query s) (f : Row s → Row s') : Query s' :=
-  .spine (q.asSpine.bind fun r => .yield (f r))
+  .spine (q.asAggregableSpine.bind fun r => .yield (f r))
 
 /-- `INNER JOIN t ON on'` with a result selector. Splices into the spine, so
 chained joins compile to one flat statement. -/
 def innerJoin (q : Query s₁) (t : Table s₂)
     (on' : Row s₁ → Row s₂ → SqlExpr .bool)
     (sel : Row s₁ → Row s₂ → Row s') : Query s' :=
-  .spine (q.asSpine.bind fun a => .joinT .inner t (on' a) (fun b => .yield (sel a b)))
+  .spine (q.asAggregableSpine.bind fun a => .joinT .inner t (on' a) (fun b => .yield (sel a b)))
 
 /-- `LEFT JOIN t ON on'` with a result selector. -/
 def leftJoin (q : Query s₁) (t : Table s₂)
     (on' : Row s₁ → Row s₂ → SqlExpr .bool)
     (sel : Row s₁ → Row s₂ → Row s') : Query s' :=
-  .spine (q.asSpine.bind fun a => .joinT .left t (on' a) (fun b => .yield (sel a b)))
+  .spine (q.asAggregableSpine.bind fun a => .joinT .left t (on' a) (fun b => .yield (sel a b)))
 
 /-- `ORDER BY` with one or more directed keys:
 `q.orderBy (fun c => [c["Name"].asc, c["Age"].desc])`. Keys reference the
 query's *output* columns. -/
 def orderBy (q : Query s) (ks : Row s → List OrderKey) : Query s :=
-  .spine (q.asSpine.bind fun r => .order (ks r) (.yield r))
+  .spine (q.asAggregableSpine.bind fun r => .order (ks r) (.yield r))
+
+/-- `INNER/LEFT JOIN` in comprehension position (the `join x in t on p`
+clause): the ON predicate and continuation close over previously-bound rows. -/
+def joinOn (kind : JoinKind) (t : Table s₂) (on' : Row s₂ → SqlExpr .bool)
+    (f : Row s₂ → Query s') : Query s' :=
+  .spine (.joinT kind t on' (fun r => (f r).asSpine))
+
+/-- `ORDER BY` in comprehension position (the `orderBy k, …` clause): keys
+are already applied to bound rows; the rest of the comprehension follows. -/
+def orderWith (ks : List OrderKey) (rest : Query s) : Query s :=
+  .spine (.order ks rest.asSpine)
+
+/-- The grouped terminal of a comprehension (`groupBy … having … select …`):
+keys, optional HAVING, and the grouped projection, all over bound rows. -/
+def groupYieldQ (ks : List KeyExpr) (hv : Option (SqlExpr .bool)) (r : Row s) :
+    Query s :=
+  .spine (.groupYield ks hv r)
 
 /-- `SELECT DISTINCT`. -/
 def distinct (q : Query s) : Query s := .distinctC q
@@ -151,7 +202,7 @@ def GroupedQuery.having (g : GroupedQuery s)
 /-- Grouped projection over keys and aggregates:
 `g.select (fun c a => ![c["Age"].as "Age", (a.count).as "Cnt"])`. -/
 def GroupedQuery.select (g : GroupedQuery s) (f : Row s → Agg → Row s') : Query s' :=
-  .groupedC g.query.asSpine g.keys g.having? f
+  .groupedC g.query.asAggregableSpine g.keys g.having? f
 
 /-- A query returning a single scalar value (COUNT/SUM/AVG/MIN/MAX). -/
 inductive ScalarQuery : SqlType → Type where
@@ -159,13 +210,13 @@ inductive ScalarQuery : SqlType → Type where
   | countQ {s : Schema} (sp : SpineQ s) : ScalarQuery .int
 
 /-- `COUNT(*)` over a query. -/
-def Query.count (q : Query s) : ScalarQuery .int := .countQ q.asSpine
+def Query.count (q : Query s) : ScalarQuery .int := .countQ q.asAggregableSpine
 
 /-- `SUM` over a single-column query (project first: `q.select … |>.sum`). -/
-def Query.sum (q : Query [(n, t)]) : ScalarQuery t := .aggQ .sum q.asSpine
-def Query.avg (q : Query [(n, t)]) : ScalarQuery t := .aggQ .avg q.asSpine
-def Query.min (q : Query [(n, t)]) : ScalarQuery t := .aggQ .min q.asSpine
-def Query.max (q : Query [(n, t)]) : ScalarQuery t := .aggQ .max q.asSpine
+def Query.sum (q : Query [(n, t)]) : ScalarQuery t := .aggQ .sum q.asAggregableSpine
+def Query.avg (q : Query [(n, t)]) : ScalarQuery t := .aggQ .avg q.asAggregableSpine
+def Query.min (q : Query [(n, t)]) : ScalarQuery t := .aggQ .min q.asAggregableSpine
+def Query.max (q : Query [(n, t)]) : ScalarQuery t := .aggQ .max q.asAggregableSpine
 
 /-- Anything that can appear as a `from` source in a query comprehension:
 tables, and queries themselves (spines inline via `Query.bind`; boundary

@@ -635,6 +635,32 @@ def oracles : List (String × OCase) := [
     (let a := customers.select fun c => [ci c.id, c.name]
      let b := customers.where' (·.age < 18) |>.select fun c => [ci c.id, c.name]
      (a.where' (fun r => !b.contains r)).eraseDups)),
+  -- comprehension-syntax parity cases
+  ("LinqJoin", u (joinedCO.select fun (c, oo) => [c.name, ci oo.amount])),
+  ("LinqLeftJoin", u
+    (leftJoin customers orders (fun c oo => c.id == oo.customerId)
+      |>.select fun (c, oo?) => [c.name, optI (oo?.map (·.amount))])),
+  ("LinqOrderBy", o
+    (customers.orderBy' (fun a b => a.name < b.name || (a.name == b.name && a.age ≥ b.age))
+      |>.select fun c => [ci c.id, c.name])),
+  ("LinqGroupBy", u
+    (groupOn orders (·.customerId)
+      |>.select fun (k, g) => [ci k, ci (sumBy g (·.amount))])),
+  ("LinqGroupByHaving", u
+    (groupOn orders (·.customerId) |>.where' (fun (_, g) => g.length > 1)
+      |>.select fun (k, g) => [ci k, ci (sumBy g (·.amount))])),
+  ("LinqDistinctLimit", o
+    (((customers.where' (·.age > 18) |>.orderBy' (·.name ≤ ·.name)
+      |>.select fun c => [c.name]).eraseDups).take 2)),
+  ("LinqComplex", o
+    (groupOn (joinedCO.where' fun (c, _) => c.age ≥ 18) (fun (c, _) => (c.id, c.name))
+      |>.where' (fun (_, g) => g.length > 1)
+      |>.select (fun ((id, name), g) => (id, name, sumBy g (·.2.amount)))
+      |>.orderBy' (fun a b => a.2.2 ≥ b.2.2)
+      |>.select fun (id, name, total) => [ci id, name, ci total])),
+  ("LinqLimitOffset", o
+    (customers.orderBy' (·.id ≤ ·.id) |>.drop 1 |>.take 2
+      |>.select fun c => [ci c.id, c.name])),
   -- statements: expected table state = seed transformed by the mutation
   ("InsertBasic", o
     (customers.select custRow ++ [[ci 200, ci 25, "John Doe", nullC]])),

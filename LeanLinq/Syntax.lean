@@ -5,17 +5,35 @@ import LeanLinq.Core.Query
 ```
 query! {
   from c in customers
-  from o in orders
-  where c["Id"] ==. o["CustomerId"]
-  select ![c["Name"].as "Name", o["OrderId"].as "OrderId"]
+  join o in orders on c["Id"] ==. o["CustomerId"]
+  where c["Age"] >=. 18
+  groupBy c["Id"].key, c["Name"].key into a
+  having a.count >. 1
+  orderBy (a.sum o["Amount"]).desc
+  select ![c["Id"].as "CustomerId", (a.sum o["Amount"]).as "TotalSpent"]
+  distinct
+  limit 5 offset 10
 }
 ```
 
-desugars right-to-left into the binder-style `Query` constructors:
-`from x in src …` ⇒ `QuerySource.bind src (fun x => …)` (sources are tables,
-or queries — inlined by normalization), `where p …` ⇒ `Query.guard p …`, and
-the final `select r` ⇒ `Query.yield r`. Nested `from`s are cross products.
-Clauses are newline- (or `;`-) separated, do-notation style.
+Clauses desugar right-to-left onto the spine constructors:
+- `from x in src` ⇒ `QuerySource.bind src (fun x => …)` (tables, or queries —
+  inlined by normalization);
+- `join x in t on p` / `leftJoin x in t on p` ⇒ `Query.joinOn` (fuse into the
+  same flat statement);
+- `where p` ⇒ `Query.guard p …` (a WHERE conjunct);
+- `orderBy k, …` ⇒ `Query.orderWith` (spine ORDER BY — may reference
+  aggregates when grouped);
+- `groupBy k, … into a` + optional `having p` turn the final `select r` into
+  a grouped terminal (`Query.groupYieldQ`); `into a` *binds* the aggregate
+  token (C#'s `group … into g`), so `a.count`/`a.sum e`/… are in scope only
+  in the clauses after the grouping;
+- plain `select r` ⇒ `Query.yield r`;
+- trailing `distinct` / `limit n [offset m]` / `offset n` decorate the
+  finished query.
+
+Clauses are newline- (or `;`-) separated, do-notation style. Join sources and
+limit/offset amounts parse at `term:max` (parenthesize anything compound).
 
 Token choices, learned the hard way:
 - the head must be a *reserved* token — non-reserved (`&"…"`) leading keywords
@@ -23,44 +41,118 @@ Token choices, learned the hard way:
   application of an identifier to a structure instance;
 - `query!` (like `panic!`/`assert!`) reserves nothing usable: `query` remains
   a perfectly good identifier, since `!` cannot appear in identifiers;
-- `select` stays non-reserved — reserving it would break `.select`/dot
-  notation everywhere — which is fine mid-rule, just not in head position. -/
+- clause keywords (`select`, `join`, `orderBy`, …) stay non-reserved —
+  reserving them would break those names as identifiers everywhere — which is
+  fine mid-category thanks to `behavior := both`, just not in term-head
+  position. Rules led by non-reserved keywords cannot be matched by quotation
+  patterns, so the expander dispatches on syntax kinds. -/
 
 -- `behavior := both` makes the category dispatch rules led by a non-reserved
--- identifier keyword (our `select`); the default behavior only dispatches on
--- reserved tokens.
+-- identifier keyword (`select`, `join`, …); the default behavior only
+-- dispatches on reserved tokens.
 declare_syntax_cat sqlClause (behavior := both)
 
 namespace LeanLinq
 
 syntax (name := sqlFrom) "from " ident " in " term : sqlClause
+syntax (name := sqlJoin) &"join " ident " in " term:max &"on " term : sqlClause
+syntax (name := sqlLeftJoin) &"leftJoin " ident " in " term:max &"on " term : sqlClause
 syntax (name := sqlWhere) "where " term : sqlClause
+syntax (name := sqlOrderBy) &"orderBy " term,+ : sqlClause
+syntax (name := sqlGroupBy) &"groupBy " term:max,+ &"into " ident : sqlClause
+syntax (name := sqlHaving) &"having " term : sqlClause
 syntax (name := sqlSelect) &"select " term : sqlClause
+syntax (name := sqlDistinct) &"distinct" : sqlClause
+syntax (name := sqlLimit) &"limit " term:max (&"offset " term:max)? : sqlClause
+syntax (name := sqlOffset) &"offset " term:max : sqlClause
 
 scoped syntax (name := sqlQuery) "query! " "{" withoutPosition(sepByIndentSemicolon(sqlClause)) "}" : term
 
-open Lean in
-private def expandClauses : List (TSyntax `sqlClause) → MacroM Term
-  | [] => Macro.throwError "query comprehension must end with a `select` clause"
-  | [c] =>
-    -- `select` is non-reserved, so its rule cannot be matched by a quotation
-    -- pattern (a leading ident gets antiquotation treatment); match by kind.
-    if c.raw.isOfKind ``sqlSelect then
-      `(LeanLinq.Query.yield $(⟨c.raw[1]⟩))
+open Lean
+
+private def sepTerms (stx : Syntax) : Syntax.TSepArray `term "," :=
+  .ofElems (stx.getSepArgs.map (⟨·⟩))
+
+/-- Fold the leading clauses (from/join/where/orderBy) right-to-left over the
+terminal. -/
+private def foldLeading (acc : Term) (c : Syntax) : MacroM Term := do
+  if c.isOfKind ``sqlFrom then
+    `(LeanLinq.QuerySource.bind $(⟨c[3]⟩) (fun $(⟨c[1]⟩) => $acc))
+  else if c.isOfKind ``sqlJoin then
+    `(LeanLinq.Query.joinOn LeanLinq.JoinKind.inner $(⟨c[3]⟩)
+        (fun $(⟨c[1]⟩) => $(⟨c[5]⟩)) (fun $(⟨c[1]⟩) => $acc))
+  else if c.isOfKind ``sqlLeftJoin then
+    `(LeanLinq.Query.joinOn LeanLinq.JoinKind.left $(⟨c[3]⟩)
+        (fun $(⟨c[1]⟩) => $(⟨c[5]⟩)) (fun $(⟨c[1]⟩) => $acc))
+  else if c.isOfKind ``sqlWhere then
+    `(LeanLinq.Query.guard $(⟨c[1]⟩) $acc)
+  else if c.isOfKind ``sqlOrderBy then
+    `(LeanLinq.Query.orderWith [$(sepTerms c[1]),*] $acc)
+  else
+    Macro.throwErrorAt c "unexpected clause before `select` (allowed: from, join, leftJoin, where, orderBy, groupBy, having)"
+
+/-- Apply the trailing clauses (distinct / limit [offset] / offset) in
+written order. -/
+private def applyTrailing (acc : Term) (c : Syntax) : MacroM Term := do
+  if c.isOfKind ``sqlDistinct then
+    `(LeanLinq.Query.distinct $acc)
+  else if c.isOfKind ``sqlLimit then
+    let lim : Term := ⟨c[1]⟩
+    if c[2].getNumArgs > 0 then
+      `(LeanLinq.Query.limitOffset $acc (some $lim) (some $(⟨c[2][1]⟩)))
     else
-      Macro.throwError "the last clause of a query comprehension must be `select`"
-  | c :: rest => do
-    let restE ← expandClauses rest
-    match c with
-    | `(sqlClause| from $x in $src) => `(LeanLinq.QuerySource.bind $src (fun $x => $restE))
-    | `(sqlClause| where $p) => `(LeanLinq.Query.guard $p $restE)
-    | _ =>
-      if c.raw.isOfKind ``sqlSelect then
-        Macro.throwError "`select` must be the last clause of a query comprehension"
-      else
-        Macro.throwUnsupported
+      `(LeanLinq.Query.limit $acc $lim)
+  else if c.isOfKind ``sqlOffset then
+    `(LeanLinq.Query.offset $acc $(⟨c[1]⟩))
+  else
+    Macro.throwErrorAt c "only `distinct`, `limit`, and `offset` may follow `select`"
+
+private def expandClauses (clauses : List Syntax) : MacroM Term := do
+  match clauses.findIdx? (·.isOfKind ``sqlSelect) with
+  | none => Macro.throwError "query! must contain a `select` clause"
+  | some i =>
+    let pre := clauses.take i
+    -- note: `(…)!` parenthesized so the lexer doesn't munch `![` (the
+    -- row-literal token) out of `clauses[i]![1]`
+    let selRow : Term := ⟨(clauses[i]!)[1]⟩
+    let post := clauses.drop (i + 1)
+    let core ←
+      match pre.findIdx? (·.isOfKind ``sqlGroupBy) with
+      | none =>
+        match pre.find? (·.isOfKind ``sqlHaving) with
+        | some h => Macro.throwErrorAt h "`having` requires a `groupBy … into …` clause"
+        | none => do
+          let terminal ← `(LeanLinq.Query.yield $selRow)
+          pre.foldrM (fun c acc => foldLeading acc c) terminal
+      | some gi => do
+        let g := pre[gi]!
+        let before := pre.take gi
+        let after := pre.drop (gi + 1)
+        if let some g' := (after.find? (·.isOfKind ``sqlGroupBy)) then
+          Macro.throwErrorAt g' "duplicate `groupBy` clause"
+        if let some h := before.find? (·.isOfKind ``sqlHaving) then
+          Macro.throwErrorAt h "`having` must follow the `groupBy` clause"
+        -- after the grouping, only `having` (at most once) and `orderBy` —
+        -- the aggregate binder is not in scope for `where`/`from`/joins
+        let havings := after.filter (·.isOfKind ``sqlHaving)
+        let orderBys := after.filter (·.isOfKind ``sqlOrderBy)
+        if havings.length > 1 then
+          Macro.throwErrorAt havings[1]! "duplicate `having` clause"
+        if let some c := after.find? (fun c =>
+            !c.isOfKind ``sqlHaving && !c.isOfKind ``sqlOrderBy) then
+          Macro.throwErrorAt c "only `having` and `orderBy` may appear between `groupBy` and `select`"
+        let hv ← match havings with
+          | [] => `(Option.none)
+          | h :: _ => `(Option.some $(⟨h[1]⟩))
+        let terminal ← `(LeanLinq.Query.groupYieldQ [$(sepTerms g[1]),*] $hv $selRow)
+        let grouped ← orderBys.foldrM (fun c acc => foldLeading acc c) terminal
+        -- `into a` binds the aggregate token over having/orderBy/select
+        let binder : Ident := ⟨g[3]⟩
+        let withBinder ← `((fun ($binder : LeanLinq.Agg) => $grouped) LeanLinq.Agg.mk)
+        before.foldrM (fun c acc => foldLeading acc c) withBinder
+    post.foldlM applyTrailing core
 
 @[macro sqlQuery] def expandQuery : Lean.Macro := fun stx =>
-  expandClauses (stx[2].getSepArgs.toList.map (⟨·⟩))
+  expandClauses stx[2].getSepArgs.toList
 
 end LeanLinq

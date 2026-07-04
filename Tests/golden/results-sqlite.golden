@@ -163,6 +163,14 @@ FromOrderByLimitDistinct	Jane Smith|John Doe
 Union	4,Senior User
 Intersect	
 Except	1,John Doe|2,Jane Smith|4,Senior User
+LinqJoin	Jane Smith,300|John Doe,150|John Doe,500|Senior User,75
+LinqLeftJoin	Jane Smith,300|John Doe,150|John Doe,500|Minor User,NULL|Senior User,75
+LinqOrderBy	2,Jane Smith|1,John Doe|3,Minor User|4,Senior User
+LinqGroupBy	1,650|2,300|4,75
+LinqGroupByHaving	1,650
+LinqDistinctLimit	Jane Smith|John Doe
+LinqComplex	1,John Doe,650
+LinqLimitOffset	2,Jane Smith|3,Minor User
 InsertBasic	1,25,John Doe,1|2,30,Jane Smith,1|3,16,Minor User,0|4,65,Senior User,1|200,25,John Doe,NULL
 UpdateBasic	1,25,John Doe,1|2,30,Jane Smith,1|3,16,Minor User,0|4,65,Senior User,1
 UpdateMultiple	1,25,John Doe,1|2,30,Jane Smith,1|3,16,Minor User,0|4,65,Senior User,1

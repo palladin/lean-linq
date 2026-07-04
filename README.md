@@ -109,11 +109,30 @@ core binders (exactly how C# desugars LINQ into `SelectMany`):
 | Clause | Desugars to | SQL |
 |---|---|---|
 | `from x in src` | `QuerySource.bind src (fun x => …)` | a `FROM` source |
+| `join x in t on p` / `leftJoin x in t on p` | `Query.joinOn` | `INNER/LEFT JOIN … ON` |
 | `where p` | `Query.guard p …` | a `WHERE` conjunct |
-| `select r` (last) | `Query.yield r` | the `SELECT` list |
+| `orderBy k, …` | `Query.orderWith` | `ORDER BY` (may reference aggregates when grouped) |
+| `groupBy k, …` + `having p` | grouped terminal (`Query.groupYieldQ`) | `GROUP BY … HAVING` |
+| `select r` | `Query.yield r` | the `SELECT` list |
+| trailing `distinct`, `limit n [offset m]`, `offset n` | `.distinct`/`.limitOffset` | `DISTINCT`, `LIMIT/OFFSET` |
 
 Sources are tables *or* queries via the `QuerySource` class. Nested `from`s are cross
-products — there is no product combinator; a join is two `from`s and a `where`.
+products — there is no product combinator; a join is two `from`s and a `where` (or a `join`
+clause). In grouped comprehensions, aggregates use the `agg` constant (`agg.count`,
+`agg.sum e`, …) in `having`, `orderBy`, and `select` — and ordering by an aggregate
+expression is something only the comprehension can express in one statement:
+
+```lean
+query! {
+  from c in customers
+  join o in orders on c["Id"] ==. o["CustomerId"]
+  where c["Age"] >=. 18
+  groupBy c["Id"].key, c["Name"].key
+  having agg.count >. 1
+  orderBy (agg.sum o["Amount"]).desc
+  select ![c["Id"].as "CustomerId", (agg.sum o["Amount"]).as "TotalSpent"]
+}
+```
 
 A pipeline API is derived on top of the same core (`from` and `where` are Lean keywords,
 hence the primes):

@@ -66,6 +66,7 @@ shape does not depend on row values). ORDER BY inside a derived table
 (`fromQ`) does not count — it belongs to the inner statement. -/
 def SpineQ.hasOrder : SpineQ s → Bool
   | .yield _ => false
+  | .groupYield .. => false
   | .guard _ rest => rest.hasOrder
   | .order _ _ => true
   | .fromT _ f => (f default).hasOrder
@@ -145,6 +146,21 @@ def SpineQ.compileSpine : SpineQ s → StmtAcc →
         if acc.orders.isEmpty then ""
         else s!" ORDER BY {String.intercalate ", " acc.orders.toList}"
       return s!"{head} {sel}{renderFroms acc.froms}{renderWheres acc.wheres}{tail}{orderClause}"
+  -- the grouped terminal carries its own projection and GROUP BY/HAVING
+  -- tail; the caller's projection callback does not apply
+  | .groupYield ks hv r, acc, _ => do
+      let items ← r.selectList
+      let ksStr ← compileGroupKeys ks
+      let hvStr ← match hv with
+        | none => pure ""
+        | some h => do
+            let hs ← h.compile
+            pure s!" HAVING {hs}"
+      let head := if acc.distinct then "SELECT DISTINCT" else "SELECT"
+      let orderClause :=
+        if acc.orders.isEmpty then ""
+        else s!" ORDER BY {String.intercalate ", " acc.orders.toList}"
+      return s!"{head} {String.intercalate ", " items}{renderFroms acc.froms}{renderWheres acc.wheres} GROUP BY {ksStr}{hvStr}{orderClause}"
   | .guard b rest, acc, k => do
       let w ← b.compile
       rest.compileSpine { acc with wheres := acc.wheres.push w } k

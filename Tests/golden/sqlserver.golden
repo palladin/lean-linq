@@ -163,6 +163,14 @@ FromOrderByLimitDistinct	SELECT [a2].[Name] AS [Name] FROM (SELECT DISTINCT [a1]
 Union	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) UNION SELECT [a1].[Id] AS [Id], [a1].[Name] AS [Name] FROM [customers] [a1] WHERE ([a1].[Name] = @p1)	@p0=int 30; @p1=string "Alice"
 Intersect	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) INTERSECT SELECT [a1].[Id] AS [Id], [a1].[Name] AS [Name] FROM [customers] [a1] WHERE ([a1].[Name] = @p1)	@p0=int 25; @p1=string "John"
 Except	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] EXCEPT SELECT [a1].[Id] AS [Id], [a1].[Name] AS [Name] FROM [customers] [a1] WHERE ([a1].[Age] < @p0)	@p0=int 18
+LinqJoin	SELECT [a0].[Name] AS [Name], [a1].[Amount] AS [Amount] FROM [customers] [a0] INNER JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId])	
+LinqLeftJoin	SELECT [a0].[Name] AS [Name], [a1].[Amount] AS [Amount] FROM [customers] [a0] LEFT JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId])	
+LinqOrderBy	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] ORDER BY [a0].[Name] ASC, [a0].[Age] DESC	
+LinqGroupBy	SELECT [a0].[CustomerId] AS [CustomerId], SUM([a0].[Amount]) AS [Total] FROM [orders] [a0] GROUP BY [a0].[CustomerId]	
+LinqGroupByHaving	SELECT [a0].[CustomerId] AS [CustomerId], SUM([a0].[Amount]) AS [Total] FROM [orders] [a0] GROUP BY [a0].[CustomerId] HAVING (COUNT(*) > @p0)	@p0=int 1
+LinqDistinctLimit	SELECT DISTINCT [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) ORDER BY [a0].[Name] ASC OFFSET 0 ROWS FETCH NEXT 2 ROWS ONLY	@p0=int 18
+LinqComplex	SELECT [a0].[Id] AS [CustomerId], [a0].[Name] AS [CustomerName], SUM([a1].[Amount]) AS [TotalSpent] FROM [customers] [a0] INNER JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId]) WHERE ([a0].[Age] >= @p0) GROUP BY [a0].[Id], [a0].[Name] HAVING (COUNT(*) > @p1) ORDER BY SUM([a1].[Amount]) DESC	@p0=int 18; @p1=int 1
+LinqLimitOffset	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] ORDER BY [a0].[Id] ASC OFFSET 1 ROWS FETCH NEXT 2 ROWS ONLY	
 InsertBasic	INSERT INTO [customers] ([Id], [Age], [Name]) VALUES (@p0, @p1, @p2)	@p0=long 200; @p1=int 25; @p2=string "John Doe"
 UpdateBasic	UPDATE [customers] SET [Age] = @p0 WHERE ([Id] = @p1)	@p0=int 26; @p1=long 200
 UpdateMultiple	UPDATE [customers] SET [Age] = @p0, [Name] = @p1 WHERE ([Id] = @p2)	@p0=int 27; @p1=string "John Smith"; @p2=long 200

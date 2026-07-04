@@ -262,6 +262,60 @@ def ExceptQ :=
     |>.where' (fun c => c["Age"] <. 18)
     |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"]))
 
+/-! Comprehension-syntax parity cases: the same shapes expressed with
+`query!` clauses (join/leftJoin/orderBy/groupBy/having/distinct/limit). -/
+
+def LinqJoin := query! {
+  from c in customers
+  join o in orders on c["Id"] ==. o["CustomerId"]
+  select ![c["Name"].as "Name", o["Amount"].as "Amount"]
+}
+def LinqLeftJoin := query! {
+  from c in customers
+  leftJoin o in orders on c["Id"] ==. o["CustomerId"]
+  select ![c["Name"].as "Name", o["Amount"].as "Amount"]
+}
+def LinqOrderBy := query! {
+  from c in customers
+  orderBy c["Name"].asc, c["Age"].desc
+  select ![c["Id"].as "Id", c["Name"].as "Name"]
+}
+def LinqGroupBy := query! {
+  from o in orders
+  groupBy o["CustomerId"].key into a
+  select ![o["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "Total"]
+}
+def LinqGroupByHaving := query! {
+  from o in orders
+  groupBy o["CustomerId"].key into a
+  having a.count >. 1
+  select ![o["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "Total"]
+}
+def LinqDistinctLimit := query! {
+  from c in customers
+  where c["Age"] >. 18
+  orderBy c["Name"].asc
+  select ![c["Name"].as "Name"]
+  distinct
+  limit 2
+}
+def LinqComplex := query! {
+  from c in customers
+  join o in orders on c["Id"] ==. o["CustomerId"]
+  where c["Age"] >=. 18
+  groupBy c["Id"].key, c["Name"].key into a
+  having a.count >. 1
+  orderBy (a.sum o["Amount"]).desc
+  select ![c["Id"].as "CustomerId", c["Name"].as "CustomerName",
+           (a.sum o["Amount"]).as "TotalSpent"]
+}
+def LinqLimitOffset := query! {
+  from c in customers
+  orderBy c["Id"].asc
+  select ![c["Id"].as "Id", c["Name"].as "Name"]
+  limit 2 offset 1
+}
+
 /-- The full query registry: name ↦ per-dialect compilation. -/
 def queryCases : List (String × (DatabaseType → Compiled)) := [
   ("From", q From), ("FromStatic", q FromStatic), ("FromSelect", q FromSelect),
@@ -392,7 +446,12 @@ def queryCases : List (String × (DatabaseType → Compiled)) := [
   ("FromSelectDistinctOrderBy", q FromSelectDistinctOrderBy),
   ("FromSelectDistinctMultipleColumns", q FromSelectDistinctMultipleColumns),
   ("FromOrderByLimitDistinct", q FromOrderByLimitDistinct),
-  ("Union", q UnionQ), ("Intersect", q IntersectQ), ("Except", q ExceptQ)
+  ("Union", q UnionQ), ("Intersect", q IntersectQ), ("Except", q ExceptQ),
+  ("LinqJoin", q LinqJoin), ("LinqLeftJoin", q LinqLeftJoin),
+  ("LinqOrderBy", q LinqOrderBy), ("LinqGroupBy", q LinqGroupBy),
+  ("LinqGroupByHaving", q LinqGroupByHaving),
+  ("LinqDistinctLimit", q LinqDistinctLimit), ("LinqComplex", q LinqComplex),
+  ("LinqLimitOffset", q LinqLimitOffset)
 ]
 
 end TQ
