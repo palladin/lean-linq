@@ -1,4 +1,4 @@
-import Tests.Queries2
+import Tests.QueriesC
 import Tests.StatementsT
 import Tests.Oracle
 
@@ -196,7 +196,9 @@ def normalizeOutput (sql : String) (out : String) : String :=
 /-! ## Case execution -/
 
 /-- Cases whose output depends on the current time: execute-only. -/
-def skipResults : List String := ["DateTimeNow", "DateTimeFunctionsInSelect"]
+def skipResults : List String :=
+  ["DateTimeNow", "DateTimeFunctionsInSelect",
+   "CDateTimeNow", "CDateTimeFunctionsInSelect"]
 
 /-- Cases where engines legitimately disagree; excluded from the
 cross-dialect comparison and the oracle, still checked against their
@@ -205,7 +207,8 @@ SQL Server (256) but exact on PostgreSQL/SQLite (256.25).
 `FromGroupByMultipleOrderBySelect`: ORDER BY COUNT(*) DESC where every count
 ties, so order is engine-specific. -/
 def crossDialectAllowlist : List String := [
-  "FromSelectAvg", "FromGroupByMultipleOrderBySelect"
+  "FromSelectAvg", "FromGroupByMultipleOrderBySelect",
+  "CFromSelectAvg", "CFromGroupByMultipleOrderBySelect"
 ]
 
 /-- Statement cases verify table state inside a rolled-back transaction. -/
@@ -258,6 +261,7 @@ def main (args : List String) : IO UInt32 := do
     | none => dialects.map Prod.fst
   let allNamed : List (Bool × String × (DatabaseType → CompiledSql)) :=
     queryCases.map (fun (n, f) => (false, n, f)) ++
+    twinCases.map (fun (n, f) => (false, n, f)) ++
     statementCases.map (fun (n, f) => (true, n, f))
   let sqliteFile ← do
     let tmp := s!"/tmp/leanlinq-integration.db"
@@ -289,7 +293,12 @@ def main (args : List String) : IO UInt32 := do
     -- in-memory oracle: independently-derived expected rows
     for r in results do
       if !r.isError && r.result != "<executed>" then
-        match Oracle.oracles.lookup r.name with
+        -- comprehension twins (C<Name>) share the original's oracle
+        let oracle? := (Oracle.oracles.lookup r.name).orElse fun _ =>
+          if r.name.startsWith "C" then
+            Oracle.oracles.lookup ((r.name.toList.drop 1) |> String.ofList)
+          else none
+        match oracle? with
         | some oc =>
             let want := Oracle.render oc
             if want != r.result then

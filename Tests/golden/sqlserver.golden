@@ -171,6 +171,171 @@ LinqGroupByHaving	SELECT [a0].[CustomerId] AS [CustomerId], SUM([a0].[Amount]) A
 LinqDistinctLimit	SELECT DISTINCT [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) ORDER BY [a0].[Name] ASC OFFSET 0 ROWS FETCH NEXT 2 ROWS ONLY	@p0=int 18
 LinqComplex	SELECT [a0].[Id] AS [CustomerId], [a0].[Name] AS [CustomerName], SUM([a1].[Amount]) AS [TotalSpent] FROM [customers] [a0] INNER JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId]) WHERE ([a0].[Age] >= @p0) GROUP BY [a0].[Id], [a0].[Name] HAVING (COUNT(*) > @p1) ORDER BY SUM([a1].[Amount]) DESC	@p0=int 18; @p1=int 1
 LinqLimitOffset	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] ORDER BY [a0].[Id] ASC OFFSET 1 ROWS FETCH NEXT 2 ROWS ONLY	
+CFrom	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0]	
+CFromStatic	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0]	
+CFromSelect	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0]	
+CFromSelectSingle	SELECT [a0].[Age] AS [Age] FROM [customers] [a0]	
+CFromSelectExpression	SELECT ([a0].[Id] * @p0) AS [Calc], ([a0].[Name] + @p1) AS [Label] FROM [customers] [a0]	@p0=long 100; @p1=string " - Customer"
+CFromWhereInt	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[Age] > @p0)	@p0=int 18
+CFromWhereString	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[Name] = @p0)	@p0=string "John"
+CFromWhereMultiple	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE (([a0].[Age] > @p0) AND ([a0].[Name] <> @p1))	@p0=int 18; @p1=string "Admin"
+CFromWhereOr	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ((([a0].[Age] > @p0) AND ([a0].[Age] < @p1)) OR ([a0].[Name] = @p2))	@p0=int 18; @p1=int 65; @p2=string "VIP"
+CFromWhereAnd	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE (([a0].[Age] > @p0) AND ([a0].[Name] = @p1))	@p0=int 18; @p1=string "John"
+CFromOrderByAsc	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] ORDER BY [a0].[Name] ASC	
+CFromOrderByDesc	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] ORDER BY [a0].[Age] DESC	
+CFromWhereSelect	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] >= @p0)	@p0=int 21
+CFromWhereAndSelect	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE (([a0].[Age] >= @p0) AND ([a0].[Name] <> @p1))	@p0=int 21; @p1=string ""
+CFromWhereOrderBy	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE (([a0].[Age] > @p0) AND ([a0].[Name] <> @p1)) ORDER BY [a0].[Age] ASC	@p0=int 21; @p1=string ""
+CFromSelectOrderBy	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], ([a0].[Age] + @p0) AS [AgePlus] FROM [customers] [a0] ORDER BY [a0].[Name] ASC	@p0=int 5
+CFromWhereSelectOrderBy	SELECT ([a0].[Id] + @p1) AS [IdPlus], ([a0].[Name] + @p2) AS [Loud] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) ORDER BY [a0].[Name] ASC	@p0=int 18; @p1=long 1; @p2=string "!"
+CFromWhereOrderBySelect	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], ([a0].[Age] + @p2) AS [AgePlus] FROM [customers] [a0] WHERE (([a0].[Age] > @p0) AND ([a0].[Name] <> @p1)) ORDER BY [a0].[Age] ASC	@p0=int 21; @p1=string ""; @p2=int 10
+CFromWhereOrderBySelectNamed	SELECT [a0].[Id] AS [CustomerId], ([a0].[Name] + @p2) AS [CustomerInfo], ([a0].[Age] + @p3) AS [AdjustedAge] FROM [customers] [a0] WHERE (([a0].[Age] >= @p0) AND ([a0].[Name] <> @p1)) ORDER BY [a0].[Name] ASC	@p0=int 21; @p1=string ""; @p2=string " (Customer)"; @p3=int 5
+CFromWhereSelectNamed	SELECT [a0].[Id] AS [OriginalId], ([a0].[Id] * @p1) AS [ModifiedId], [a0].[Name] AS [CustomerName] FROM [customers] [a0] WHERE ([a0].[Age] > @p0)	@p0=int 18; @p1=long 100
+CFromProductWhereSelect	SELECT [a0].[Id] AS [Id], [a0].[ProductName] AS [ProductName] FROM [products] [a0] WHERE ([a0].[ProductName] <> @p0)	@p0=string "Discontinued"
+CFromWhereSelectParameterized	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE (([a0].[Age] >= @minAge) AND ([a0].[Age] <= @maxAge))	@minAge=null; @maxAge=null
+CFromWhereFusionTwo	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) AND ([a0].[Name] <> @p1)	@p0=int 18; @p1=string "Admin"
+CFromWhereFusionThree	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) AND ([a0].[Name] <> @p1) AND ([a0].[Age] < @p2)	@p0=int 18; @p1=string "Admin"; @p2=int 65
+CFromWhereFusionWithSelect	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] >= @p0) AND ([a0].[Name] <> @p1)	@p0=int 21; @p1=string ""
+CFromWhereFusionWithOrderBy	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) AND ([a0].[Name] <> @p1) ORDER BY [a0].[Name] ASC	@p0=int 18; @p1=string "Admin"
+CFromOrderByThenBy	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] ORDER BY [a0].[Name] ASC, [a0].[Age] ASC	
+CFromOrderByThenByDescending	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] ORDER BY [a0].[Name] ASC, [a0].[Age] DESC	
+CFromOrderByDescendingThenBy	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] ORDER BY [a0].[Age] DESC, [a0].[Name] ASC	
+CFromOrderByMultiple	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] ORDER BY [a0].[Name] ASC, [a0].[Age] DESC, [a0].[Id] ASC	
+CFromWhereOrderByThenBy	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) ORDER BY [a0].[Name] ASC, [a0].[Age] DESC	@p0=int 18
+CFromOrderByThenBySelect	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] ORDER BY [a0].[Name] ASC, [a0].[Age] ASC	
+CFromWhereIsNull	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE [a0].[Name] IS NULL	
+CFromWhereIsNotNull	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE [a0].[Name] IS NOT NULL	
+CFromWhereIsNullInt	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE [a0].[Age] IS NULL	
+CFromWhereIsNotNullInt	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE [a0].[Age] IS NOT NULL	
+CFromWhereIsNullCombined	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[Name] IS NULL AND [a0].[Age] IS NOT NULL)	
+CFromWhereAgeGreaterThanSum	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[Age] > (SELECT SUM([a1].[Age]) FROM [customers] [a1]))	
+CSumAges	SELECT SUM([a0].[Age]) FROM [customers] [a0]	
+CCountCustomers	SELECT COUNT(*) FROM [customers] [a0]	
+CCountActiveCustomers	SELECT COUNT(*) FROM [customers] [a0] WHERE ([a0].[Age] >= @p0)	@p0=int 18
+CSumPrices	SELECT SUM([a0].[Price]) FROM [products] [a0]	
+CAvgPrices	SELECT AVG([a0].[Price]) FROM [products] [a0]	
+CMinPrice	SELECT MIN([a0].[Price]) FROM [products] [a0]	
+CMaxPrice	SELECT MAX([a0].[Price]) FROM [products] [a0]	
+CSumExpensivePrices	SELECT SUM([a0].[Price]) FROM [products] [a0] WHERE ([a0].[Price] > @p0)	@p0=decimal 100.0
+CAvgExpensivePrices	SELECT AVG([a0].[Price]) FROM [products] [a0] WHERE ([a0].[Price] > @p0)	@p0=decimal 100.0
+CFromWhereAgeGreaterThanAverageAge	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[Age] > (SELECT SUM([a1].[Age]) FROM [customers] [a1]))	
+CFromWhereAgeIn	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE [a0].[Age] IN (@p0, @p1, @p2, @p3)	@p0=int 18; @p1=int 21; @p2=int 25; @p3=int 30
+CFromWhereAgeInSubquery	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE [a0].[Age] IN (SELECT [a1].[Age] AS [Age] FROM [customers] [a1] WHERE ([a1].[Name] = @p0))	@p0=string "VIP"
+CFromWhereAgeInSubqueryWithClosure	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE [a0].[Age] IN (SELECT [a1].[Age] AS [Age] FROM [customers] [a1] WHERE ([a1].[Name] = ([a0].[Name] + @p0)))	@p0=string "_VIP"
+CFromSubquery	SELECT [a0].[Id] AS [Id], ([a0].[Age] + @p0) AS [NewAge] FROM [customers] [a0]	@p0=int 1
+CFromWhereSelectWhereFromNested	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) AND ([a0].[Id] > @p1)	@p0=int 18; @p1=long 100
+CFromWhereSelectWhereNested	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) AND ([a0].[Id] > @p1)	@p0=int 18; @p1=long 100
+CFromGroupBySelect	SELECT [a0].[Age] AS [Age], COUNT(*) AS [Count] FROM [customers] [a0] GROUP BY [a0].[Age]	
+CFromGroupByMultipleSelect	SELECT [a0].[Age] AS [Age], [a0].[Name] AS [Name], COUNT(*) AS [Count] FROM [customers] [a0] GROUP BY [a0].[Age], [a0].[Name]	
+CFromGroupByHavingSelect	SELECT [a0].[Age] AS [Age], COUNT(*) AS [Count] FROM [customers] [a0] GROUP BY [a0].[Age] HAVING (COUNT(*) > @p0)	@p0=int 1
+CFromWhereGroupBySelect	SELECT [a0].[Age] AS [Age], COUNT(*) AS [Count] FROM [customers] [a0] WHERE ([a0].[Age] >= @p0) GROUP BY [a0].[Age]	@p0=int 18
+CInnerJoinBasic	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a1].[Id] AS [OrderId], [a1].[Amount] AS [Amount] FROM [customers] [a0] INNER JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId])	
+CInnerJoinWithSelect	SELECT [a0].[Name] AS [CustomerName], [a1].[Amount] AS [OrderAmount] FROM [customers] [a0] INNER JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId])	
+CInnerJoinWithWhere	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age], [a1].[Id] AS [OrderId], [a1].[Amount] AS [Amount] FROM [customers] [a0] INNER JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId]) WHERE ([a0].[Age] >= @p0) AND ([a1].[Amount] > @p1)	@p0=int 18; @p1=int 100
+CInnerJoinWithOrderBy	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a1].[Id] AS [OrderId], [a1].[Amount] AS [Amount] FROM [customers] [a0] INNER JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId]) ORDER BY [a0].[Name] ASC	
+CLeftJoinBasic	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a1].[Id] AS [OrderId], [a1].[Amount] AS [Amount] FROM [customers] [a0] LEFT JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId])	
+CLeftJoinWithSelect	SELECT ([a0].[Name] + @p0) AS [CustomerInfo], [a1].[Amount] AS [OrderAmount] FROM [customers] [a0] LEFT JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId])	@p0=string " (Customer)"
+CLeftJoinWithWhere	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age], [a1].[Id] AS [OrderId], [a1].[Amount] AS [OrderAmount] FROM [customers] [a0] LEFT JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId]) WHERE ([a0].[Age] >= @p0) AND ([a0].[Age] < @p1)	@p0=int 21; @p1=int 65
+CLeftJoinWithOrderBy	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a1].[Id] AS [OrderId], [a1].[Amount] AS [Amount] FROM [customers] [a0] LEFT JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId]) ORDER BY [a0].[Name] ASC, [a1].[Amount] DESC	
+CInnerJoinWithGroupBy	SELECT [a0].[Id] AS [CustomerId], [a0].[Name] AS [CustomerName], SUM([a1].[Amount]) AS [TotalAmount] FROM [customers] [a0] INNER JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId]) GROUP BY [a0].[Id], [a0].[Name]	
+CLeftJoinWithAggregates	SELECT [a0].[Id] AS [CustomerId], COUNT(*) AS [OrderCount], SUM([a1].[Amount]) AS [TotalSpent] FROM [customers] [a0] LEFT JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId]) GROUP BY [a0].[Id]	
+CMultipleInnerJoinsFusion	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a1].[ProductId] AS [OrderProductId], [a2].[ProductName] AS [ProductName] FROM [customers] [a0] INNER JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId]) INNER JOIN [products] [a2] ON ([a1].[ProductId] = [a2].[Id])	
+CMixedJoinTypesFusion	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a1].[ProductId] AS [OrderProductId], [a2].[ProductName] AS [ProductName] FROM [customers] [a0] INNER JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId]) LEFT JOIN [products] [a2] ON ([a1].[ProductId] = [a2].[Id])	
+CJoinFusionWithWhere	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a1].[Amount] AS [Amount], [a2].[ProductName] AS [ProductName] FROM [customers] [a0] INNER JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId]) INNER JOIN [products] [a2] ON ([a1].[ProductId] = [a2].[Id]) WHERE ([a0].[Age] >= @p0) AND ([a1].[Amount] > @p1)	@p0=int 18; @p1=int 100
+CFromGroupByOrderBySelect	SELECT [a0].[CustomerId] AS [CustomerId], SUM([a0].[Amount]) AS [TotalAmount] FROM [orders] [a0] GROUP BY [a0].[CustomerId] ORDER BY SUM([a0].[Amount]) DESC	
+CFromGroupByOrderByMultipleSelect	SELECT [a0].[CustomerId] AS [CustomerId], SUM([a0].[Amount]) AS [TotalAmount], COUNT(*) AS [OrderCount] FROM [orders] [a0] GROUP BY [a0].[CustomerId] ORDER BY SUM([a0].[Amount]) DESC, COUNT(*) ASC	
+CFromGroupByOrderByThreeKeysSelect	SELECT [a0].[CustomerId] AS [CustomerId], SUM([a0].[Amount]) AS [TotalAmount], COUNT(*) AS [OrderCount] FROM [orders] [a0] GROUP BY [a0].[CustomerId] ORDER BY SUM([a0].[Amount]) DESC, COUNT(*) ASC, [a0].[CustomerId] ASC	
+CFromGroupByMultipleOrderBySelect	SELECT [a0].[Age] AS [Age], [a0].[Name] AS [Name], COUNT(*) AS [Count] FROM [customers] [a0] GROUP BY [a0].[Age], [a0].[Name] ORDER BY COUNT(*) DESC	
+CFromGroupByHavingOrderBySelect	SELECT [a0].[CustomerId] AS [CustomerId], SUM([a0].[Amount]) AS [TotalAmount] FROM [orders] [a0] GROUP BY [a0].[CustomerId] HAVING (COUNT(*) > @p0) ORDER BY SUM([a0].[Amount]) DESC	@p0=int 1
+CComplexJoinWhereGroupByHavingOrderBySelect	SELECT [a0].[Id] AS [CustomerId], [a0].[Name] AS [CustomerName], COUNT(*) AS [TotalOrders], SUM([a1].[Amount]) AS [TotalSpent], (SUM([a1].[Amount]) / COUNT(*)) AS [AvgOrderValue] FROM [customers] [a0] INNER JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId]) WHERE (([a0].[Age] >= @p0) AND ([a1].[Amount] > @p1)) GROUP BY [a0].[Id], [a0].[Name] HAVING ((COUNT(*) > @p2) AND (SUM([a1].[Amount]) > @p3)) ORDER BY SUM([a1].[Amount]) DESC, COUNT(*) ASC	@p0=int 18; @p1=int 50; @p2=int 2; @p3=int 500
+CComplexLeftJoinWhereGroupByOrderBySelect	SELECT [a0].[Id] AS [CustomerId], [a0].[Name] AS [CustomerName], COUNT(*) AS [OrderCount], SUM([a1].[Amount]) AS [TotalSpent] FROM [customers] [a0] LEFT JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId]) WHERE ([a0].[Age] >= @p0) GROUP BY [a0].[Id], [a0].[Name] ORDER BY SUM([a1].[Amount]) DESC, [a0].[Name] ASC	@p0=int 21
+CFromGroupByMinMaxSelect	SELECT [a0].[CustomerId] AS [CustomerId], MIN([a0].[Amount]) AS [MinAmount], MAX([a0].[Amount]) AS [MaxAmount], COUNT(*) AS [OrderCount] FROM [orders] [a0] GROUP BY [a0].[CustomerId]	
+CFromGroupByAvgSelect	SELECT [a0].[CustomerId] AS [CustomerId], AVG([a0].[Amount]) AS [AvgAmount], COUNT(*) AS [OrderCount] FROM [orders] [a0] GROUP BY [a0].[CustomerId]	
+CFromGroupByDecimalAggregatesSelect	SELECT [a0].[ProductName] AS [ProductName], SUM([a0].[Price]) AS [TotalPrice], AVG([a0].[Price]) AS [AvgPrice], MIN([a0].[Price]) AS [MinPrice], MAX([a0].[Price]) AS [MaxPrice], COUNT(*) AS [ProductCount] FROM [products] [a0] GROUP BY [a0].[ProductName]	
+CFromGroupByDecimalSumSelect	SELECT [a0].[ProductName] AS [ProductName], SUM([a0].[Price]) AS [TotalPrice] FROM [products] [a0] GROUP BY [a0].[ProductName]	
+CFromGroupByDecimalAvgSelect	SELECT [a0].[ProductName] AS [ProductName], AVG([a0].[Price]) AS [AvgPrice] FROM [products] [a0] GROUP BY [a0].[ProductName]	
+CFromSelectSum	SELECT SUM([a0].[Amount]) FROM [orders] [a0]	
+CFromSelectAvg	SELECT AVG([a0].[Amount]) FROM [orders] [a0]	
+CFromSelectMin	SELECT MIN([a0].[Amount]) FROM [orders] [a0]	
+CFromSelectMax	SELECT MAX([a0].[Amount]) FROM [orders] [a0]	
+CParameterAsIntParam	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @minAge)	@minAge=null
+CParameterAsStringParam	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age] FROM [customers] [a0] WHERE ([a0].[Name] = @customerName)	@customerName=null
+CParameterAsBoolParam	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age] FROM [customers] [a0] WHERE (CASE WHEN ([a0].[Age] > @p0) THEN 1 ELSE 0 END = @isAdult)	@p0=int 18; @isAdult=null
+CBoolColumnDirectComparison	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[IsActive] = @isActive)	@isActive=null
+CBoolColumnLiteralTrue	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[IsActive] = @p0)	@p0=bool true
+CBoolColumnLiteralFalse	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[IsActive] = @p0)	@p0=bool false
+CCaseStringExpression	SELECT [a0].[Id] AS [Id], CASE WHEN ([a0].[Age] > @p0) THEN @p1 ELSE @p2 END AS [AgeGroup] FROM [customers] [a0]	@p0=int 18; @p1=string "Adult"; @p2=string "Minor"
+CCaseIntExpression	SELECT [a0].[Id] AS [Id], CASE WHEN ([a0].[Age] > @p0) THEN @p1 ELSE @p2 END AS [IsSenior] FROM [customers] [a0]	@p0=int 65; @p1=int 1; @p2=int 0
+CCaseBoolExpression	SELECT [a0].[Id] AS [Id], CASE WHEN ([a0].[Age] > @p0) THEN [a0].[IsActive] ELSE @p1 END AS [ActiveAdult] FROM [customers] [a0]	@p0=int 18; @p1=bool false
+CCaseInWhere	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE (CASE WHEN ([a0].[Age] > @p0) THEN @p1 ELSE @p2 END = @p3)	@p0=int 18; @p1=string "Adult"; @p2=string "Minor"; @p3=string "Adult"
+CLikeWildcard	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE [a0].[Name] LIKE @p0	@p0=string "Jo%"
+CLikeSingleChar	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE [a0].[Name] LIKE @p0	@p0=string "J_n"
+CLikeBothWildcards	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE [a0].[Name] LIKE @p0	@p0=string "%o_n%"
+CLikeExact	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE [a0].[Name] LIKE @p0	@p0=string "John"
+CAbsColumn	SELECT [a0].[Id] AS [Id], ABS([a0].[Age]) AS [AbsAge] FROM [customers] [a0]	
+CAbsInWhere	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age] FROM [customers] [a0] WHERE (ABS([a0].[Age]) > @p0)	@p0=int 30
+CAbsExpression	SELECT [a0].[Id] AS [Id], ABS(([a0].[Age] - @p0)) AS [AbsDiff] FROM [customers] [a0]	@p0=int 50
+CAbsParameter	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age] FROM [customers] [a0] WHERE (ABS([a0].[Age]) > ABS(@minAge))	@minAge=null
+CFromWhereDecimalComparison	SELECT [a0].[Id] AS [Id], [a0].[ProductName] AS [ProductName], [a0].[Price] AS [Price], [a0].[CreatedDate] AS [CreatedDate], [a0].[UniqueId] AS [UniqueId] FROM [products] [a0] WHERE ([a0].[Price] > @p0)	@p0=decimal 100.50
+CFromSelectDecimalArithmetic	SELECT [a0].[ProductName] AS [ProductName], ([a0].[Price] * @p0) AS [Marked], ([a0].[Price] + @p1) AS [Plus], ([a0].[Price] - @p2) AS [Minus] FROM [products] [a0]	@p0=decimal 1.1; @p1=decimal 10.0; @p2=decimal 5.0
+CFromWhereDecimalIsNull	SELECT [a0].[Id] AS [Id], [a0].[ProductName] AS [ProductName], [a0].[Price] AS [Price], [a0].[CreatedDate] AS [CreatedDate], [a0].[UniqueId] AS [UniqueId] FROM [products] [a0] WHERE [a0].[Price] IS NULL	
+CFromWhereDecimalIsNotNull	SELECT [a0].[Id] AS [Id], [a0].[ProductName] AS [ProductName], [a0].[Price] AS [Price], [a0].[CreatedDate] AS [CreatedDate], [a0].[UniqueId] AS [UniqueId] FROM [products] [a0] WHERE [a0].[Price] IS NOT NULL	
+CCaseDecimalExpression	SELECT [a0].[ProductName] AS [ProductName], CASE WHEN ([a0].[Price] > @p0) THEN @p1 ELSE CASE WHEN ([a0].[Price] > @p2) THEN @p3 ELSE @p4 END END AS [ExpensiveFlag] FROM [products] [a0]	@p0=decimal 1000.0; @p1=string "Expensive"; @p2=decimal 100.0; @p3=string "Moderate"; @p4=string "Cheap"
+CParameterAsDecimalParam	SELECT [a0].[Id] AS [Id], [a0].[ProductName] AS [ProductName], [a0].[Price] AS [Price], [a0].[CreatedDate] AS [CreatedDate], [a0].[UniqueId] AS [UniqueId] FROM [products] [a0] WHERE ([a0].[Price] > @minPrice)	@minPrice=null
+CFromWhereCreatedDateComparison	SELECT [a0].[Id] AS [Id], [a0].[ProductName] AS [ProductName], [a0].[Price] AS [Price], [a0].[CreatedDate] AS [CreatedDate], [a0].[UniqueId] AS [UniqueId] FROM [products] [a0] WHERE ([a0].[CreatedDate] > @p0)	@p0=dateTime "2024-01-01"
+CFromWhereCreatedDateIsNull	SELECT [a0].[Id] AS [Id], [a0].[ProductName] AS [ProductName], [a0].[Price] AS [Price], [a0].[CreatedDate] AS [CreatedDate], [a0].[UniqueId] AS [UniqueId] FROM [products] [a0] WHERE [a0].[CreatedDate] IS NULL	
+CFromWhereCreatedDateIsNotNull	SELECT [a0].[Id] AS [Id], [a0].[ProductName] AS [ProductName], [a0].[Price] AS [Price], [a0].[CreatedDate] AS [CreatedDate], [a0].[UniqueId] AS [UniqueId] FROM [products] [a0] WHERE [a0].[CreatedDate] IS NOT NULL	
+CFromSelectCreatedDateMinMax	SELECT [a0].[ProductName] AS [ProductName], [a0].[CreatedDate] AS [EarliestDate], [a0].[CreatedDate] AS [LatestDate] FROM [products] [a0]	
+CCaseDateTimeExpression	SELECT [a0].[ProductName] AS [ProductName], CASE WHEN ([a0].[CreatedDate] < @p0) THEN @p1 ELSE CASE WHEN ([a0].[CreatedDate] < @p2) THEN @p3 ELSE @p4 END END AS [Age] FROM [products] [a0]	@p0=dateTime "2020-01-01"; @p1=string "Old"; @p2=dateTime "2024-01-01"; @p3=string "Recent"; @p4=string "New"
+CParameterAsDateTimeParam	SELECT [a0].[Id] AS [Id], [a0].[ProductName] AS [ProductName], [a0].[Price] AS [Price], [a0].[CreatedDate] AS [CreatedDate], [a0].[UniqueId] AS [UniqueId] FROM [products] [a0] WHERE ([a0].[CreatedDate] > @startDate)	@startDate=null
+CFromWhereUniqueIdEquals	SELECT [a0].[Id] AS [Id], [a0].[ProductName] AS [ProductName], [a0].[Price] AS [Price], [a0].[CreatedDate] AS [CreatedDate], [a0].[UniqueId] AS [UniqueId] FROM [products] [a0] WHERE ([a0].[UniqueId] = @p0)	@p0=guid "12345678-1234-1234-1234-123456789012"
+CFromWhereUniqueIdNotEquals	SELECT [a0].[Id] AS [Id], [a0].[ProductName] AS [ProductName], [a0].[Price] AS [Price], [a0].[CreatedDate] AS [CreatedDate], [a0].[UniqueId] AS [UniqueId] FROM [products] [a0] WHERE ([a0].[UniqueId] <> @p0)	@p0=guid "00000000-0000-0000-0000-000000000000"
+CFromWhereUniqueIdIsNull	SELECT [a0].[Id] AS [Id], [a0].[ProductName] AS [ProductName], [a0].[Price] AS [Price], [a0].[CreatedDate] AS [CreatedDate], [a0].[UniqueId] AS [UniqueId] FROM [products] [a0] WHERE [a0].[UniqueId] IS NULL	
+CFromWhereUniqueIdIsNotNull	SELECT [a0].[Id] AS [Id], [a0].[ProductName] AS [ProductName], [a0].[Price] AS [Price], [a0].[CreatedDate] AS [CreatedDate], [a0].[UniqueId] AS [UniqueId] FROM [products] [a0] WHERE [a0].[UniqueId] IS NOT NULL	
+CCaseGuidExpression	SELECT [a0].[ProductName] AS [ProductName], CASE WHEN ([a0].[UniqueId] = @p0) THEN @p1 ELSE @p2 END AS [Status] FROM [products] [a0]	@p0=guid "00000000-0000-0000-0000-000000000000"; @p1=string "Empty"; @p2=string "HasId"
+CParameterAsGuidParam	SELECT [a0].[Id] AS [Id], [a0].[ProductName] AS [ProductName], [a0].[Price] AS [Price], [a0].[CreatedDate] AS [CreatedDate], [a0].[UniqueId] AS [UniqueId] FROM [products] [a0] WHERE ([a0].[UniqueId] = @targetId)	@targetId=null
+CStringSubstring	SELECT SUBSTRING([a0].[ProductName], @p0, @p1) AS [Sub] FROM [products] [a0]	@p0=int 1; @p1=int 5
+CStringUpper	SELECT UPPER([a0].[ProductName]) AS [Upper] FROM [products] [a0]	
+CStringLower	SELECT LOWER([a0].[ProductName]) AS [Lower] FROM [products] [a0]	
+CStringTrim	SELECT TRIM([a0].[ProductName]) AS [Trimmed] FROM [products] [a0]	
+CStringLength	SELECT LEN([a0].[ProductName]) AS [Len] FROM [products] [a0]	
+CStringFunctionsInWhere	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ((UPPER([a0].[Name]) = @p0) AND (LEN([a0].[Name]) > @p1))	@p0=string "JOHN"; @p1=int 3
+CStringFunctionsInSelect	SELECT [a0].[Id] AS [Id], UPPER([a0].[Name]) AS [UpperName], LOWER([a0].[Name]) AS [LowerName], TRIM([a0].[Name]) AS [TrimmedName], LEN([a0].[Name]) AS [NameLength], SUBSTRING([a0].[Name], @p0, @p1) AS [FirstThree] FROM [customers] [a0]	@p0=int 1; @p1=int 3
+CDateTimeNow	SELECT GETDATE() AS [Now] FROM [products] [a0]	
+CDateTimeYear	SELECT YEAR([a0].[CreatedDate]) AS [Year] FROM [products] [a0]	
+CDateTimeMonth	SELECT MONTH([a0].[CreatedDate]) AS [Month] FROM [products] [a0]	
+CDateTimeDay	SELECT DAY([a0].[CreatedDate]) AS [Day] FROM [products] [a0]	
+CDateTimeAddDays	SELECT DATEADD(day, @p0, [a0].[CreatedDate]) AS [Plus30] FROM [products] [a0]	@p0=int 30
+CDateTimeAddMonths	SELECT DATEADD(month, @p0, [a0].[CreatedDate]) AS [Plus6M] FROM [products] [a0]	@p0=int 6
+CDateTimeAddYears	SELECT DATEADD(year, @p0, [a0].[CreatedDate]) AS [Plus1Y] FROM [products] [a0]	@p0=int 1
+CDateTimeDiffDays	SELECT DATEDIFF(day, [a0].[CreatedDate], @p0) AS [Diff] FROM [products] [a0]	@p0=dateTime "2025-01-01"
+CDateTimeDiffMonths	SELECT DATEDIFF(month, [a0].[CreatedDate], @p0) AS [Diff] FROM [products] [a0]	@p0=dateTime "2025-01-01"
+CDateTimeDiffYears	SELECT DATEDIFF(year, [a0].[CreatedDate], @p0) AS [Diff] FROM [products] [a0]	@p0=dateTime "2025-01-01"
+CDateTimeFunctionsInWhere	SELECT [a0].[Id] AS [Id], [a0].[CreatedDate] AS [CreatedDate] FROM [products] [a0] WHERE ((YEAR([a0].[CreatedDate]) = @p0) AND (MONTH([a0].[CreatedDate]) > @p1))	@p0=int 2024; @p1=int 6
+CDateTimeFunctionsInSelect	SELECT [a0].[Id] AS [Id], YEAR([a0].[CreatedDate]) AS [CreatedYear], MONTH([a0].[CreatedDate]) AS [CreatedMonth], DAY([a0].[CreatedDate]) AS [CreatedDay], DATEADD(day, @p0, [a0].[CreatedDate]) AS [NextWeek], DATEADD(month, @p1, [a0].[CreatedDate]) AS [NextMonth], DATEDIFF(day, [a0].[CreatedDate], GETDATE()) AS [DaysAgo] FROM [products] [a0]	@p0=int 7; @p1=int 1
+CDecimalRound	SELECT ROUND([a0].[Price], @p0) AS [Rounded] FROM [products] [a0]	@p0=int 2
+CDecimalCeiling	SELECT CEILING([a0].[Price]) AS [Ceil] FROM [products] [a0]	
+CDecimalFloor	SELECT FLOOR([a0].[Price]) AS [Floor] FROM [products] [a0]	
+CMathFunctionsInWhere	SELECT [a0].[Id] AS [Id], [a0].[Price] AS [Price] FROM [products] [a0] WHERE ((ROUND([a0].[Price], @p0) > @p1) AND (CEILING([a0].[Price]) < @p2))	@p0=int 0; @p1=decimal 100.0; @p2=decimal 1000.0
+CMathFunctionsInSelect	SELECT [a0].[Id] AS [Id], [a0].[Price] AS [OriginalPrice], ROUND([a0].[Price], @p0) AS [RoundedPrice], CEILING([a0].[Price]) AS [CeilingPrice], FLOOR([a0].[Price]) AS [FloorPrice] FROM [products] [a0]	@p0=int 2
+CFromLimitOffset	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] ORDER BY [a0].[Id] ASC OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY	
+CFromSelectLimitOffset	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] ORDER BY [a0].[Id] ASC OFFSET 5 ROWS FETCH NEXT 3 ROWS ONLY	
+CFromWhereLimitOffset	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) ORDER BY [a0].[Id] ASC OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY	@p0=int 18
+CFromWhereSelectLimitOffset	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age] FROM [customers] [a0] WHERE ([a0].[Age] >= @p0) ORDER BY [a0].[Id] ASC OFFSET 15 ROWS FETCH NEXT 5 ROWS ONLY	@p0=int 21
+CFromOrderByLimitOffset	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] ORDER BY [a0].[Name] ASC OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY	
+CFromWhereOrderByLimitOffset	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) ORDER BY [a0].[Age] DESC OFFSET 10 ROWS FETCH NEXT 20 ROWS ONLY	@p0=int 18
+CFromWhereOrderBySelectLimitOffset	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age] FROM [customers] [a0] WHERE ([a0].[Name] <> @p0) ORDER BY [a0].[Name] ASC, [a0].[Age] DESC OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY	@p0=string ""
+CFromLimitOffsetOnly	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] ORDER BY [a0].[Id] ASC OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY	
+CFromOffsetOnly	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] ORDER BY [a0].[Id] ASC OFFSET 5 ROWS	
+CFromLimitOffsetWithoutOrderBy	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age], [a0].[Name] AS [Name], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] ORDER BY (SELECT NULL) OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY	
+CFromSelectDistinct	SELECT DISTINCT [a0].[Name] AS [Name] FROM [customers] [a0]	
+CFromSelectDistinctWhere	SELECT DISTINCT [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @p0)	@p0=int 18
+CFromSelectDistinctOrderBy	SELECT DISTINCT [a0].[Name] AS [Name] FROM [customers] [a0] ORDER BY [a0].[Name] ASC	
+CFromSelectDistinctMultipleColumns	SELECT DISTINCT [a0].[Name] AS [Name], [a0].[Age] AS [Age] FROM [customers] [a0] ORDER BY [a0].[Name] ASC	
+CFromOrderByLimitDistinct	SELECT DISTINCT [a0].[Name] AS [Name] FROM [customers] [a0] ORDER BY [a0].[Name] ASC OFFSET 0 ROWS FETCH NEXT 2 ROWS ONLY	
+CUnion	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) UNION SELECT [a1].[Id] AS [Id], [a1].[Name] AS [Name] FROM [customers] [a1] WHERE ([a1].[Name] = @p1)	@p0=int 30; @p1=string "Alice"
+CIntersect	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) INTERSECT SELECT [a1].[Id] AS [Id], [a1].[Name] AS [Name] FROM [customers] [a1] WHERE ([a1].[Name] = @p1)	@p0=int 25; @p1=string "John"
+CExcept	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] EXCEPT SELECT [a1].[Id] AS [Id], [a1].[Name] AS [Name] FROM [customers] [a1] WHERE ([a1].[Age] < @p0)	@p0=int 18
 InsertBasic	INSERT INTO [customers] ([Id], [Age], [Name]) VALUES (@p0, @p1, @p2)	@p0=long 200; @p1=int 25; @p2=string "John Doe"
 UpdateBasic	UPDATE [customers] SET [Age] = @p0 WHERE ([Id] = @p1)	@p0=int 26; @p1=long 200
 UpdateMultiple	UPDATE [customers] SET [Age] = @p0, [Name] = @p1 WHERE ([Id] = @p2)	@p0=int 27; @p1=string "John Smith"; @p2=long 200

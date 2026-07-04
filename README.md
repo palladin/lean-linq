@@ -18,21 +18,16 @@ open LeanLinq
 
 abbrev CustomersS : Schema := [("Id", .int), ("Name", .string), ("Age", .int)]
 def customers : Table CustomersS := ⟨"Customers"⟩
-abbrev OrdersS : Schema := [("OrderId", .int), ("CustomerId", .int)]
-def orders : Table OrdersS := ⟨"Orders"⟩
 
-def customerOrders := query! {
-  from c in customers
-  from o in orders
-  where c["Id"] ==. o["CustomerId"]
-  where c["Age"] >. 18
-  select ![c["Name"].as "Name", o["OrderId"].as "OrderId"]
-}
+def adults := Query.from' customers
+  |>.where' (fun c => 18 <. c["Age"])
+  |>.orderBy (fun c => [c["Name"].asc])
+  |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"])
 
-#eval customerOrders.toSql .sqlite
--- { sql := "SELECT \"a0\".\"Name\" AS \"Name\", \"a1\".\"OrderId\" AS \"OrderId\"
---           FROM \"Customers\" \"a0\", \"Orders\" \"a1\"
---           WHERE (\"a0\".\"Id\" = \"a1\".\"CustomerId\") AND (:p0 < \"a0\".\"Age\")",
+#eval adults.toSql .sqlite
+-- { sql := "SELECT \"a0\".\"Id\" AS \"Id\", \"a0\".\"Name\" AS \"Name\"
+--           FROM \"Customers\" \"a0\"
+--           WHERE (:p0 < \"a0\".\"Age\") ORDER BY \"a0\".\"Name\" ASC",
 --   params := #[(":p0", .int 18)] }
 ```
 
@@ -43,18 +38,20 @@ Ill-typed queries don't compile: a misspelled column name, comparing an `int` co
 
 ```
 lake build                        # library
-lake test                         # golden tests: 181 cases × 3 dialects (exact SQL + parameters)
+lake test                         # golden tests: 355 cases × 3 dialects (exact SQL + parameters)
 lake exe tests --update           # regenerate Tests/golden/{sqlite,sqlserver,postgres}.golden
 
 docker compose up -d --wait       # PostgreSQL + SQL Server test databases
-lake exe integration              # execute all 181 cases against live SQLite/PostgreSQL/SQL Server
+lake exe integration              # execute all 355 cases against live SQLite/PostgreSQL/SQL Server
 lake exe integration --update     # regenerate Tests/golden/results-*.golden
 ```
 
 ## Integration tests
 
-`lake exe integration` executes every registered query and statement against real
-databases: SQLite (local temp file), PostgreSQL and SQL Server (docker compose
+Every pipeline query case has a comprehension twin (`C<Name>`, Tests/QueriesC.lean)
+expressing the same shape with `query!` clauses, so both surfaces are covered by
+every layer below. `lake exe integration` executes every registered query and
+statement against real databases: SQLite (local temp file), PostgreSQL and SQL Server (docker compose
 services, driven through `psql`/`sqlcmd` inside the containers — no local client
 installs needed). The seed dataset mirrors the classic customers/products/orders
 fixture. Parameters are inlined as dialect-escaped literals *for execution only*;
@@ -101,10 +98,44 @@ the library itself always emits parameterized SQL.
   `.toSqlServer`, `.toPostgres`. Every SQLite golden is parse-validated against
   a real SQLite database.
 
-## The comprehension syntax
+## The pipeline API
 
-`query! { … }` takes newline- (or `;`-) separated clauses, desugared right-to-left onto the
-core binders (exactly how C# desugars LINQ into `SelectMany`):
+The primary surface is a fluent pipeline over typed combinators (`from` and `where` are Lean
+keywords, hence the primes):
+
+```lean
+abbrev OrdersS : Schema := [("OrderId", .int), ("CustomerId", .int), ("Amount", .int)]
+def orders : Table OrdersS := ⟨"Orders"⟩
+
+def report := Query.from' customers
+  |>.where' (fun c => 18 <. c["Age"])
+  |>.innerJoin orders (fun c o => c["Id"] ==. o["CustomerId"])
+      (fun c o => ![c["Id"].as "CustId", c["Name"].as "Name", o["Amount"].as "Amount"])
+  |>.groupBy (fun r => [r["CustId"].key, r["Name"].key])
+  |>.having (fun _ a => 1 <. a.count)
+  |>.select (fun r a => ![r["Name"].as "Name", (a.sum r["Amount"]).as "Total"])
+  |>.orderBy (fun r => [r["Total"].desc])
+  |>.limit 10
+```
+
+Available: `from'` / `where'` / `select`, `innerJoin` / `leftJoin`, `orderBy` (multi-key),
+`groupBy` / `having` / grouped `select` (the lambda receives an `Agg` token: `a.count`,
+`a.sum e`, …), `distinct`, `limitOffset`/`limit`/`offset`, `union`/`intersect`/`except`,
+and scalar queries (`count`/`sum`/`avg`/`min`/`max`, embeddable in expressions via
+`.embed`, subqueries via `inQuery`).
+
+Queries **normalize at construction time** (`Query.bind`, the comprehension monad):
+`where'` splices a conjunct, `select` replaces the projection, joins extend the FROM clause,
+`orderBy` attaches to the statement, and a query used as a source is inlined — so pipelines
+compile to a single flat SELECT. Clauses that must not be spliced through — DISTINCT,
+LIMIT/OFFSET, GROUP BY/HAVING, set operations — are *boundary nodes*: binding over them
+wraps the query as a derived table, which is exactly SQL's semantics.
+
+## The query! comprehension syntax
+
+The same core also has a C#-LINQ-style comprehension surface: `query! { … }` takes newline-
+(or `;`-) separated clauses, desugared right-to-left onto the spine constructors (exactly
+how C# desugars LINQ into `SelectMany`):
 
 | Clause | Desugars to | SQL |
 |---|---|---|
@@ -112,43 +143,32 @@ core binders (exactly how C# desugars LINQ into `SelectMany`):
 | `join x in t on p` / `leftJoin x in t on p` | `Query.joinOn` | `INNER/LEFT JOIN … ON` |
 | `where p` | `Query.guard p …` | a `WHERE` conjunct |
 | `orderBy k, …` | `Query.orderWith` | `ORDER BY` (may reference aggregates when grouped) |
-| `groupBy k, …` + `having p` | grouped terminal (`Query.groupYieldQ`) | `GROUP BY … HAVING` |
+| `groupBy k, … into a` + `having p` | grouped terminal (`Query.groupYieldQ`) | `GROUP BY … HAVING` |
 | `select r` | `Query.yield r` | the `SELECT` list |
 | trailing `distinct`, `limit n [offset m]`, `offset n` | `.distinct`/`.limitOffset` | `DISTINCT`, `LIMIT/OFFSET` |
 
-Sources are tables *or* queries via the `QuerySource` class. Nested `from`s are cross
-products — there is no product combinator; a join is two `from`s and a `where` (or a `join`
-clause). In grouped comprehensions, aggregates use the `agg` constant (`agg.count`,
-`agg.sum e`, …) in `having`, `orderBy`, and `select` — and ordering by an aggregate
-expression is something only the comprehension can express in one statement:
+Sources are tables *or* queries via the `QuerySource` class (nested `from`s are cross
+products). `groupBy … into a` *binds* the aggregate token — like C#'s `group … into g` —
+so `a.count` / `a.sum e` are in scope only in the clauses after the grouping; `where` after
+`groupBy` and `having` without `groupBy` are rejected. Ordering by an aggregate *expression*
+is something only the comprehension can express in one statement:
 
 ```lean
 query! {
   from c in customers
   join o in orders on c["Id"] ==. o["CustomerId"]
   where c["Age"] >=. 18
-  groupBy c["Id"].key, c["Name"].key
-  having agg.count >. 1
-  orderBy (agg.sum o["Amount"]).desc
-  select ![c["Id"].as "CustomerId", (agg.sum o["Amount"]).as "TotalSpent"]
+  groupBy c["Id"].key, c["Name"].key into a
+  having a.count >. 1
+  orderBy (a.sum o["Amount"]).desc
+  select ![c["Id"].as "CustomerId", (a.sum o["Amount"]).as "TotalSpent"]
 }
 ```
 
-A pipeline API is derived on top of the same core (`from` and `where` are Lean keywords,
-hence the primes):
+Every pipeline test case has a comprehension twin (Tests/QueriesC.lean), so both surfaces
+are exercised by the full test stack.
 
-```lean
-def adults := Query.from' customers
-  |>.where' (fun c => 18 <. c["Age"])
-  |>.select (fun c => ![c["Name"].as "Name"])
-```
-
-Queries **normalize at construction time** (`Query.bind`, the comprehension monad):
-`where'` splices a conjunct, `select` replaces the projection, joins extend the FROM clause,
-`orderBy` attaches to the statement, and a query used as a `from` source is inlined. Both
-surfaces compile to the same flat SELECT. Clauses that must not be spliced through —
-DISTINCT, LIMIT/OFFSET, GROUP BY/HAVING, set operations — are *boundary nodes*: binding over
-them wraps the query as a derived table, which is exactly SQL's semantics.
+## Rows and operators
 
 Row access and construction:
 
@@ -191,6 +211,7 @@ return `Bool`/`Prop`, so SQL needs its own).
 ## Status
 
 Core, full query surface (joins, grouping, aggregates, set ops, subqueries),
-statements, and the three dialects are implemented, with a 181-case × 3-dialect
-golden test suite. Possible next steps: executing queries against a live
+statements, and the three dialects are implemented, with a 355-case × 3-dialect
+golden suite (both surfaces), an executable in-memory oracle, and live 3-engine
+integration tests. Possible next steps: executing queries against a live
 connection, richer HAVING/ORDER BY over aggregates, and window functions.

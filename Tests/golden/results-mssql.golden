@@ -171,6 +171,171 @@ LinqGroupByHaving	1,650
 LinqDistinctLimit	Jane Smith|John Doe
 LinqComplex	1,John Doe,650
 LinqLimitOffset	2,Jane Smith|3,Minor User
+CFrom	1,25,John Doe,1|2,30,Jane Smith,1|3,16,Minor User,0|4,65,Senior User,1
+CFromStatic	1,25,John Doe,1|2,30,Jane Smith,1|3,16,Minor User,0|4,65,Senior User,1
+CFromSelect	1,John Doe|2,Jane Smith|3,Minor User|4,Senior User
+CFromSelectSingle	16|25|30|65
+CFromSelectExpression	100,John Doe - Customer|200,Jane Smith - Customer|300,Minor User - Customer|400,Senior User - Customer
+CFromWhereInt	1,25,John Doe,1|2,30,Jane Smith,1|4,65,Senior User,1
+CFromWhereString	
+CFromWhereMultiple	1,25,John Doe,1|2,30,Jane Smith,1|4,65,Senior User,1
+CFromWhereOr	1,25,John Doe,1|2,30,Jane Smith,1
+CFromWhereAnd	
+CFromOrderByAsc	2,30,Jane Smith,1|1,25,John Doe,1|3,16,Minor User,0|4,65,Senior User,1
+CFromOrderByDesc	4,65,Senior User,1|2,30,Jane Smith,1|1,25,John Doe,1|3,16,Minor User,0
+CFromWhereSelect	1,John Doe|2,Jane Smith|4,Senior User
+CFromWhereAndSelect	1,John Doe|2,Jane Smith|4,Senior User
+CFromWhereOrderBy	1,25,John Doe,1|2,30,Jane Smith,1|4,65,Senior User,1
+CFromSelectOrderBy	2,Jane Smith,35|1,John Doe,30|3,Minor User,21|4,Senior User,70
+CFromWhereSelectOrderBy	3,Jane Smith!|2,John Doe!|5,Senior User!
+CFromWhereOrderBySelect	1,John Doe,35|2,Jane Smith,40|4,Senior User,75
+CFromWhereOrderBySelectNamed	2,Jane Smith (Customer),35|1,John Doe (Customer),30|4,Senior User (Customer),70
+CFromWhereSelectNamed	1,100,John Doe|2,200,Jane Smith|4,400,Senior User
+CFromProductWhereSelect	1,Laptop|2,Mouse
+CFromWhereSelectParameterized	1,John Doe|2,Jane Smith|4,Senior User
+CFromWhereFusionTwo	1,25,John Doe,1|2,30,Jane Smith,1|4,65,Senior User,1
+CFromWhereFusionThree	1,25,John Doe,1|2,30,Jane Smith,1
+CFromWhereFusionWithSelect	1,John Doe|2,Jane Smith|4,Senior User
+CFromWhereFusionWithOrderBy	2,30,Jane Smith,1|1,25,John Doe,1|4,65,Senior User,1
+CFromOrderByThenBy	2,30,Jane Smith,1|1,25,John Doe,1|3,16,Minor User,0|4,65,Senior User,1
+CFromOrderByThenByDescending	2,30,Jane Smith,1|1,25,John Doe,1|3,16,Minor User,0|4,65,Senior User,1
+CFromOrderByDescendingThenBy	4,65,Senior User,1|2,30,Jane Smith,1|1,25,John Doe,1|3,16,Minor User,0
+CFromOrderByMultiple	2,30,Jane Smith,1|1,25,John Doe,1|3,16,Minor User,0|4,65,Senior User,1
+CFromWhereOrderByThenBy	2,30,Jane Smith,1|1,25,John Doe,1|4,65,Senior User,1
+CFromOrderByThenBySelect	2,Jane Smith|1,John Doe|3,Minor User|4,Senior User
+CFromWhereIsNull	
+CFromWhereIsNotNull	1,25,John Doe,1|2,30,Jane Smith,1|3,16,Minor User,0|4,65,Senior User,1
+CFromWhereIsNullInt	
+CFromWhereIsNotNullInt	1,25,John Doe,1|2,30,Jane Smith,1|3,16,Minor User,0|4,65,Senior User,1
+CFromWhereIsNullCombined	
+CFromWhereAgeGreaterThanSum	
+CSumAges	136
+CCountCustomers	4
+CCountActiveCustomers	3
+CSumPrices	1025.49
+CAvgPrices	512.745
+CMinPrice	25.5
+CMaxPrice	999.99
+CSumExpensivePrices	999.99
+CAvgExpensivePrices	999.99
+CFromWhereAgeGreaterThanAverageAge	
+CFromWhereAgeIn	1,25,John Doe,1|2,30,Jane Smith,1
+CFromWhereAgeInSubquery	
+CFromWhereAgeInSubqueryWithClosure	
+CFromSubquery	1,26|2,31|3,17|4,66
+CFromWhereSelectWhereFromNested	
+CFromWhereSelectWhereNested	
+CFromGroupBySelect	16,1|25,1|30,1|65,1
+CFromGroupByMultipleSelect	16,Minor User,1|25,John Doe,1|30,Jane Smith,1|65,Senior User,1
+CFromGroupByHavingSelect	
+CFromWhereGroupBySelect	25,1|30,1|65,1
+CInnerJoinBasic	1,John Doe,1,500|1,John Doe,2,150|2,Jane Smith,3,300|4,Senior User,4,75
+CInnerJoinWithSelect	Jane Smith,300|John Doe,150|John Doe,500|Senior User,75
+CInnerJoinWithWhere	1,John Doe,25,1,500|1,John Doe,25,2,150|2,Jane Smith,30,3,300
+CInnerJoinWithOrderBy	2,Jane Smith,3,300|1,John Doe,1,500|1,John Doe,2,150|4,Senior User,4,75
+CLeftJoinBasic	1,John Doe,1,500|1,John Doe,2,150|2,Jane Smith,3,300|3,Minor User,NULL,NULL|4,Senior User,4,75
+CLeftJoinWithSelect	Jane Smith (Customer),300|John Doe (Customer),150|John Doe (Customer),500|Minor User (Customer),NULL|Senior User (Customer),75
+CLeftJoinWithWhere	1,John Doe,25,1,500|1,John Doe,25,2,150|2,Jane Smith,30,3,300
+CLeftJoinWithOrderBy	2,Jane Smith,3,300|1,John Doe,1,500|1,John Doe,2,150|3,Minor User,NULL,NULL|4,Senior User,4,75
+CInnerJoinWithGroupBy	1,John Doe,650|2,Jane Smith,300|4,Senior User,75
+CLeftJoinWithAggregates	1,2,650|2,1,300|3,1,NULL|4,1,75
+CMultipleInnerJoinsFusion	1,John Doe,1,Laptop|1,John Doe,2,Mouse|2,Jane Smith,1,Laptop|4,Senior User,2,Mouse
+CMixedJoinTypesFusion	1,John Doe,1,Laptop|1,John Doe,2,Mouse|2,Jane Smith,1,Laptop|4,Senior User,2,Mouse
+CJoinFusionWithWhere	1,John Doe,150,Mouse|1,John Doe,500,Laptop|2,Jane Smith,300,Laptop
+CFromGroupByOrderBySelect	1,650|2,300|4,75
+CFromGroupByOrderByMultipleSelect	1,650,2|2,300,1|4,75,1
+CFromGroupByOrderByThreeKeysSelect	1,650,2|2,300,1|4,75,1
+CFromGroupByMultipleOrderBySelect	30,Jane Smith,1|25,John Doe,1|16,Minor User,1|65,Senior User,1
+CFromGroupByHavingOrderBySelect	1,650
+CComplexJoinWhereGroupByHavingOrderBySelect	
+CComplexLeftJoinWhereGroupByOrderBySelect	1,John Doe,2,650|2,Jane Smith,1,300|4,Senior User,1,75
+CFromGroupByMinMaxSelect	1,150,500,2|2,300,300,1|4,75,75,1
+CFromGroupByAvgSelect	1,325,2|2,300,1|4,75,1
+CFromGroupByDecimalAggregatesSelect	Discontinued,NULL,NULL,NULL,NULL,1|Laptop,999.99,999.99,999.99,999.99,1|Mouse,25.5,25.5,25.5,25.5,1
+CFromGroupByDecimalSumSelect	Discontinued,NULL|Laptop,999.99|Mouse,25.5
+CFromGroupByDecimalAvgSelect	Discontinued,NULL|Laptop,999.99|Mouse,25.5
+CFromSelectSum	1025
+CFromSelectAvg	256
+CFromSelectMin	75
+CFromSelectMax	500
+CParameterAsIntParam	1,John Doe|2,Jane Smith|4,Senior User
+CParameterAsStringParam	1,25
+CParameterAsBoolParam	1,John Doe,25|2,Jane Smith,30|4,Senior User,65
+CBoolColumnDirectComparison	1,John Doe,25,1|2,Jane Smith,30,1|4,Senior User,65,1
+CBoolColumnLiteralTrue	1,John Doe,25,1|2,Jane Smith,30,1|4,Senior User,65,1
+CBoolColumnLiteralFalse	3,Minor User,16,0
+CCaseStringExpression	1,Adult|2,Adult|3,Minor|4,Adult
+CCaseIntExpression	1,0|2,0|3,0|4,0
+CCaseBoolExpression	1,1|2,1|3,0|4,1
+CCaseInWhere	1,John Doe|2,Jane Smith|4,Senior User
+CLikeWildcard	1,John Doe
+CLikeSingleChar	
+CLikeBothWildcards	1,John Doe
+CLikeExact	
+CAbsColumn	1,25|2,30|3,16|4,65
+CAbsInWhere	4,Senior User,65
+CAbsExpression	1,25|2,20|3,34|4,15
+CAbsParameter	1,John Doe,25|2,Jane Smith,30|4,Senior User,65
+CFromWhereDecimalComparison	1,Laptop,999.99,2023-01-15 00:00:00,11111111-1111-1111-1111-111111111111
+CFromSelectDecimalArithmetic	Discontinued,NULL,NULL,NULL|Laptop,1099.989,1009.99,994.99|Mouse,28.05,35.5,20.5
+CFromWhereDecimalIsNull	3,Discontinued,NULL,NULL,NULL
+CFromWhereDecimalIsNotNull	1,Laptop,999.99,2023-01-15 00:00:00,11111111-1111-1111-1111-111111111111|2,Mouse,25.5,2023-06-10 00:00:00,22222222-2222-2222-2222-222222222222
+CCaseDecimalExpression	Discontinued,Cheap|Laptop,Moderate|Mouse,Cheap
+CParameterAsDecimalParam	1,Laptop,999.99,2023-01-15 00:00:00,11111111-1111-1111-1111-111111111111
+CFromWhereCreatedDateComparison	
+CFromWhereCreatedDateIsNull	3,Discontinued,NULL,NULL,NULL
+CFromWhereCreatedDateIsNotNull	1,Laptop,999.99,2023-01-15 00:00:00,11111111-1111-1111-1111-111111111111|2,Mouse,25.5,2023-06-10 00:00:00,22222222-2222-2222-2222-222222222222
+CFromSelectCreatedDateMinMax	Discontinued,NULL,NULL|Laptop,2023-01-15 00:00:00,2023-01-15 00:00:00|Mouse,2023-06-10 00:00:00,2023-06-10 00:00:00
+CCaseDateTimeExpression	Discontinued,New|Laptop,Recent|Mouse,Recent
+CParameterAsDateTimeParam	1,Laptop,999.99,2023-01-15 00:00:00,11111111-1111-1111-1111-111111111111|2,Mouse,25.5,2023-06-10 00:00:00,22222222-2222-2222-2222-222222222222
+CFromWhereUniqueIdEquals	
+CFromWhereUniqueIdNotEquals	1,Laptop,999.99,2023-01-15 00:00:00,11111111-1111-1111-1111-111111111111|2,Mouse,25.5,2023-06-10 00:00:00,22222222-2222-2222-2222-222222222222
+CFromWhereUniqueIdIsNull	3,Discontinued,NULL,NULL,NULL
+CFromWhereUniqueIdIsNotNull	1,Laptop,999.99,2023-01-15 00:00:00,11111111-1111-1111-1111-111111111111|2,Mouse,25.5,2023-06-10 00:00:00,22222222-2222-2222-2222-222222222222
+CCaseGuidExpression	Discontinued,HasId|Laptop,HasId|Mouse,HasId
+CParameterAsGuidParam	1,Laptop,999.99,2023-01-15 00:00:00,11111111-1111-1111-1111-111111111111
+CStringSubstring	Disco|Lapto|Mouse
+CStringUpper	DISCONTINUED|LAPTOP|MOUSE
+CStringLower	discontinued|laptop|mouse
+CStringTrim	Discontinued|Laptop|Mouse
+CStringLength	12|5|6
+CStringFunctionsInWhere	
+CStringFunctionsInSelect	1,JOHN DOE,john doe,John Doe,8,Joh|2,JANE SMITH,jane smith,Jane Smith,10,Jan|3,MINOR USER,minor user,Minor User,10,Min|4,SENIOR USER,senior user,Senior User,11,Sen
+CDateTimeNow	<executed>
+CDateTimeYear	2023|2023|NULL
+CDateTimeMonth	1|6|NULL
+CDateTimeDay	10|15|NULL
+CDateTimeAddDays	2023-02-14 00:00:00|2023-07-10 00:00:00|NULL
+CDateTimeAddMonths	2023-07-15 00:00:00|2023-12-10 00:00:00|NULL
+CDateTimeAddYears	2024-01-15 00:00:00|2024-06-10 00:00:00|NULL
+CDateTimeDiffDays	571|717|NULL
+CDateTimeDiffMonths	19|24|NULL
+CDateTimeDiffYears	2|2|NULL
+CDateTimeFunctionsInWhere	
+CDateTimeFunctionsInSelect	<executed>
+CDecimalRound	25.5|999.99|NULL
+CDecimalCeiling	1000|26|NULL
+CDecimalFloor	25|999|NULL
+CMathFunctionsInWhere	
+CMathFunctionsInSelect	1,999.99,999.99,1000,999|2,25.5,25.5,26,25|3,NULL,NULL,NULL,NULL
+CFromLimitOffset	
+CFromSelectLimitOffset	
+CFromWhereLimitOffset	1,25,John Doe,1|2,30,Jane Smith,1|4,65,Senior User,1
+CFromWhereSelectLimitOffset	
+CFromOrderByLimitOffset	
+CFromWhereOrderByLimitOffset	
+CFromWhereOrderBySelectLimitOffset	2,Jane Smith,30|1,John Doe,25|3,Minor User,16|4,Senior User,65
+CFromLimitOffsetOnly	1,25,John Doe,1|2,30,Jane Smith,1|3,16,Minor User,0|4,65,Senior User,1
+CFromOffsetOnly	
+CFromLimitOffsetWithoutOrderBy	1,25,John Doe,1|2,30,Jane Smith,1|3,16,Minor User,0|4,65,Senior User,1
+CFromSelectDistinct	Jane Smith|John Doe|Minor User|Senior User
+CFromSelectDistinctWhere	Jane Smith|John Doe|Senior User
+CFromSelectDistinctOrderBy	Jane Smith|John Doe|Minor User|Senior User
+CFromSelectDistinctMultipleColumns	Jane Smith,30|John Doe,25|Minor User,16|Senior User,65
+CFromOrderByLimitDistinct	Jane Smith|John Doe
+CUnion	4,Senior User
+CIntersect	
+CExcept	1,John Doe|2,Jane Smith|4,Senior User
 InsertBasic	1,25,John Doe,1|2,30,Jane Smith,1|3,16,Minor User,0|4,65,Senior User,1|200,25,John Doe,NULL
 UpdateBasic	1,25,John Doe,1|2,30,Jane Smith,1|3,16,Minor User,0|4,65,Senior User,1
 UpdateMultiple	1,25,John Doe,1|2,30,Jane Smith,1|3,16,Minor User,0|4,65,Senior User,1

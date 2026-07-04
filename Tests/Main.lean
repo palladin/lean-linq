@@ -1,4 +1,4 @@
-import Tests.Queries2
+import Tests.QueriesC
 import Tests.StatementsT
 import Tests.Basic
 
@@ -32,7 +32,7 @@ def renderLine (name : String) (c : CompiledSql) : String :=
   s!"{name}\t{c.sql}\t{ps}"
 
 def allCases : List (String × (DatabaseType → CompiledSql)) :=
-  queryCases ++ statementCases
+  queryCases ++ twinCases ++ statementCases
 
 def main (args : List String) : IO UInt32 := do
   let update := args.contains "--update"
