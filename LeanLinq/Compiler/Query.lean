@@ -85,14 +85,25 @@ def Query.hasOrderBy : Query s → Bool
   | .groupedC sp _ _ ord? _ => sp.hasOrder || ord?.isSome
   | .setOpC .. => false
 
+/-- What spine assembly needs from the caller, by terminal shape: *plain*
+terminals take a projection callback — select list plus statement tail —
+which is how scalar queries substitute `COUNT(*)` and pipeline grouping
+injects its `GROUP BY … HAVING …`; *grouped* terminals own their projection
+and tail, so there is nothing to pass. -/
+@[reducible] def SelectK : Terminal → Schema → Type
+  | .plain, s => Row s → CompileM (String × String)
+  | .grouped, _ => Unit
+
 mutual
 
 /-- Compile a full query. Boundary clauses (DISTINCT, LIMIT, set ops,
 GROUP BY) decorate the statement produced by the spine underneath. -/
 def Query.compileStmt : Query s → CompileM String
-  | .spine sp => sp.compileSpine {} Row.defaultSelect
+  | .spine (g := .plain) sp => sp.compileSpine {} Row.defaultSelect
+  | .spine (g := .grouped) sp => sp.compileSpine {} ()
   -- spines assemble with the DISTINCT flag …
-  | .distinctC (.spine sp) => sp.compileSpine { distinct := true } Row.defaultSelect
+  | .distinctC (.spine (g := .plain) sp) => sp.compileSpine { distinct := true } Row.defaultSelect
+  | .distinctC (.spine (g := .grouped) sp) => sp.compileSpine { distinct := true } ()
   -- … other boundary queries become a derived table under a distinct SELECT
   -- (structural recursion forbids `asSpine` here: it can wrap `q`, producing
   -- a larger term)
@@ -142,11 +153,10 @@ def Query.compileStmt : Query s → CompileM String
       return s!"{← a.compileStmt} {op.token} {← b.compileStmt}"
 
 /-- Walk a comprehension spine accumulating FROM sources, JOIN clauses, and
-WHERE conjuncts until the final `yield`, then assemble one flat SELECT via
-the projection callback (which also supplies a statement tail, e.g.
-`GROUP BY … HAVING …`). -/
-def SpineQ.compileSpine : SpineQ g s → StmtAcc →
-    (Row s → CompileM (String × String)) → CompileM String
+WHERE conjuncts until the terminal, then assemble one flat SELECT. The third
+argument's type follows the terminal (`SelectK`): a projection callback for
+plain spines, nothing for grouped ones. -/
+def SpineQ.compileSpine : SpineQ g s → StmtAcc → SelectK g s → CompileM String
   | .yield r, acc, k => do
       let (sel, tail) ← k r
       let head := if acc.distinct then "SELECT DISTINCT" else "SELECT"
@@ -155,8 +165,8 @@ def SpineQ.compileSpine : SpineQ g s → StmtAcc →
         else s!" ORDER BY {String.intercalate ", " acc.orders.toList}"
       return s!"{head} {sel}{renderFroms acc.froms}{renderWheres acc.wheres}{tail}{orderClause}"
   -- the grouped terminal carries its own projection and GROUP BY/HAVING
-  -- tail; the caller's projection callback does not apply
-  | .groupYield ks hv r, acc, _ => do
+  -- tail; by type (`SelectK .grouped`), there is no caller callback at all
+  | .groupYield ks hv r, acc, () => do
       let items ← r.selectList
       let ksStr ← compileGroupKeys ks
       let hvStr ← match hv with
