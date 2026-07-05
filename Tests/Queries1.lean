@@ -72,8 +72,8 @@ def FromProductWhereSelect := Query.from' (ts := TestCtx) products
   |>.where' (fun p => p["ProductName"] !=. "Discontinued")
   |>.select (fun p => ![p["Id"].as "Id", p["ProductName"].as "ProductName"])
 def FromWhereSelectParameterized := Query.from' (ts := TestCtx) customers
-  |>.where' (fun c => c["Age"] >=. SqlExpr.param .int "minAge" &&.
-                      c["Age"] <=. SqlExpr.param .int "maxAge")
+  |>.where' (fun c => c["Age"] >=. SqlExpr.param "minAge" &&.
+                      c["Age"] <=. SqlExpr.param "maxAge")
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"])
 
 def FromWhereFusionTwo := Query.from' (ts := TestCtx) customers

@@ -104,21 +104,41 @@ def Scope.get? (sc : Scope) (alias name : String) (t : SqlType) : Option t.inter
   let ⟨_, v⟩ ← sc.lookup alias
   v.get? name t
 
-/-- A typed database: one row-list per context entry. A query typed against
-`ts` evaluates against any `TableEnv ts` — resolution happened at
-elaboration (`HasTable`), so there is no name lookup, no schema check, and
-no failure mode at run time. -/
-inductive TableEnv : Ctx → Type where
+/-- A typed database: one row-list per table entry of the context. A query
+typed against `c` evaluates against any `TableEnv c.tables` — resolution
+happened at elaboration (`HasTable`), so there is no name lookup, no schema
+check, and no failure mode at run time. -/
+inductive TableEnv : List (String × Schema) → Type where
   | nil : TableEnv []
-  | cons : {n : String} → {s : Schema} → {ts : Ctx} →
+  | cons : {n : String} → {s : Schema} → {ts : List (String × Schema)} →
       List (Values s) → TableEnv ts → TableEnv ((n, s) :: ts)
 
+/-- Typed parameter bindings: one (nullable) value per parameter entry of
+the context — the `TableEnv` of parameters. -/
+inductive ParamEnv : List (String × SqlType) → Type where
+  | nil : ParamEnv []
+  | cons : {n : String} → {t : SqlType} → {ps : List (String × SqlType)} →
+      Option t.interp → ParamEnv ps → ParamEnv ((n, t) :: ps)
+
+/-- Membership of a named parameter in the context's parameter list, by
+instance search — the `HasCol`/`HasTable` idiom once more. The evidence *is*
+the accessor: resolving a parameter at elaboration time means already
+knowing how to read its value from any `ParamEnv ps`, so an unbound
+parameter is untypeable rather than silently NULL. -/
+class HasParam (ps : List (String × SqlType)) (n : String) (t : outParam SqlType) where
+  get : ParamEnv ps → Option t.interp
+
+instance (priority := high) : HasParam ((n, t) :: ps) n t where
+  get | .cons v _ => v
+
+instance [h : HasParam ps n t] : HasParam ((n', t') :: ps) n t where
+  get | .cons _ env => h.get env
+
 /-- Everything evaluation reads besides the query itself: the typed tables,
-the bindings for user-named parameters, and the (optional) current
-timestamp. -/
-structure EvalEnv (ts : Ctx) where
-  tables : TableEnv ts
-  params : List (String × SqlValue) := []
+the typed parameter bindings, and the (optional) current timestamp. -/
+structure EvalEnv (c : Ctx) where
+  tables : TableEnv c.tables
+  params : ParamEnv c.params
   now : Option String := none
 
 /-! ## Decimals: exact milli-units (scale 3) -/
@@ -240,20 +260,6 @@ def sqlSubstring (s : String) (start len : Int) : String :=
   String.ofList ((s.toList.drop (start - 1).toNat).take len.toNat)
 
 /-! ## Parameter values -/
-
-/-- Convert a bound parameter value to a runtime cell of the expected type
-(mismatch → NULL; unreachable for well-typed bindings). -/
-def SqlValue.toCell : (t : SqlType) → SqlValue → Option t.interp
-  | .int, .int i => some i
-  | .long, .long i => some i
-  | .long, .int i => some i
-  | .double, .double f => some f
-  | .decimal, .decimal d => some (parseDecimal d)
-  | .string, .string s => some s
-  | .bool, .bool b => some b
-  | .dateTime, .dateTime s => some (normDateTime s)
-  | .guid, .guid g => some g.toLower
-  | _, _ => none
 
 /-! ## Display -/
 

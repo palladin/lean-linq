@@ -13,16 +13,16 @@ namespace TQ
 stuck), and the corpus only ever runs against the seed context. -/
 
 def ParameterAsIntParam := Query.from' (ts := TestCtx) customers
-  |>.where' (fun c => c["Age"] >. SqlExpr.param .int "minAge")
+  |>.where' (fun c => c["Age"] >. SqlExpr.param "minAge")
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"])
 def ParameterAsStringParam := Query.from' (ts := TestCtx) customers
-  |>.where' (fun c => c["Name"] ==. SqlExpr.param .string "customerName")
+  |>.where' (fun c => c["Name"] ==. SqlExpr.param "customerName")
   |>.select (fun c => ![c["Id"].as "Id", c["Age"].as "Age"])
 def ParameterAsBoolParam := Query.from' (ts := TestCtx) customers
-  |>.where' (fun c => (c["Age"] >. 18) ==. SqlExpr.param .bool "isAdult")
+  |>.where' (fun c => (c["Age"] >. 18) ==. SqlExpr.param "isAdult")
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age"])
 def BoolColumnDirectComparison := Query.from' (ts := TestCtx) customers
-  |>.where' (fun c => c["IsActive"] ==. SqlExpr.param .bool "isActive")
+  |>.where' (fun c => c["IsActive"] ==. SqlExpr.param "isActive")
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age",
                         c["IsActive"].as "IsActive"])
 def BoolColumnLiteralTrue := Query.from' (ts := TestCtx) customers
@@ -69,7 +69,7 @@ def AbsInWhere := Query.from' (ts := TestCtx) customers
 def AbsExpression := Query.from' (ts := TestCtx) customers
   |>.select (fun c => ![c["Id"].as "Id", ((c["Age"] - 50).abs).as "AbsDiff"])
 def AbsParameter := Query.from' (ts := TestCtx) customers
-  |>.where' (fun c => c["Age"].abs >. (SqlExpr.param .int "minAge").abs)
+  |>.where' (fun c => c["Age"].abs >. (SqlExpr.param (ts := TestCtx) "minAge").abs)
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age"])
 
 def FromWhereDecimalComparison := Query.from' (ts := TestCtx) products
@@ -86,7 +86,7 @@ def CaseDecimalExpression := Query.from' (ts := TestCtx) products
         (SqlExpr.caseWhen (p["Price"] >. 100.0) (SqlExpr.str "Moderate")
           (SqlExpr.str "Cheap"))).as "ExpensiveFlag"])
 def ParameterAsDecimalParam := Query.from' (ts := TestCtx) products
-  |>.where' (fun p => p["Price"] >. SqlExpr.param .decimal "minPrice")
+  |>.where' (fun p => p["Price"] >. SqlExpr.param "minPrice")
 
 def FromWhereCreatedDateComparison := Query.from' (ts := TestCtx) products
   |>.where' (fun p => p["CreatedDate"] >. SqlExpr.dt "2024-01-01")
@@ -103,7 +103,7 @@ def CaseDateTimeExpression := Query.from' (ts := TestCtx) products
         (SqlExpr.caseWhen (p["CreatedDate"] <. SqlExpr.dt "2024-01-01") (SqlExpr.str "Recent")
           (SqlExpr.str "New"))).as "Age"])
 def ParameterAsDateTimeParam := Query.from' (ts := TestCtx) products
-  |>.where' (fun p => p["CreatedDate"] >. SqlExpr.param .dateTime "startDate")
+  |>.where' (fun p => p["CreatedDate"] >. SqlExpr.param "startDate")
 
 def FromWhereUniqueIdEquals := Query.from' (ts := TestCtx) products
   |>.where' (fun p => p["UniqueId"] ==. SqlExpr.gd "12345678-1234-1234-1234-123456789012")
@@ -118,7 +118,7 @@ def CaseGuidExpression := Query.from' (ts := TestCtx) products
       (SqlExpr.caseWhen (p["UniqueId"] ==. SqlExpr.gd "00000000-0000-0000-0000-000000000000")
         (SqlExpr.str "Empty") (SqlExpr.str "HasId")).as "Status"])
 def ParameterAsGuidParam := Query.from' (ts := TestCtx) products
-  |>.where' (fun p => p["UniqueId"] ==. SqlExpr.param .guid "targetId")
+  |>.where' (fun p => p["UniqueId"] ==. SqlExpr.param "targetId")
 
 def StringSubstring := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![(p["ProductName"].substring 1 5).as "Sub"])

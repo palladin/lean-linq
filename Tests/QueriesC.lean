@@ -128,8 +128,8 @@ def CFromProductWhereSelect := (query! {
 } : Query TestCtx _)
 def CFromWhereSelectParameterized := (query! {
   from c in customers
-  where c["Age"] >=. SqlExpr.param .int "minAge" &&.
-        c["Age"] <=. SqlExpr.param .int "maxAge"
+  where c["Age"] >=. SqlExpr.param "minAge" &&.
+        c["Age"] <=. SqlExpr.param "maxAge"
   select ![c["Id"].as "Id", c["Name"].as "Name"]
 } : Query TestCtx _)
 def CFromWhereFusionTwo := (query! {
@@ -513,22 +513,22 @@ def CFromSelectMax := ((query! {
 } : Query TestCtx _)).max
 def CParameterAsIntParam := (query! {
   from c in customers
-  where c["Age"] >. SqlExpr.param .int "minAge"
+  where c["Age"] >. SqlExpr.param "minAge"
   select ![c["Id"].as "Id", c["Name"].as "Name"]
 } : Query TestCtx _)
 def CParameterAsStringParam := (query! {
   from c in customers
-  where c["Name"] ==. SqlExpr.param .string "customerName"
+  where c["Name"] ==. SqlExpr.param "customerName"
   select ![c["Id"].as "Id", c["Age"].as "Age"]
 } : Query TestCtx _)
 def CParameterAsBoolParam := (query! {
   from c in customers
-  where (c["Age"] >. 18) ==. SqlExpr.param .bool "isAdult"
+  where (c["Age"] >. 18) ==. SqlExpr.param "isAdult"
   select ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age"]
 } : Query TestCtx _)
 def CBoolColumnDirectComparison := (query! {
   from c in customers
-  where c["IsActive"] ==. SqlExpr.param .bool "isActive"
+  where c["IsActive"] ==. SqlExpr.param "isActive"
   select ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age",
            c["IsActive"].as "IsActive"]
 } : Query TestCtx _)
@@ -600,7 +600,7 @@ def CAbsExpression := (query! {
 } : Query TestCtx _)
 def CAbsParameter := (query! {
   from c in customers
-  where c["Age"].abs >. (SqlExpr.param .int "minAge").abs
+  where c["Age"].abs >. (SqlExpr.param (ts := TestCtx) "minAge").abs
   select ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age"]
 } : Query TestCtx _)
 def CFromWhereDecimalComparison := (query! {
@@ -632,7 +632,7 @@ def CCaseDecimalExpression := (query! {
 } : Query TestCtx _)
 def CParameterAsDecimalParam := (query! {
   from p in products
-  where p["Price"] >. SqlExpr.param .decimal "minPrice"
+  where p["Price"] >. SqlExpr.param "minPrice"
   select p
 } : Query TestCtx _)
 def CFromWhereCreatedDateComparison := (query! {
@@ -664,7 +664,7 @@ def CCaseDateTimeExpression := (query! {
 } : Query TestCtx _)
 def CParameterAsDateTimeParam := (query! {
   from p in products
-  where p["CreatedDate"] >. SqlExpr.param .dateTime "startDate"
+  where p["CreatedDate"] >. SqlExpr.param "startDate"
   select p
 } : Query TestCtx _)
 def CFromWhereUniqueIdEquals := (query! {
@@ -695,7 +695,7 @@ def CCaseGuidExpression := (query! {
 } : Query TestCtx _)
 def CParameterAsGuidParam := (query! {
   from p in products
-  where p["UniqueId"] ==. SqlExpr.param .guid "targetId"
+  where p["UniqueId"] ==. SqlExpr.param "targetId"
   select p
 } : Query TestCtx _)
 def CStringSubstring := (query! {

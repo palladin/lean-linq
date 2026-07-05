@@ -53,8 +53,11 @@ inductive SqlExpr : Ctx → SqlType → Type where
   | dateTimeC (iso : String) : SqlExpr ts .dateTime
   | guidC (g : String) : SqlExpr ts .guid
   | nullC (t : SqlType) : SqlExpr ts t
-  -- user-named parameter
-  | param (t : SqlType) (name : String) : SqlExpr ts t
+  -- user-named parameter: membership in the context's parameter list is
+  -- established here (`HasParam`) and the resolved accessor is stored in
+  -- the node — an unbound parameter is untypeable, and its type comes from
+  -- the context rather than an annotation
+  | param (name : String) {t : SqlType} [inst : HasParam ts.params name t] : SqlExpr ts t
   -- column reference (empty alias renders as a bare column name)
   | field (t : SqlType) (alias name : String) : SqlExpr ts t
   -- operators

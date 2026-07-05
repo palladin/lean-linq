@@ -45,7 +45,7 @@ def SqlExpr.compile : SqlExpr ts t → CompileM String
   | .dateTimeC s   => pushParam (.dateTime s)
   | .guidC g       => pushParam (.guid g)
   | .nullC _       => pure "NULL"
-  | .param _ name  => refParam name
+  | .param (inst := _) name => refParam name
   | .field _ alias name => do
       if alias.isEmpty then quote name
       else return s!"{← quote alias}.{← quote name}"

@@ -18,7 +18,7 @@ def customers : Table "Customers" CustomersS := ⟨⟩
 abbrev OrdersS : Schema := [("OrderId", .int), ("CustomerId", .int)]
 def orders : Table "Orders" OrdersS := ⟨⟩
 
-abbrev BasicCtx : Ctx := [("Customers", CustomersS), ("Orders", OrdersS)]
+abbrev BasicCtx : Ctx := { tables := [("Customers", CustomersS), ("Orders", OrdersS)] }
 
 /-! ## Pipeline style -/
 
@@ -108,12 +108,12 @@ def exLinqSub := (query! {
 
 /-! ## Executable semantics: `Query.run` kernel-evaluates too. -/
 
-def demoEnv : TableEnv BasicCtx :=
+def demoEnv : TableEnv BasicCtx.tables :=
   .cons [.cons (some 1) (.cons (some "Nick") (.cons (some 30) .nil)),
          .cons (some 2) (.cons (some "Ada") (.cons (some 17) .nil))] <|
   .cons [] .nil
 
-#guard ((Query.from' customers
+#guard ((Query.from' (ts := BasicCtx) customers
   |>.where' (fun c => 18 <. c["Age"])
   |>.select (fun c => ![c["Name"].as "Name"])).run demoEnv).length == 1
 
@@ -124,3 +124,6 @@ def demoEnv : TableEnv BasicCtx :=
 #check_failure fun (c : Row BasicCtx CustomersS) => c["Name"] + c["Name"] -- + on strings
 -- a table outside the context: no HasTable instance, so the query is untypeable
 #check_failure (Query.from' (⟨⟩ : Table "Ghost" CustomersS) : Query BasicCtx CustomersS)
+-- a parameter outside the context: no HasParam instance — unbound is untypeable,
+-- not silently NULL
+#check_failure (SqlExpr.param (ts := BasicCtx) "ghost")

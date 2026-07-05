@@ -34,7 +34,7 @@ abbrev ProductsS : Schema :=
 def products : Table "products" ProductsS := ⟨⟩
 
 abbrev PlayCtx : Ctx :=
-  [("customers", CustomersS), ("orders", OrdersS), ("products", ProductsS)]
+  { tables := [("customers", CustomersS), ("orders", OrdersS), ("products", ProductsS)] }
 
 /-! ## Pipeline style -/
 
@@ -115,7 +115,7 @@ value that compiles to SQL (the integration suite differential-tests all
 three engines against it). Table resolution happened at elaboration, so a
 `TableEnv PlayCtx` is all it takes — no names, no failure modes. -/
 
-def demoEnv : TableEnv PlayCtx :=
+def demoEnv : TableEnv PlayCtx.tables :=
   .cons  -- customers
     [.cons (some 1) (.cons (some 25) (.cons (some "John Doe") (.cons (some true) .nil))),
      .cons (some 2) (.cons (some 30) (.cons (some "Jane Smith") (.cons (some true) .nil))),
@@ -143,7 +143,7 @@ def demoEnv : TableEnv PlayCtx :=
 
 -- statements also apply in memory, through the same `HasTable` instance:
 #eval ((customers.update (ts := PlayCtx)
-  |>.setWith "Age" (fun c => c["Age"] + 1)).apply demoEnv : TableEnv PlayCtx) |> fun _ => "applied"
+  |>.setWith "Age" (fun c => c["Age"] + 1)).apply demoEnv : TableEnv PlayCtx.tables) |> fun _ => "applied"
 
 /-! ## The type system at work — uncomment any line for the error
 

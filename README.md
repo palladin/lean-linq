@@ -19,7 +19,7 @@ open LeanLinq
 abbrev CustomersS : Schema := [("Id", .int), ("Name", .string), ("Age", .int)]
 def customers : Table "Customers" CustomersS := ⟨⟩
 
-abbrev MyDb : Ctx := [("Customers", CustomersS)]
+abbrev MyDb : Ctx := { tables := [("Customers", CustomersS)] }
 
 def adults := Query.from' (ts := MyDb) customers
   |>.where' (fun c => 18 <. c["Age"])
@@ -47,9 +47,10 @@ def adults' := (query! {
 ```
 
 Ill-typed queries don't compile: a misspelled column name, comparing an `int` column to a
-`string`, adding two `string` columns, or referencing a table outside the declared context
-(`Ctx`) are all elaboration errors. A query's type records the database context it is
-written against; each table reference is resolved by instance search (`HasTable`) at
+`string`, adding two `string` columns, referencing a table outside the declared context
+(`Ctx`), or referencing an unbound named parameter are all elaboration errors. A query's
+type records the database context it is written against — its tables *and* its named
+parameters — and each reference is resolved by instance search (`HasTable`/`HasParam`) at
 elaboration time, the way columns are resolved by `HasCol`.
 
 **Scope**: lean-linq compiles queries to `CompiledSql` (SQL text + parameter bindings) for a
@@ -104,7 +105,7 @@ the library itself always emits parameterized SQL.
   `isNull`/`isNotNull`, `setNull`/`valueNull` in statements.
 - **Expressions**: `+ - * /` (numeric), `++` (concat), `==. !=. <. <=. >. >=.`,
   `&&. ||. !.`, `like`, `inValues`, `inQuery` (subquery), `caseWhen`,
-  named parameters (`SqlExpr.param`), `abs`/`round`/`ceiling`/`floor`,
+  context-typed named parameters (`SqlExpr.param "minAge"`), `abs`/`round`/`ceiling`/`floor`,
   `substring`/`upper`/`lower`/`trim`/`length`,
   `now`/`year`/`month`/`day`/`addDays`/`addMonths`/`addYears`/`diffDays`/`diffMonths`/`diffYears`.
 - **Queries**: `from'`/`where'`/`select`, `innerJoin`/`leftJoin` (fuse into one
@@ -211,21 +212,23 @@ customers.delete |>.where' (fun c => c["Age"] <. 18)
 ## Running queries in memory
 
 Queries are total, deeply-embedded values, so they carry a denotational
-semantics: `Query.run : Query ts s → TableEnv ts → List (Values s)` evaluates
-the exact query value that compiles to SQL against a *typed* in-memory
-database — SQL semantics included (three-valued NULL logic, LEFT JOIN
-padding, GROUP BY/HAVING with aggregates, exact fixed-point decimals,
-civil-calendar date arithmetic). Statements apply as `TableEnv ts →
-TableEnv ts`.
+semantics: `Query.run : Query c s → TableEnv c.tables → ParamEnv c.params →
+List (Values s)` evaluates the exact query value that compiles to SQL
+against a *typed* in-memory database — SQL semantics included (three-valued
+NULL logic, LEFT JOIN padding, GROUP BY/HAVING with aggregates, exact
+fixed-point decimals, civil-calendar date arithmetic). Statements apply as
+`TableEnv c.tables → TableEnv c.tables`. For a parameterless context the
+`ParamEnv` argument defaults away.
 
-Because every table reference was resolved against the context at
-elaboration time (the `HasTable` instance stored in the query *is* the
-accessor), evaluation performs no name lookup and has no failure mode:
-running a query against a database that lacks one of its tables is not an
-error case — it is untypeable.
+Because every table and parameter reference was resolved against the context
+at elaboration time (the `HasTable`/`HasParam` instance stored in the query
+*is* the accessor), evaluation performs no name lookup and has no failure
+mode: running a query against a database that lacks one of its tables — or
+leaves one of its parameters unbound — is not an error case, it is
+untypeable.
 
 ```lean
-def db : TableEnv MyDb := .cons [/- value rows -/] .nil
+def db : TableEnv MyDb.tables := .cons [/- value rows -/] .nil
 
 #eval adults.run db      -- [(2, "Jane Smith"), (1, "John Doe")]
 ```
@@ -266,12 +269,14 @@ return `Bool`/`Prop`, so SQL needs its own).
 ## Design
 
 - `SqlType` universe; `SqlExpr : Ctx → SqlType → Type` GADT — ill-typed SQL is unrepresentable.
-- `Schema := List (String × SqlType)`; `Ctx := List (String × Schema)`;
-  `Row : Ctx → Schema → Type` heterogeneous tuple of expressions.
+- `Schema := List (String × SqlType)`; `Ctx := { tables : List (String × Schema), params :
+  List (String × SqlType) }`; `Row : Ctx → Schema → Type` heterogeneous tuple of expressions.
 - Table names live at the type level (`Table (n : String) (s : Schema)`); queries are indexed
-  by their ambient context, and `fromT`/`joinT` *store* the `HasTable` membership instance
-  resolved at elaboration — a query carries its referenced tables as capabilities, so the
-  evaluator reads rows through them with no run-time resolution.
+  by their ambient context, and `fromT`/`joinT`/`param` *store* the `HasTable`/`HasParam`
+  membership instance resolved at elaboration — a query carries its referenced tables and
+  parameters as capabilities, so the evaluator reads rows and bindings through them with no
+  run-time resolution. A parameter's type comes from the context, not an annotation
+  (`SqlExpr.param "minAge"`).
 - Two-level query algebra: `SpineQ` (the comprehension spine: `yield`/`guard`/`fromT`/
   `joinT`/`order`/`fromQ`) and `Query` (boundary nodes: `distinct`, `limit`, grouped
   selects, set ops). Separate inductives so the statement ↔ spine compiler recursion is

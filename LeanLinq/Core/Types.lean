@@ -45,11 +45,14 @@ abbrev Customers : Schema := [("Id", .int), ("Name", .string), ("Age", .int)]
 -/
 abbrev Schema := List (String × SqlType)
 
-/-- A table context: the named tables (with schemas) a query is typed
-against. Queries carry a `Ctx` index; the membership of each referenced
-table is established by instance search (`HasTable`) at construction, and a
-`TableEnv ts` supplies the rows at evaluation. Like schemas, concrete
-contexts must be `abbrev`. -/
-abbrev Ctx := List (String × Schema)
+/-- The context a query is typed against: the named tables (with schemas)
+and the named parameters (with types) its database provides. Queries carry a
+`Ctx` index; membership of each referenced table/parameter is established by
+instance search (`HasTable`/`HasParam`) at construction, and a
+`TableEnv c.tables` / `ParamEnv c.params` supplies rows and bindings at
+evaluation. Like schemas, concrete contexts must be `abbrev`. -/
+structure Ctx where
+  tables : List (String × Schema)
+  params : List (String × SqlType) := []
 
 end LeanLinq

@@ -22,7 +22,7 @@ private def prod (id : Int) (name : String) (priceM : Option Int)
 private def ord (id cid pid amt : Int) : Values OrdersS :=
   .cons (some id) (.cons (some cid) (.cons (some pid) (.cons (some amt) .nil)))
 
-def seedEnv : TableEnv TestCtx :=
+def seedEnv : TableEnv TestCtx.tables :=
   .cons
     [cust 1 25 "John Doe" true, cust 2 30 "Jane Smith" true,
      cust 3 16 "Minor User" false, cust 4 65 "Senior User" true] <|

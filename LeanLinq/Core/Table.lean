@@ -23,7 +23,7 @@ performs no name lookup, no schema check, and has no failure mode.
 
 A query over a table absent from the context fails at compile time with
 `failed to synthesize HasTable …`. -/
-class HasTable (ts : Ctx) (n : String) (s : outParam Schema) where
+class HasTable (ts : List (String × Schema)) (n : String) (s : outParam Schema) where
   rows : TableEnv ts → List (Values s)
   set : TableEnv ts → List (Values s) → TableEnv ts
 

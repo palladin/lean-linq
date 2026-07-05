@@ -171,12 +171,13 @@ def SpineQ.evalSpine : SpineQ ts g s → EvalEnv ts → Nat → Scope → List (
 end
 
 /-- Evaluate a query over a typed in-memory database. Everything the query
-references was resolved against `ts` at elaboration time, so any
-`TableEnv ts` — plus bindings for its named parameters — is all it takes. -/
-def Query.run (q : Query ts s) (env : TableEnv ts)
-    (params : List (String × SqlValue) := []) (now : Option String := none) :
+references — tables *and* named parameters — was resolved against `ts` at
+elaboration time, so a `TableEnv` and a `ParamEnv` for the context are all
+it takes. For a parameterless context the `ps` argument defaults away. -/
+def Query.run (q : Query ts s) (env : TableEnv ts.tables)
+    (ps : ParamEnv ts.params := by exact .nil) (now : Option String := none) :
     List (Values s) :=
-  q.evalRows ⟨env, params, now⟩
+  q.evalRows ⟨env, ps, now⟩
 
 /-- Evaluate a scalar aggregate query: the spine's branches are the group. -/
 def ScalarQuery.evalCell : ScalarQuery ts t → EvalEnv ts → Option t.interp
@@ -190,9 +191,9 @@ def ScalarQuery.evalCell : ScalarQuery ts t → EvalEnv ts → Option t.interp
 
 /-- Scalar counterpart of `Query.run`; the result cell is `none` for SQL
 NULL (e.g. SUM over no rows). -/
-def ScalarQuery.run (sc : ScalarQuery ts t) (env : TableEnv ts)
-    (params : List (String × SqlValue) := []) (now : Option String := none) :
+def ScalarQuery.run (sc : ScalarQuery ts t) (env : TableEnv ts.tables)
+    (ps : ParamEnv ts.params := by exact .nil) (now : Option String := none) :
     Option t.interp :=
-  sc.evalCell ⟨env, params, now⟩
+  sc.evalCell ⟨env, ps, now⟩
 
 end LeanLinq

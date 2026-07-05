@@ -52,10 +52,10 @@ inductive SpineQ : Ctx → Terminal → Schema → Type where
   | order : {ts : Ctx} → {g : Terminal} → {s : Schema} →
       List (OrderKey ts) → SpineQ ts g s → SpineQ ts g s
   | fromT : {ts : Ctx} → {g : Terminal} → {n : String} → {s s' : Schema} →
-      [inst : HasTable ts n s] → Table n s →
+      [inst : HasTable ts.tables n s] → Table n s →
       (Row ts s → SpineQ ts g s') → SpineQ ts g s'
   | joinT : {ts : Ctx} → {g : Terminal} → {n : String} → {s s' : Schema} →
-      [inst : HasTable ts n s] → JoinKind → Table n s →
+      [inst : HasTable ts.tables n s] → JoinKind → Table n s →
       (Row ts s → SqlExpr ts .bool) →
       (Row ts s → SpineQ ts g s') → SpineQ ts g s'
   | fromQ : {ts : Ctx} → {g : Terminal} → {s s' : Schema} → Query ts s →
@@ -135,7 +135,7 @@ def bind (q : Query ts s) (k : Row ts s → Query ts s') : Query ts s' :=
   .spine (q.asPlainSpine.bind (fun r => (k r).asPlainSpine))
 
 /-- `FROM t` (named `from'` because `from` is a Lean keyword). -/
-def from' (t : Table n s) [HasTable ts n s] : Query ts s :=
+def from' (t : Table n s) [HasTable ts.tables n s] : Query ts s :=
   .spine (.fromT t (fun r => .yield r))
 
 /-- `WHERE p` (named `where'` because `where` is a Lean keyword). Splices the
@@ -150,13 +150,13 @@ def select (q : Query ts s) (f : Row ts s → Row ts s') : Query ts s' :=
 
 /-- `INNER JOIN t ON on'` with a result selector. Splices into the spine, so
 chained joins compile to one flat statement. -/
-def innerJoin (q : Query ts s₁) (t : Table n s₂) [HasTable ts n s₂]
+def innerJoin (q : Query ts s₁) (t : Table n s₂) [HasTable ts.tables n s₂]
     (on' : Row ts s₁ → Row ts s₂ → SqlExpr ts .bool)
     (sel : Row ts s₁ → Row ts s₂ → Row ts s') : Query ts s' :=
   .spine (q.asPlainSpine.bind fun a => .joinT .inner t (on' a) (fun b => .yield (sel a b)))
 
 /-- `LEFT JOIN t ON on'` with a result selector. -/
-def leftJoin (q : Query ts s₁) (t : Table n s₂) [HasTable ts n s₂]
+def leftJoin (q : Query ts s₁) (t : Table n s₂) [HasTable ts.tables n s₂]
     (on' : Row ts s₁ → Row ts s₂ → SqlExpr ts .bool)
     (sel : Row ts s₁ → Row ts s₂ → Row ts s') : Query ts s' :=
   .spine (q.asPlainSpine.bind fun a => .joinT .left t (on' a) (fun b => .yield (sel a b)))
@@ -257,7 +257,7 @@ their terminal shapes known at elaboration time. -/
 class QuerySource (ts : Ctx) (γ : Type) (s : outParam Schema) where
   bind : γ → (Row ts s → SpineQ ts g s') → SpineQ ts g s'
 
-instance [HasTable ts n s] : QuerySource ts (Table n s) s := ⟨.fromT⟩
+instance [HasTable ts.tables n s] : QuerySource ts (Table n s) s := ⟨.fromT⟩
 instance : QuerySource ts (Query ts s) s :=
   ⟨fun q k =>
     match q with

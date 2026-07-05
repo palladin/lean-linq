@@ -35,16 +35,16 @@ private def buildInsertRow (ee : EvalEnv ts)
         | none => none
       .cons cell (buildInsertRow ee vs rest)
 
-def InsertStmt.apply (i : InsertStmt ts n s) [inst : HasTable ts n s]
-    (env : TableEnv ts) (params : List (String × SqlValue) := [])
-    (now : Option String := none) : TableEnv ts :=
-  let ee : EvalEnv ts := ⟨env, params, now⟩
+def InsertStmt.apply (i : InsertStmt ts n s) [inst : HasTable ts.tables n s]
+    (env : TableEnv ts.tables) (ps : ParamEnv ts.params := by exact .nil)
+    (now : Option String := none) : TableEnv ts.tables :=
+  let ee : EvalEnv ts := ⟨env, ps, now⟩
   inst.set env (inst.rows env ++ [buildInsertRow ee i.values s])
 
-def UpdateStmt.apply (u : UpdateStmt ts n s) [inst : HasTable ts n s]
-    (env : TableEnv ts) (params : List (String × SqlValue) := [])
-    (now : Option String := none) : TableEnv ts :=
-  let ee : EvalEnv ts := ⟨env, params, now⟩
+def UpdateStmt.apply (u : UpdateStmt ts n s) [inst : HasTable ts.tables n s]
+    (env : TableEnv ts.tables) (ps : ParamEnv ts.params := by exact .nil)
+    (now : Option String := none) : TableEnv ts.tables :=
+  let ee : EvalEnv ts := ⟨env, ps, now⟩
   let marker := Row.ofAlias "" s
   inst.set env <| (inst.rows env).map fun v =>
     let sc : Scope := [("", ⟨s, v⟩)]
@@ -58,10 +58,10 @@ def UpdateStmt.apply (u : UpdateStmt ts n s) [inst : HasTable ts n s]
         | ⟨t', e⟩ => acc.setCol nm t' (e.evalG ee [sc])
     else v
 
-def DeleteStmt.apply (d : DeleteStmt ts n s) [inst : HasTable ts n s]
-    (env : TableEnv ts) (params : List (String × SqlValue) := [])
-    (now : Option String := none) : TableEnv ts :=
-  let ee : EvalEnv ts := ⟨env, params, now⟩
+def DeleteStmt.apply (d : DeleteStmt ts n s) [inst : HasTable ts.tables n s]
+    (env : TableEnv ts.tables) (ps : ParamEnv ts.params := by exact .nil)
+    (now : Option String := none) : TableEnv ts.tables :=
+  let ee : EvalEnv ts := ⟨env, ps, now⟩
   let marker := Row.ofAlias "" s
   inst.set env <| (inst.rows env).filter fun v =>
     match d.where? with

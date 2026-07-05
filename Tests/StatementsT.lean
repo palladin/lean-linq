@@ -53,17 +53,17 @@ def UpdateSetNewColumnsNull := products.update (ts := TestCtx)
 to the seed, ordered by `Id` — mirroring the harness's rolled-back
 transaction plus verification SELECT. The table is read back through the
 same `HasTable` instance `apply` writes through. -/
-def si (i : InsertStmt TestCtx n s) [inst : HasTable TestCtx n s] : Case :=
+def si (i : InsertStmt TestCtx n s) [inst : HasTable TestCtx.tables n s] : Case :=
   { compile := fun db => i.toSql db
-    expected := fun env => renderTableRows (inst.rows (i.apply env bindings))
+    expected := fun env => renderTableRows (inst.rows (i.apply env seedParams))
     ordered := true }
-def su (u : UpdateStmt TestCtx n s) [inst : HasTable TestCtx n s] : Case :=
+def su (u : UpdateStmt TestCtx n s) [inst : HasTable TestCtx.tables n s] : Case :=
   { compile := fun db => u.toSql db
-    expected := fun env => renderTableRows (inst.rows (u.apply env bindings))
+    expected := fun env => renderTableRows (inst.rows (u.apply env seedParams))
     ordered := true }
-def sd (d : DeleteStmt TestCtx n s) [inst : HasTable TestCtx n s] : Case :=
+def sd (d : DeleteStmt TestCtx n s) [inst : HasTable TestCtx.tables n s] : Case :=
   { compile := fun db => d.toSql db
-    expected := fun env => renderTableRows (inst.rows (d.apply env bindings))
+    expected := fun env => renderTableRows (inst.rows (d.apply env seedParams))
     ordered := true }
 
 /-- The statement registry: name ↦ per-dialect compilation + expected state. -/

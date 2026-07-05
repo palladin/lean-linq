@@ -116,7 +116,7 @@ def SqlExpr.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts t → Option t.i
   | _, .dateTimeC s => some (normDateTime s)
   | _, .guidC g => some g.toLower
   | _, .nullC _ => none
-  | _, .param t' name => (ee.params.lookup name).bind (SqlValue.toCell t' ·)
+  | _, .param (inst := i) _ => i.get ee.params
   | envs, .field t' alias name => envs.head?.bind fun env => env.get? alias name t'
   | envs, .arith op a b => do
       let x ← a.evalG ee envs

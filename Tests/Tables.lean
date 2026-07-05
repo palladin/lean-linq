@@ -27,10 +27,23 @@ def orders : Table "orders" OrdersS := ⟨⟩
 /-- The test context: what the seed database provides. Queries are defined
 polymorphically over any context with the tables they use; the registry
 instantiates them here. -/
-abbrev TestCtx : Ctx :=
-  [("customers", CustomersS), ("products", ProductsS), ("orders", OrdersS)]
+abbrev TestCtx : Ctx := {
+  tables := [("customers", CustomersS), ("products", ProductsS), ("orders", OrdersS)]
+  params := [("minAge", .int), ("maxAge", .int), ("customerName", .string),
+             ("isAdult", .bool), ("isActive", .bool), ("minPrice", .decimal),
+             ("startDate", .dateTime), ("targetId", .guid)] }
 
-/-- Test values for user-named parameters, aligned with the seed data. -/
+/-- Test values for user-named parameters, aligned with the seed data —
+the typed bindings the evaluator reads (`SqlType.interp` conventions:
+milli-unit decimals, normalized date-times, lower-case guids). -/
+def seedParams : ParamEnv TestCtx.params :=
+  .cons (some 18) <| .cons (some 65) <| .cons (some "John Doe") <|
+  .cons (some true) <| .cons (some true) <| .cons (some 100000) <|
+  .cons (some "2023-01-01 00:00:00") <|
+  .cons (some "11111111-1111-1111-1111-111111111111") .nil
+
+/-- The same values as SQL literal sources, for the integration runner's
+execution-only parameter inlining. -/
 def bindings : List (String × SqlValue) := [
   ("minAge", .int 18), ("maxAge", .int 65),
   ("customerName", .string "John Doe"),
@@ -86,20 +99,20 @@ def sniffOrdered (c : CompiledSql) : Bool := (c.sql.splitOn " ORDER BY ").length
 the latter computed by the evaluator over the typed seed database. -/
 structure Case where
   compile : DatabaseType → CompiledSql
-  expected : TableEnv TestCtx → String
+  expected : TableEnv TestCtx.tables → String
   ordered : Bool
 
 /-- Register a query. -/
 def q (query : Query TestCtx s) : Case :=
   let ordered := sniffOrdered (query.toSql .sqlite)
   { compile := fun db => query.toSql db
-    expected := fun env => renderRows ordered ((query.run env bindings).map cellsOf)
+    expected := fun env => renderRows ordered ((query.run env seedParams).map cellsOf)
     ordered }
 
 /-- Register a scalar aggregate query: one row, one cell. -/
 def sq (sc : ScalarQuery TestCtx t) : Case :=
   { compile := fun db => sc.toSql db
-    expected := fun env => renderCell t (sc.run env bindings)
+    expected := fun env => renderCell t (sc.run env seedParams)
     ordered := false }
 
 end TQ
