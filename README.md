@@ -213,12 +213,18 @@ customers.delete |>.where' (fun c => c["Age"] <. 18)
 
 Queries are total, deeply-embedded values, so they carry a denotational
 semantics: `Query.run : Query c s → TableEnv c.tables → ParamEnv c.params →
-List (Values s)` evaluates the exact query value that compiles to SQL
-against a *typed* in-memory database — SQL semantics included (three-valued
-NULL logic, LEFT JOIN padding, GROUP BY/HAVING with aggregates, exact
-fixed-point decimals, civil-calendar date arithmetic). Statements apply as
-`TableEnv c.tables → TableEnv c.tables`. For a parameterless context the
-`ParamEnv` argument defaults away.
+Except EvalError (List (Values s))` evaluates the exact query value that
+compiles to SQL against a *typed* in-memory database — SQL semantics
+included (three-valued NULL logic, LEFT JOIN padding, GROUP BY/HAVING with
+aggregates, exact fixed-point decimals, civil-calendar date arithmetic).
+Statements apply as `TableEnv c.tables → Except EvalError (TableEnv
+c.tables)`. For a parameterless context the `ParamEnv` argument defaults
+away.
+
+NULL and errors are separate channels, never conflated: `Nullable`'s `none`
+is SQL NULL and only NULL, while exceptional, statement-aborting conditions
+— division by zero, `now` without a clock — are explicit `EvalError`s
+(`CASE WHEN` stays lazy, as in SQL, so a guarded division doesn't abort).
 
 Because every table and parameter reference was resolved against the context
 at elaboration time (the `HasTable`/`HasParam` instance stored in the query
@@ -230,7 +236,7 @@ untypeable.
 ```lean
 def db : TableEnv MyDb.tables := .cons [/- value rows -/] .nil
 
-#eval adults.run db      -- [(2, "Jane Smith"), (1, "John Doe")]
+#eval adults.run db      -- Except.ok [(2, "Jane Smith"), (1, "John Doe")]
 ```
 
 This is also how the test suite works: the integration runner computes every

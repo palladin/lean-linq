@@ -228,11 +228,11 @@ def ScalarQuery.toSql (sq : ScalarQuery ts t) (db : DatabaseType := .sqlite) : C
 same type. Stored as its staged actions (see `SubQuery`): compilation for
 `toSql`, evaluation for `run`. -/
 def SqlExpr.inQuery (e : SqlExpr ts t) (q : Query ts [(n, t)]) : SqlExpr ts .bool :=
-  .inSub e ⟨q.compileStmt, fun ee => (q.evalRows ee).map fun | .cons c .nil => c⟩
+  .inSub e ⟨q.compileStmt, fun ee => (q.evalRows ee).map fun rows => rows.map fun | .cons c .nil => c⟩
 
 /-- Embed a scalar aggregate query as an expression:
 `c["Age"] >. (customers' |>.select … |>.avg).embed`. -/
 def ScalarQuery.embed (sq : ScalarQuery ts t) : SqlExpr ts t :=
-  .scalarSub ⟨sq.compile, fun ee => [sq.evalCell ee]⟩
+  .scalarSub ⟨sq.compile, fun ee => (sq.evalCell ee).map fun c => [c]⟩
 
 end LeanLinq

@@ -55,7 +55,7 @@ def bindings : List (String × SqlValue) := [
 
 /-! ## Rendering evaluated rows (the harness's normalized cell format) -/
 
-def renderCell : (t : SqlType) → Option t.interp → String
+def renderCell : (t : SqlType) → Nullable t → String
   | _, none => "NULL"
   | .int, some i => toString i
   | .long, some i => toString i
@@ -102,17 +102,28 @@ structure Case where
   expected : TableEnv TestCtx.tables → String
   ordered : Bool
 
+/-- Rendered when evaluation aborts (`EvalError`) — never matches engine
+output, so it surfaces as a loud mismatch. No registered case errors today;
+an engine-divergent condition (e.g. division by zero) would show up here. -/
+def evalFailure (e : EvalError) : String := s!"<eval error: {repr e}>"
+
 /-- Register a query. -/
 def q (query : Query TestCtx s) : Case :=
   let ordered := sniffOrdered (query.toSql .sqlite)
   { compile := fun db => query.toSql db
-    expected := fun env => renderRows ordered ((query.run env seedParams).map cellsOf)
+    expected := fun env =>
+      match query.run env seedParams with
+      | .ok rows => renderRows ordered (rows.map cellsOf)
+      | .error e => evalFailure e
     ordered }
 
 /-- Register a scalar aggregate query: one row, one cell. -/
 def sq (sc : ScalarQuery TestCtx t) : Case :=
   { compile := fun db => sc.toSql db
-    expected := fun env => renderCell t (sc.run env seedParams)
+    expected := fun env =>
+      match sc.run env seedParams with
+      | .ok cell => renderCell t cell
+      | .error e => evalFailure e
     ordered := false }
 
 end TQ

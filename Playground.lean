@@ -125,9 +125,14 @@ def demoEnv : TableEnv PlayCtx.tables :=
      .cons (some 2) (.cons (some 2) (.cons (some 1) (.cons (some 300) .nil)))] <|
   .cons [] .nil  -- products
 
-#eval adults.run demoEnv             -- [(2, "Jane Smith"), (1, "John Doe")]
-#eval adults'.run demoEnv == adults.run demoEnv   -- twins agree at run time too
-#eval spending.run demoEnv           -- joins/grouping run in memory as well
+#eval adults.run demoEnv    -- Except.ok [(2, "Jane Smith"), (1, "John Doe")]
+#eval (adults'.run demoEnv).toOption == (adults.run demoEnv).toOption   -- twins agree
+#eval spending.run demoEnv  -- joins/grouping run in memory as well
+
+-- NULL is data; exceptional conditions are the explicit error channel:
+#eval (Query.from' (ts := PlayCtx) customers
+  |>.select (fun c => ![(c["Age"] / 0).as "Boom"])).run demoEnv
+-- Except.error LeanLinq.EvalError.divByZero
 
 /-! ## Statements -/
 
@@ -143,7 +148,7 @@ def demoEnv : TableEnv PlayCtx.tables :=
 
 -- statements also apply in memory, through the same `HasTable` instance:
 #eval ((customers.update (ts := PlayCtx)
-  |>.setWith "Age" (fun c => c["Age"] + 1)).apply demoEnv : TableEnv PlayCtx.tables) |> fun _ => "applied"
+  |>.setWith "Age" (fun c => c["Age"] + 1)).apply demoEnv) |> fun r => if r matches .ok _ then "applied" else "error"
 
 /-! ## The type system at work — uncomment any line for the error
 

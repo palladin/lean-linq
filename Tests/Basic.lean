@@ -115,7 +115,8 @@ def demoEnv : TableEnv BasicCtx.tables :=
 
 #guard ((Query.from' (ts := BasicCtx) customers
   |>.where' (fun c => 18 <. c["Age"])
-  |>.select (fun c => ![c["Name"].as "Name"])).run demoEnv).length == 1
+  |>.select (fun c => ![c["Name"].as "Name"])).run demoEnv
+    |>.toOption.map (·.length)) == some 1
 
 /-! ## Negative tests: these must NOT elaborate. -/
 

@@ -27,7 +27,7 @@ not just enforced at the smart constructors (`SqlExpr.inQuery` /
 `ScalarQuery.embed` — the only intended producers). -/
 structure SubQuery (ts : Ctx) (t : SqlType) where
   compile : CompileM String
-  eval : EvalEnv ts → List (Option t.interp)
+  eval : EvalEnv ts → Except EvalError (List (Nullable t))
 
 /-- Allocate a fresh source alias: `a0`, `a1`, … -/
 def freshAlias : CompileM String := fun _ =>

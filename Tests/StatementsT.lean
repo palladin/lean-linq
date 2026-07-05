@@ -55,15 +55,24 @@ transaction plus verification SELECT. The table is read back through the
 same `HasTable` instance `apply` writes through. -/
 def si (i : InsertStmt TestCtx n s) [inst : HasTable TestCtx.tables n s] : Case :=
   { compile := fun db => i.toSql db
-    expected := fun env => renderTableRows (inst.rows (i.apply env seedParams))
+    expected := fun env =>
+      match i.apply env seedParams with
+      | .ok env' => renderTableRows (inst.rows env')
+      | .error e => evalFailure e
     ordered := true }
 def su (u : UpdateStmt TestCtx n s) [inst : HasTable TestCtx.tables n s] : Case :=
   { compile := fun db => u.toSql db
-    expected := fun env => renderTableRows (inst.rows (u.apply env seedParams))
+    expected := fun env =>
+      match u.apply env seedParams with
+      | .ok env' => renderTableRows (inst.rows env')
+      | .error e => evalFailure e
     ordered := true }
 def sd (d : DeleteStmt TestCtx n s) [inst : HasTable TestCtx.tables n s] : Case :=
   { compile := fun db => d.toSql db
-    expected := fun env => renderTableRows (inst.rows (d.apply env seedParams))
+    expected := fun env =>
+      match d.apply env seedParams with
+      | .ok env' => renderTableRows (inst.rows env')
+      | .error e => evalFailure e
     ordered := true }
 
 /-- The statement registry: name ↦ per-dialect compilation + expected state. -/

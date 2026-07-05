@@ -15,7 +15,7 @@ namespace LeanLinq
 
 /-- Write a cell by column name (first match; type mismatch keeps the old
 value — unreachable for `HasCol`-checked statements). -/
-private def Values.setCol (name : String) (t' : SqlType) (cell : Option t'.interp) :
+private def Values.setCol (name : String) (t' : SqlType) (cell : Nullable t') :
     {s : Schema} → Values s → Values s
   | _, .nil => .nil
   | _, .cons (name := n) (t := tc) c r =>
@@ -26,48 +26,52 @@ private def Values.setCol (name : String) (t' : SqlType) (cell : Option t'.inter
 /-- Build the inserted row in schema order: unmentioned columns are NULL. -/
 private def buildInsertRow (ee : EvalEnv ts)
     (vs : List (String × ((u : SqlType) × SqlExpr ts u))) :
-    (s : Schema) → Values s
-  | [] => .nil
-  | (n, t) :: rest =>
-      let cell : Option t.interp :=
+    (s : Schema) → Except EvalError (Values s)
+  | [] => pure .nil
+  | (n, t) :: rest => do
+      let cell : Nullable t ←
         match vs.find? (·.1 == n) with
-        | some (_, ⟨u, e⟩) => if h : u = t then h ▸ (e.evalG ee [([] : Scope)]) else none
-        | none => none
-      .cons cell (buildInsertRow ee vs rest)
+        | some (_, ⟨u, e⟩) =>
+            if h : u = t then do pure (h ▸ (← e.evalG ee [([] : Scope)]))
+            else pure none
+        | none => pure none
+      pure (.cons cell (← buildInsertRow ee vs rest))
 
 def InsertStmt.apply (i : InsertStmt ts n s) [inst : HasTable ts.tables n s]
     (env : TableEnv ts.tables) (ps : ParamEnv ts.params := by exact .nil)
-    (now : Option String := none) : TableEnv ts.tables :=
+    (now : Option String := none) : Except EvalError (TableEnv ts.tables) := do
   let ee : EvalEnv ts := ⟨env, ps, now⟩
-  inst.set env (inst.rows env ++ [buildInsertRow ee i.values s])
+  pure (inst.set env (inst.rows env ++ [← buildInsertRow ee i.values s]))
 
 def UpdateStmt.apply (u : UpdateStmt ts n s) [inst : HasTable ts.tables n s]
     (env : TableEnv ts.tables) (ps : ParamEnv ts.params := by exact .nil)
-    (now : Option String := none) : TableEnv ts.tables :=
+    (now : Option String := none) : Except EvalError (TableEnv ts.tables) := do
   let ee : EvalEnv ts := ⟨env, ps, now⟩
   let marker := Row.ofAlias "" s
-  inst.set env <| (inst.rows env).map fun v =>
+  let rows ← (inst.rows env).mapM fun v => do
     let sc : Scope := [("", ⟨s, v⟩)]
-    let hit := match u.where? with
-      | none => true
-      | some p => (p marker).evalG ee [sc] == some true
+    let hit ← match u.where? with
+      | none => pure true
+      | some p => do pure ((← (p marker).evalG ee [sc]) == some true)
     if hit then
       -- every SET expression sees the pre-update row (SQL semantics)
-      u.sets.foldl (init := v) fun acc (nm, f) =>
+      u.sets.foldlM (init := v) fun acc (nm, f) =>
         match f marker with
-        | ⟨t', e⟩ => acc.setCol nm t' (e.evalG ee [sc])
-    else v
+        | ⟨t', e⟩ => do pure (acc.setCol nm t' (← e.evalG ee [sc]))
+    else pure v
+  pure (inst.set env rows)
 
 def DeleteStmt.apply (d : DeleteStmt ts n s) [inst : HasTable ts.tables n s]
     (env : TableEnv ts.tables) (ps : ParamEnv ts.params := by exact .nil)
-    (now : Option String := none) : TableEnv ts.tables :=
+    (now : Option String := none) : Except EvalError (TableEnv ts.tables) := do
   let ee : EvalEnv ts := ⟨env, ps, now⟩
   let marker := Row.ofAlias "" s
-  inst.set env <| (inst.rows env).filter fun v =>
+  let rows ← (inst.rows env).filterM fun v => do
     match d.where? with
-    | none => false                     -- unconditional DELETE clears the table
+    | none => pure false                -- unconditional DELETE clears the table
     | some p =>
         let sc : Scope := [("", ⟨s, v⟩)]
-        (p marker).evalG ee [sc] != some true
+        pure ((← (p marker).evalG ee [sc]) != some true)
+  pure (inst.set env rows)
 
 end LeanLinq
