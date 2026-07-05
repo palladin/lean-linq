@@ -1,13 +1,8 @@
 import LeanLinq.Core.Query
 import LeanLinq.Compiler.Expr
+import LeanLinq.Eval.Query
 
 namespace LeanLinq
-
-/-- Materialize the staged row of a source: every column becomes a `field`
-reference through the given alias (empty alias ⇒ bare column names). -/
-def Row.ofAlias (alias : String) : (s : Schema) → Row s
-  | [] => .nil
-  | (name, t) :: s => .cons (.field t alias name) (Row.ofAlias alias s)
 
 /-- Render a projected row as a SELECT list: `expr AS name` per column. -/
 def Row.selectList : {s : Schema} → Row s → CompileM (List String)
@@ -229,13 +224,14 @@ def ScalarQuery.toSql (sq : ScalarQuery t) (db : DatabaseType := .sqlite) : Comp
   runCompile sq.compile db
 
 /-- `e IN (subquery)` — the subquery must project exactly one column of the
-same type. Stored as a staged compilation action (see `SubQuery`). -/
+same type. Stored as its staged actions (see `SubQuery`): compilation for
+`toSql`, evaluation for `run`. -/
 def SqlExpr.inQuery (e : SqlExpr t) (q : Query [(n, t)]) : SqlExpr .bool :=
-  .inSub e ⟨q.compileStmt⟩
+  .inSub e ⟨q.compileStmt, fun db => (q.run db).map fun | .cons c .nil => c⟩
 
 /-- Embed a scalar aggregate query as an expression:
 `c["Age"] >. (customers' |>.select … |>.avg).embed`. -/
 def ScalarQuery.embed (sq : ScalarQuery t) : SqlExpr t :=
-  .scalarSub ⟨sq.compile⟩
+  .scalarSub ⟨sq.compile, fun db => [sq.evalCell db]⟩
 
 end LeanLinq

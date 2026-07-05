@@ -32,7 +32,7 @@ def renderLine (name : String) (c : CompiledSql) : String :=
   s!"{name}\t{c.sql}\t{ps}"
 
 def allCases : List (String × (DatabaseType → CompiledSql)) :=
-  queryCases ++ twinCases ++ statementCases
+  (queryCases ++ twinCases ++ statementCases).map fun (n, c) => (n, c.compile)
 
 def main (args : List String) : IO UInt32 := do
   let update := args.contains "--update"

@@ -1,4 +1,4 @@
-import LeanLinq.Core.Types
+import LeanLinq.Core.Value
 
 namespace LeanLinq
 
@@ -12,17 +12,21 @@ structure CompileState where
 abbrev CompileM := ReaderT DatabaseType (StateM CompileState)
 
 /-- A staged subquery producing a single column of type `t`: expressions
-embed subqueries as their *compilation action* rather than their AST. This
-breaks the `SqlExpr`/`Query` cycle that would otherwise violate strict
-positivity through the HOAS binders (`Row → Query` puts `Query` occurrences
-inside `Row`'s expression fields, to the left of an arrow).
+embed subqueries as their *staged actions* — compilation and evaluation —
+rather than their AST. This breaks the `SqlExpr`/`Query` cycle that would
+otherwise violate strict positivity through the HOAS binders (`Row → Query`
+puts `Query` occurrences inside `Row`'s expression fields, to the left of an
+arrow); the actions' types (`CompileM String`, `Db → …`) mention neither
+inductive, so positivity is untouched.
 
-The index is a phantom carrying the erased query's column type, so the
-type-match between a subquery and the expression it embeds into is visible
-in the AST, not just enforced at the smart constructors
+The index carries the erased query's column type: it types the phantom
+`compile` side and is load-bearing for `eval`, whose cells it types. The
+type-match between a subquery and the expression it embeds into is therefore
+visible in the AST, not just enforced at the smart constructors
 (`SqlExpr.inQuery` / `ScalarQuery.embed` — the only intended producers). -/
 structure SubQuery (t : SqlType) where
   compile : CompileM String
+  eval : Db → List (Option t.interp)
 
 /-- Allocate a fresh source alias: `a0`, `a1`, … -/
 def freshAlias : CompileM String := fun _ =>

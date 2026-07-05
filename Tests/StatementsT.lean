@@ -46,12 +46,24 @@ def UpdateSetNewColumnsNull := products.update
   |>.setNull "Price" |>.setNull "CreatedDate" |>.setNull "UniqueId"
   |>.where' (fun p => p["Id"] ==. 101)
 
-def si (i : InsertStmt s) : DatabaseType → CompiledSql := fun db => i.toSql db
-def su (u : UpdateStmt s) : DatabaseType → CompiledSql := fun db => u.toSql db
-def sd (d : DeleteStmt s) : DatabaseType → CompiledSql := fun db => d.toSql db
+/-- Register a statement: expected = the statement's table after applying it
+to the seed, ordered by `Id` — mirroring the harness's rolled-back
+transaction plus verification SELECT. -/
+def si (i : InsertStmt s) : Case :=
+  { compile := fun db => i.toSql db
+    expected := fun db => renderTable (i.apply db) i.table.name s
+    ordered := true }
+def su (u : UpdateStmt s) : Case :=
+  { compile := fun db => u.toSql db
+    expected := fun db => renderTable (u.apply db) u.table.name s
+    ordered := true }
+def sd (d : DeleteStmt s) : Case :=
+  { compile := fun db => d.toSql db
+    expected := fun db => renderTable (d.apply db) d.table.name s
+    ordered := true }
 
-/-- The statement registry: name ↦ per-dialect compilation. -/
-def statementCases : List (String × (DatabaseType → CompiledSql)) := [
+/-- The statement registry: name ↦ per-dialect compilation + expected state. -/
+def statementCases : List (String × Case) := [
   ("InsertBasic", si InsertBasic), ("UpdateBasic", su UpdateBasic),
   ("UpdateMultiple", su UpdateMultiple), ("UpdateConditional", su UpdateConditional),
   ("DeleteBasic", sd DeleteBasic), ("DeleteConditional", sd DeleteConditional),

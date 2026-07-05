@@ -905,7 +905,7 @@ def CExcept :=
   })
 
 /-- Comprehension twins registry: `C<Original>` for every pipeline query. -/
-def twinCases : List (String × (DatabaseType → CompiledSql)) := [
+def twinCases : List (String × Case) := [
   ("CFrom", q CFrom), ("CFromStatic", q CFromStatic), ("CFromSelect", q CFromSelect),
   ("CFromSelectSingle", q CFromSelectSingle),
   ("CFromSelectExpression", q CFromSelectExpression),

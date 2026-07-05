@@ -101,6 +101,17 @@ def exLinqSub := query! {
   { sql := "SELECT \"a0\".\"Name\" AS \"Name\", \"a1\".\"OrderId\" AS \"OrderId\" FROM \"Customers\" \"a0\", \"Orders\" \"a1\" WHERE (\"a0\".\"Id\" = \"a1\".\"CustomerId\")",
     params := #[] }
 
+/-! ## Executable semantics: `Query.run` kernel-evaluates too. -/
+
+def demoDb : Db :=
+  { tables := [("Customers", ⟨CustomersS,
+      [.cons (some 1) (.cons (some "Nick") (.cons (some 30) .nil)),
+       .cons (some 2) (.cons (some "Ada") (.cons (some 17) .nil))]⟩)] }
+
+#guard ((Query.from' customers
+  |>.where' (fun c => 18 <. c["Age"])
+  |>.select (fun c => ![c["Name"].as "Name"])).run demoDb).length == 1
+
 /-! ## Negative tests: these must NOT elaborate. -/
 
 #check_failure fun (c : Row CustomersS) => c["Nmae"]               -- misspelled column

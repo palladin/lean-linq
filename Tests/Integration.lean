@@ -1,6 +1,6 @@
 import Tests.QueriesC
 import Tests.StatementsT
-import Tests.Oracle
+import Tests.Seed
 
 /-! # Integration runner
 
@@ -8,26 +8,19 @@ Executes every registered query/statement against live databases:
 SQLite (local temp file), PostgreSQL and SQL Server (docker compose services,
 driven through `psql`/`sqlcmd` inside the containers). Parameters are inlined
 as dialect-escaped literals *for execution only* — the library itself never
-inlines. Row results are normalized and compared against
-`Tests/golden/results-{db}.golden`; regenerate with
-`lake exe integration --update`. A cross-dialect comparison then checks that
-all engines agree, modulo a known-variant allowlist (AVG division semantics).
+inlines. Row results are normalized and checked three ways: against
+`Tests/golden/results-{db}.golden` (regenerate with
+`lake exe integration --update`); against the *evaluator* — every case's
+expected rows are computed by `Query.run` over `seedDb`, so the engines are
+differential-tested against the executable semantics; and against each other
+(cross-dialect agreement, modulo a known-variant allowlist — AVG division
+semantics).
 
 Usage: `lake exe integration [--db sqlite,postgres,mssql] [--update]` -/
 
 open LeanLinq TQ
 
 /-! ## Parameter inlining (execution only) -/
-
-/-- Test values for user-named parameters, aligned with the seed data. -/
-def bindings : List (String × SqlValue) := [
-  ("minAge", .int 18), ("maxAge", .int 65),
-  ("customerName", .string "John Doe"),
-  ("isAdult", .bool true), ("isActive", .bool true),
-  ("minPrice", .decimal "100.00"),
-  ("startDate", .dateTime "2023-01-01"),
-  ("targetId", .guid "11111111-1111-1111-1111-111111111111")
-]
 
 def sqlLiteral (db : DatabaseType) : SqlValue → String
   | .int i => toString i
@@ -201,9 +194,9 @@ def skipResults : List String :=
    "CDateTimeNow", "CDateTimeFunctionsInSelect"]
 
 /-- Cases where engines legitimately disagree; excluded from the
-cross-dialect comparison and the oracle, still checked against their
-per-dialect golden. `FromSelectAvg`: AVG over integers is integer division on
-SQL Server (256) but exact on PostgreSQL/SQLite (256.25).
+cross-dialect comparison and the evaluator check, still checked against
+their per-dialect golden. `FromSelectAvg`: AVG over integers is integer
+division on SQL Server (256) but exact on PostgreSQL/SQLite (256.25).
 `FromGroupByMultipleOrderBySelect`: ORDER BY COUNT(*) DESC where every count
 ties, so order is engine-specific. -/
 def crossDialectAllowlist : List String := [
@@ -259,10 +252,10 @@ def main (args : List String) : IO UInt32 := do
       | some csv => csv.splitOn ","
       | none => dialects.map Prod.fst
     | none => dialects.map Prod.fst
-  let allNamed : List (Bool × String × (DatabaseType → CompiledSql)) :=
-    queryCases.map (fun (n, f) => (false, n, f)) ++
-    twinCases.map (fun (n, f) => (false, n, f)) ++
-    statementCases.map (fun (n, f) => (true, n, f))
+  let allNamed : List (Bool × String × Case) :=
+    queryCases.map (fun (n, c) => (false, n, c)) ++
+    twinCases.map (fun (n, c) => (false, n, c)) ++
+    statementCases.map (fun (n, c) => (true, n, c))
   let sqliteFile ← do
     let tmp := s!"/tmp/leanlinq-integration.db"
     if ← System.FilePath.pathExists tmp then IO.FS.removeFile tmp
@@ -283,28 +276,25 @@ def main (args : List String) : IO UInt32 := do
       failures := failures + 1
       continue
     let mut results : List CaseResult := []
-    for (isStmt, name, f) in allNamed do
-      let r ← runCase db sqliteFile isStmt name (f db)
+    for (isStmt, name, c) in allNamed do
+      let r ← runCase db sqliteFile isStmt name (c.compile db)
       if r.isError then
         failures := failures + 1
         IO.eprintln s!"EXEC FAIL [{dn}] {name}: {r.result}"
       results := results ++ [r]
     collected := collected ++ [(dn, results)]
-    -- in-memory oracle: independently-derived expected rows
-    for r in results do
-      if !r.isError && r.result != "<executed>" then
-        -- comprehension twins (C<Name>) share the original's oracle
-        let oracle? := (Oracle.oracles.lookup r.name).orElse fun _ =>
-          if r.name.startsWith "C" then
-            Oracle.oracles.lookup ((r.name.toList.drop 1) |> String.ofList)
-          else none
-        match oracle? with
-        | some oc =>
-            let want := Oracle.render oc
-            if want != r.result then
-              failures := failures + 1
-              IO.eprintln s!"ORACLE MISMATCH [{dn}] {r.name}\n  oracle: {want}\n  engine: {r.result}"
-        | none => pure ()
+    -- the evaluator as oracle: expected rows computed by `Query.run` over
+    -- `seedDb` from the same query value that produced the SQL (skipped only
+    -- where no single answer exists: time-dependent results self-skip as
+    -- `<executed>`, engine-variant cases sit on the allowlist)
+    for (entry, r) in allNamed.zip results do
+      let (_, name, c) := entry
+      if !r.isError && r.result != "<executed>" &&
+         !crossDialectAllowlist.contains name then
+        let want := c.expected seedDb
+        if want != r.result then
+          failures := failures + 1
+          IO.eprintln s!"EVAL MISMATCH [{dn}] {name}\n  eval:   {want}\n  engine: {r.result}"
     let lines := results.map fun r => s!"{r.name}\t{r.result}"
     if update then
       if results.any (·.isError) then

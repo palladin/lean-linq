@@ -76,10 +76,10 @@ the library itself always emits parameterized SQL.
 
 - Row results are normalized (booleans, decimal trailing zeros, datetime
   precision, guid case, NULL sentinels, row order for unordered queries) and
-  checked three ways: against an **in-memory oracle** (`Tests/Oracle.lean` —
-  independently-derived expected rows for every deterministic case), against
-  per-dialect goldens (`Tests/golden/results-{db}.golden`), and across
-  engines.
+  checked three ways: against the **evaluator** (`Query.run` over the seed
+  database — expected rows computed from the same query value that produced
+  the SQL, for every deterministic case), against per-dialect goldens
+  (`Tests/golden/results-{db}.golden`), and across engines.
 - Statements run inside a transaction: execute, verify table state with a
   SELECT, roll back.
 - A cross-dialect comparison then checks that all engines agree on every case,
@@ -203,6 +203,28 @@ customers.delete |>.where' (fun c => c["Age"] <. 18)
 -- DELETE FROM "Customers" WHERE ("Age" < :p0)
 ```
 
+## Running queries in memory
+
+Queries are total, deeply-embedded values, so they carry a denotational
+semantics: `Query.run : Query s → Db → List (Values s)` evaluates the exact
+query value that compiles to SQL against an in-memory database — SQL
+semantics included (three-valued NULL logic, LEFT JOIN padding, GROUP
+BY/HAVING with aggregates, exact fixed-point decimals, civil-calendar date
+arithmetic). Statements apply as `Db → Db`.
+
+```lean
+def db : Db := { tables := [("customers", ⟨CustomersS, [/- value rows -/]⟩)] }
+
+#eval adults.run db      -- [(2, "Jane Smith"), (1, "John Doe")]
+```
+
+This is also how the test suite works: the integration runner computes every
+case's expected rows with `Query.run` and differential-tests all three
+engines against it — the executable semantics is the oracle, not hand-written
+expectations. And it is the foundation for stating propositions about result
+sets (rows of `q.where' p` satisfy `p`, `orderBy` results are sorted, …) as
+theorems about `⟦q⟧ = q.run`.
+
 ## Rows and operators
 
 Row access and construction:
@@ -234,14 +256,17 @@ return `Bool`/`Prop`, so SQL needs its own).
   `joinT`/`order`/`fromQ`) and `Query` (boundary nodes: `distinct`, `limit`, grouped
   selects, set ops). Separate inductives so the statement ↔ spine compiler recursion is
   structural. HOAS binders; illegal column references are type errors at the binding site.
-- Subqueries inside expressions (`inQuery`, `.embed`) are stored as *staged compilation
-  actions*, not ASTs — a mutual `SqlExpr`/`Query` block would violate strict positivity
-  through the HOAS binders (`Row → Query` puts `Query` inside `Row`'s expression fields,
-  left of an arrow).
+- Subqueries inside expressions (`inQuery`, `.embed`) are stored as *staged actions*
+  (compilation and evaluation), not ASTs — a mutual `SqlExpr`/`Query` block would violate
+  strict positivity through the HOAS binders (`Row → Query` puts `Query` inside `Row`'s
+  expression fields, left of an arrow).
 - Compiler: a `StateM` (alias counter + parameter accumulator) walk that renders the spine as
-  one flat SELECT. Everything is total — `Query` is a reflexive inductive, so structural
-  recursion covers HOAS continuations applied to any row — which means the kernel itself can
-  run the compiler (`#guard` tests of generated SQL at elaboration time).
+  one flat SELECT. The evaluator (`Query.run`) is the same walk under a different
+  interpretation — binders instantiated with the same alias-marker rows, an alias→row
+  environment where the compiler accumulates clause text. Everything is total — `Query` is a
+  reflexive inductive, so structural recursion covers HOAS continuations applied to any row —
+  which means the kernel itself can run both (`#guard` tests of generated SQL *and* of
+  evaluated rows at elaboration time).
 
 ## Status
 

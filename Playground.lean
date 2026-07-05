@@ -100,6 +100,22 @@ def bigSpenders := Query.from' customers
 
 #eval (bigSpenders.toSql .sqlite).sql
 
+/-! ## Executable semantics — the same query value *runs* in pure Lean
+
+`Query.run : Query s → Db → List (Values s)` is the library's denotational
+semantics: an in-memory evaluator over the exact query value that compiles
+to SQL (the integration suite differential-tests all three engines against
+it). Handy as a scratch interpreter, too. -/
+
+def demoDb : Db := {
+  tables := [("customers", ⟨CustomersS,
+    [.cons (some 1) (.cons (some 25) (.cons (some "John Doe") (.cons (some true) .nil))),
+     .cons (some 2) (.cons (some 30) (.cons (some "Jane Smith") (.cons (some true) .nil))),
+     .cons (some 3) (.cons (some 16) (.cons (some "Minor User") (.cons (some false) .nil)))]⟩)] }
+
+#eval adults.run demoDb              -- [(2, "Jane Smith"), (1, "John Doe")]
+#eval adults'.run demoDb == adults.run demoDb   -- twins agree at run time too
+
 /-! ## Statements -/
 
 #eval (customers.insert

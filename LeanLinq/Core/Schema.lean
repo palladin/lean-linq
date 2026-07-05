@@ -57,6 +57,15 @@ scoped syntax (name := rowLit) "![" term,+ "]" : term
     acc ← `(LeanLinq.Row.consCell $(⟨c⟩) $acc)
   return acc
 
+/-- Materialize the staged row of a source: every column becomes a `field`
+reference through the given alias (empty alias ⇒ bare column names). Both
+staged interpreters instantiate HOAS binders with these marker rows — the
+compiler renders the fields, the evaluator looks them up in an alias
+environment — so they walk the same instantiated trees. -/
+def Row.ofAlias (alias : String) : (s : Schema) → Row s
+  | [] => .nil
+  | (name, t) :: s => .cons (.field t alias name) (Row.ofAlias alias s)
+
 /-- Splice two rows; the natural result selector for `product`:
 `fun a b => a ++ b`. -/
 def Row.append : Row s₁ → Row s₂ → Row (s₁ ++ s₂)
