@@ -31,117 +31,120 @@ inductive Dir where
   | asc | desc
   deriving DecidableEq, Repr
 
-/-- Intrinsically-typed SQL expressions: `SqlExpr t` can only be built from
-operations valid for `t`, so ill-typed SQL is unrepresentable. Numeric
-operators are constrained at the notation layer (`Add`/`Sub`/… instances for
-the numeric types only); the raw constructors are internal.
+/-- Intrinsically-typed SQL expressions: `SqlExpr ts t` can only be built
+from operations valid for `t`, so ill-typed SQL is unrepresentable. The
+first index is the ambient *table context* — fixed across a whole query — so
+the tables referenced by any embedded subquery are `HasTable`-checked
+against the same context as the query it appears in. Numeric operators are
+constrained at the notation layer (`Add`/`Sub`/… instances for the numeric
+types only); the raw constructors are internal.
 
-Subqueries (`inSub`/`scalarSub`) are stored as staged `SubQuery` compilation
-actions, not ASTs — see `SubQuery` for the positivity story. Construct them
-with `SqlExpr.inQuery`/`ScalarQuery.embed` (defined with the compiler). -/
-inductive SqlExpr : SqlType → Type where
+Subqueries (`inSub`/`scalarSub`) are stored as staged `SubQuery` actions,
+not ASTs — see `SubQuery` for the positivity story. Construct them with
+`SqlExpr.inQuery`/`ScalarQuery.embed` (defined with the compiler). -/
+inductive SqlExpr : Ctx → SqlType → Type where
   -- literals (compiled to auto-named parameters, never inlined)
-  | intC (i : Int) : SqlExpr .int
-  | longC (i : Int) : SqlExpr .long
-  | doubleC (f : Float) : SqlExpr .double
-  | decimalC (digits : String) : SqlExpr .decimal
-  | stringC (s : String) : SqlExpr .string
-  | boolC (b : Bool) : SqlExpr .bool
-  | dateTimeC (iso : String) : SqlExpr .dateTime
-  | guidC (g : String) : SqlExpr .guid
-  | nullC (t : SqlType) : SqlExpr t
+  | intC (i : Int) : SqlExpr ts .int
+  | longC (i : Int) : SqlExpr ts .long
+  | doubleC (f : Float) : SqlExpr ts .double
+  | decimalC (digits : String) : SqlExpr ts .decimal
+  | stringC (s : String) : SqlExpr ts .string
+  | boolC (b : Bool) : SqlExpr ts .bool
+  | dateTimeC (iso : String) : SqlExpr ts .dateTime
+  | guidC (g : String) : SqlExpr ts .guid
+  | nullC (t : SqlType) : SqlExpr ts t
   -- user-named parameter
-  | param (t : SqlType) (name : String) : SqlExpr t
+  | param (t : SqlType) (name : String) : SqlExpr ts t
   -- column reference (empty alias renders as a bare column name)
-  | field (t : SqlType) (alias name : String) : SqlExpr t
+  | field (t : SqlType) (alias name : String) : SqlExpr ts t
   -- operators
-  | arith (op : ArithOp) : SqlExpr t → SqlExpr t → SqlExpr t
-  | concat : SqlExpr .string → SqlExpr .string → SqlExpr .string
-  | cmp (op : CmpOp) : SqlExpr t → SqlExpr t → SqlExpr .bool
-  | and : SqlExpr .bool → SqlExpr .bool → SqlExpr .bool
-  | or : SqlExpr .bool → SqlExpr .bool → SqlExpr .bool
-  | not : SqlExpr .bool → SqlExpr .bool
-  | isNull : SqlExpr t → SqlExpr .bool
-  | isNotNull : SqlExpr t → SqlExpr .bool
-  | like : SqlExpr .string → SqlExpr .string → SqlExpr .bool
+  | arith (op : ArithOp) : SqlExpr ts t → SqlExpr ts t → SqlExpr ts t
+  | concat : SqlExpr ts .string → SqlExpr ts .string → SqlExpr ts .string
+  | cmp (op : CmpOp) : SqlExpr ts t → SqlExpr ts t → SqlExpr ts .bool
+  | and : SqlExpr ts .bool → SqlExpr ts .bool → SqlExpr ts .bool
+  | or : SqlExpr ts .bool → SqlExpr ts .bool → SqlExpr ts .bool
+  | not : SqlExpr ts .bool → SqlExpr ts .bool
+  | isNull : SqlExpr ts t → SqlExpr ts .bool
+  | isNotNull : SqlExpr ts t → SqlExpr ts .bool
+  | like : SqlExpr ts .string → SqlExpr ts .string → SqlExpr ts .bool
   -- IN over a value list. Stored as Σ-packed elements because the kernel
-  -- rejects nested `List (SqlExpr t)` with a local index; the homogeneous
+  -- rejects nested `List (SqlExpr ts t)` with a local index; the homogeneous
   -- surface is `SqlExpr.inValues`.
-  | inList : SqlExpr t → List ((u : SqlType) × SqlExpr u) → SqlExpr .bool
-  | inSub : SqlExpr t → SubQuery t → SqlExpr .bool
-  | scalarSub : SubQuery t → SqlExpr t
-  | caseWhen : SqlExpr .bool → SqlExpr t → SqlExpr t → SqlExpr t
+  | inList : SqlExpr ts t → List ((u : SqlType) × SqlExpr ts u) → SqlExpr ts .bool
+  | inSub : SqlExpr ts t → SubQuery ts t → SqlExpr ts .bool
+  | scalarSub : SubQuery ts t → SqlExpr ts t
+  | caseWhen : SqlExpr ts .bool → SqlExpr ts t → SqlExpr ts t → SqlExpr ts t
   -- aggregates (meaningful in grouped selects / HAVING / scalar queries)
-  | aggE (op : AggOp) : SqlExpr t → SqlExpr t
-  | countAll : SqlExpr .int
+  | aggE (op : AggOp) : SqlExpr ts t → SqlExpr ts t
+  | countAll : SqlExpr ts .int
   -- functions
-  | abs : SqlExpr t → SqlExpr t
-  | round : SqlExpr t → Int → SqlExpr t
-  | ceiling : SqlExpr t → SqlExpr t
-  | floor : SqlExpr t → SqlExpr t
-  | substring : SqlExpr .string → Int → Int → SqlExpr .string
-  | upper : SqlExpr .string → SqlExpr .string
-  | lower : SqlExpr .string → SqlExpr .string
-  | trim : SqlExpr .string → SqlExpr .string
-  | length : SqlExpr .string → SqlExpr .int
-  | now : SqlExpr .dateTime
-  | datePart (u : DateUnit) : SqlExpr .dateTime → SqlExpr .int
-  | dateAdd (u : DateUnit) : SqlExpr .dateTime → Int → SqlExpr .dateTime
-  | dateDiff (u : DateUnit) : SqlExpr .dateTime → SqlExpr .dateTime → SqlExpr .int
+  | abs : SqlExpr ts t → SqlExpr ts t
+  | round : SqlExpr ts t → Int → SqlExpr ts t
+  | ceiling : SqlExpr ts t → SqlExpr ts t
+  | floor : SqlExpr ts t → SqlExpr ts t
+  | substring : SqlExpr ts .string → Int → Int → SqlExpr ts .string
+  | upper : SqlExpr ts .string → SqlExpr ts .string
+  | lower : SqlExpr ts .string → SqlExpr ts .string
+  | trim : SqlExpr ts .string → SqlExpr ts .string
+  | length : SqlExpr ts .string → SqlExpr ts .int
+  | now : SqlExpr ts .dateTime
+  | datePart (u : DateUnit) : SqlExpr ts .dateTime → SqlExpr ts .int
+  | dateAdd (u : DateUnit) : SqlExpr ts .dateTime → Int → SqlExpr ts .dateTime
+  | dateDiff (u : DateUnit) : SqlExpr ts .dateTime → SqlExpr ts .dateTime → SqlExpr ts .int
 
-instance : Inhabited (SqlExpr t) := ⟨.field t "" ""⟩
+instance : Inhabited (SqlExpr ts t) := ⟨.field t "" ""⟩
 
 /-- Explicit literal constructors, for positions where the expected type is
 not yet known and coercions cannot fire (e.g. a literal on the left of `==.`). -/
-def SqlExpr.int (i : Int) : SqlExpr .int := .intC i
-def SqlExpr.long (i : Int) : SqlExpr .long := .longC i
-def SqlExpr.dbl (f : Float) : SqlExpr .double := .doubleC f
-def SqlExpr.dec (digits : String) : SqlExpr .decimal := .decimalC digits
-def SqlExpr.str (s : String) : SqlExpr .string := .stringC s
-def SqlExpr.bool (b : Bool) : SqlExpr .bool := .boolC b
-def SqlExpr.dt (iso : String) : SqlExpr .dateTime := .dateTimeC iso
-def SqlExpr.gd (g : String) : SqlExpr .guid := .guidC g
+def SqlExpr.int (i : Int) : SqlExpr ts .int := .intC i
+def SqlExpr.long (i : Int) : SqlExpr ts .long := .longC i
+def SqlExpr.dbl (f : Float) : SqlExpr ts .double := .doubleC f
+def SqlExpr.dec (digits : String) : SqlExpr ts .decimal := .decimalC digits
+def SqlExpr.str (s : String) : SqlExpr ts .string := .stringC s
+def SqlExpr.bool (b : Bool) : SqlExpr ts .bool := .boolC b
+def SqlExpr.dt (iso : String) : SqlExpr ts .dateTime := .dateTimeC iso
+def SqlExpr.gd (g : String) : SqlExpr ts .guid := .guidC g
 
 /-- `e IN (v₁, v₂, …)` over a homogeneous value list. -/
-def SqlExpr.inValues (e : SqlExpr t) (vs : List (SqlExpr t)) : SqlExpr .bool :=
+def SqlExpr.inValues (e : SqlExpr ts t) (vs : List (SqlExpr ts t)) : SqlExpr ts .bool :=
   .inList e (vs.map (⟨t, ·⟩))
 
 /-- Date-part / date-arithmetic surface helpers. -/
-def SqlExpr.year (e : SqlExpr .dateTime) : SqlExpr .int := .datePart .year e
-def SqlExpr.month (e : SqlExpr .dateTime) : SqlExpr .int := .datePart .month e
-def SqlExpr.day (e : SqlExpr .dateTime) : SqlExpr .int := .datePart .day e
-def SqlExpr.addDays (e : SqlExpr .dateTime) (n : Int) : SqlExpr .dateTime := .dateAdd .day e n
-def SqlExpr.addMonths (e : SqlExpr .dateTime) (n : Int) : SqlExpr .dateTime := .dateAdd .month e n
-def SqlExpr.addYears (e : SqlExpr .dateTime) (n : Int) : SqlExpr .dateTime := .dateAdd .year e n
-def SqlExpr.diffDays (e x : SqlExpr .dateTime) : SqlExpr .int := .dateDiff .day e x
-def SqlExpr.diffMonths (e x : SqlExpr .dateTime) : SqlExpr .int := .dateDiff .month e x
-def SqlExpr.diffYears (e x : SqlExpr .dateTime) : SqlExpr .int := .dateDiff .year e x
+def SqlExpr.year (e : SqlExpr ts .dateTime) : SqlExpr ts .int := .datePart .year e
+def SqlExpr.month (e : SqlExpr ts .dateTime) : SqlExpr ts .int := .datePart .month e
+def SqlExpr.day (e : SqlExpr ts .dateTime) : SqlExpr ts .int := .datePart .day e
+def SqlExpr.addDays (e : SqlExpr ts .dateTime) (n : Int) : SqlExpr ts .dateTime := .dateAdd .day e n
+def SqlExpr.addMonths (e : SqlExpr ts .dateTime) (n : Int) : SqlExpr ts .dateTime := .dateAdd .month e n
+def SqlExpr.addYears (e : SqlExpr ts .dateTime) (n : Int) : SqlExpr ts .dateTime := .dateAdd .year e n
+def SqlExpr.diffDays (e x : SqlExpr ts .dateTime) : SqlExpr ts .int := .dateDiff .day e x
+def SqlExpr.diffMonths (e x : SqlExpr ts .dateTime) : SqlExpr ts .int := .dateDiff .month e x
+def SqlExpr.diffYears (e x : SqlExpr ts .dateTime) : SqlExpr ts .int := .dateDiff .year e x
 
 /-- A heterogeneously-typed ORDER BY key with its direction; build with
 `e.asc` / `e.desc`. -/
-structure OrderKey where
+structure OrderKey (ts : Ctx) where
   type : SqlType
-  expr : SqlExpr type
+  expr : SqlExpr ts type
   dir : Dir
 
-def SqlExpr.asc (e : SqlExpr t) : OrderKey := ⟨t, e, .asc⟩
-def SqlExpr.desc (e : SqlExpr t) : OrderKey := ⟨t, e, .desc⟩
+def SqlExpr.asc (e : SqlExpr ts t) : OrderKey ts := ⟨t, e, .asc⟩
+def SqlExpr.desc (e : SqlExpr ts t) : OrderKey ts := ⟨t, e, .desc⟩
 
 /-- A heterogeneously-typed GROUP BY key; build with `e.key`. -/
-structure KeyExpr where
+structure KeyExpr (ts : Ctx) where
   type : SqlType
-  expr : SqlExpr type
+  expr : SqlExpr ts type
 
-def SqlExpr.key (e : SqlExpr t) : KeyExpr := ⟨t, e⟩
+def SqlExpr.key (e : SqlExpr ts t) : KeyExpr ts := ⟨t, e⟩
 
 /-- The aggregate builder token passed to grouped `select`/`having` lambdas
 (mirrors passing an aggregate-function object in LINQ-style APIs). -/
 structure Agg where
 
-def Agg.count (_ : Agg) : SqlExpr .int := .countAll
-def Agg.sum (_ : Agg) (e : SqlExpr t) : SqlExpr t := .aggE .sum e
-def Agg.avg (_ : Agg) (e : SqlExpr t) : SqlExpr t := .aggE .avg e
-def Agg.min (_ : Agg) (e : SqlExpr t) : SqlExpr t := .aggE .min e
-def Agg.max (_ : Agg) (e : SqlExpr t) : SqlExpr t := .aggE .max e
+def Agg.count (_ : Agg) : SqlExpr ts .int := .countAll
+def Agg.sum (_ : Agg) (e : SqlExpr ts t) : SqlExpr ts t := .aggE .sum e
+def Agg.avg (_ : Agg) (e : SqlExpr ts t) : SqlExpr ts t := .aggE .avg e
+def Agg.min (_ : Agg) (e : SqlExpr ts t) : SqlExpr ts t := .aggE .min e
+def Agg.max (_ : Agg) (e : SqlExpr ts t) : SqlExpr ts t := .aggE .max e
 
 end LeanLinq

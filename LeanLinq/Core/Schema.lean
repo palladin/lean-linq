@@ -2,47 +2,37 @@ import LeanLinq.Core.Expr
 
 namespace LeanLinq
 
-/-- A relation schema: ordered column names with their SQL types.
-
-IMPORTANT: concrete schemas must be declared with `abbrev` (not `def`) so that
-elaboration — column lookup, projection typing — can see through the name:
-
-```
-abbrev Customers : Schema := [("Id", .int), ("Name", .string), ("Age", .int)]
-```
--/
-abbrev Schema := List (String × SqlType)
-
 /-- A heterogeneous tuple of SQL expressions indexed by a schema: the staged
 value flowing through query combinators (each column is an expression, not a
-runtime value — MetaOCaml-style staging).
+runtime value — MetaOCaml-style staging). The `ts` index is the ambient
+table context of the enclosing query, threaded through every cell.
 
 The column name lives only in the index, so it flows in from the expected type
 or from `.as`-tagged cells; see the row-literal syntax below. -/
-inductive Row : Schema → Type where
-  | nil  : Row []
+inductive Row : Ctx → Schema → Type where
+  | nil  : Row ts []
   | cons : {name : String} → {t : SqlType} → {s : Schema} →
-      SqlExpr t → Row s → Row ((name, t) :: s)
+      SqlExpr ts t → Row ts s → Row ts ((name, t) :: s)
 
 /-- A single named output column of a projection; built with `SqlExpr.as`,
 consumed by the row-literal syntax `[e₁.as "A", e₂.as "B"]`. -/
-structure Cell (name : String) (t : SqlType) where
-  expr : SqlExpr t
+structure Cell (ts : Ctx) (name : String) (t : SqlType) where
+  expr : SqlExpr ts t
 
-protected def Row.default : (s : Schema) → Row s
+protected def Row.default : (s : Schema) → Row ts s
   | [] => .nil
   | (_, _) :: s => .cons default (Row.default s)
 
-instance : Inhabited (Row s) := ⟨Row.default s⟩
+instance : Inhabited (Row ts s) := ⟨Row.default s⟩
 
 /-- Name an expression as an output column: `c["Age"].as "Age"`. -/
-def SqlExpr.as (e : SqlExpr t) (name : String) : Cell name t := ⟨e⟩
+def SqlExpr.as (e : SqlExpr ts t) (name : String) : Cell ts name t := ⟨e⟩
 
 /-- Prepend a named cell to a row. Target of the row-literal syntax. -/
-def Row.consCell (c : Cell name t) (r : Row s) : Row ((name, t) :: s) :=
+def Row.consCell (c : Cell ts name t) (r : Row ts s) : Row ts ((name, t) :: s) :=
   .cons c.expr r
 
-/-- Row literal: `![c["Name"].as "Name", c["Id"].as "Id"] : Row [("Name", _), ("Id", _)]`.
+/-- Row literal: `![c["Name"].as "Name", c["Id"].as "Id"] : Row ts [("Name", _), ("Id", _)]`.
 
 The `![…]` bracket is deliberately distinct from the `List` literal: overloading
 plain `[…]` would break list *patterns* (`match xs with | [a] => …`) in any
@@ -61,18 +51,18 @@ scoped syntax (name := rowLit) "![" term,+ "]" : term
 reference through the given alias (empty alias ⇒ bare column names). Both
 staged interpreters instantiate HOAS binders with these marker rows — the
 compiler renders the fields, the evaluator looks them up in an alias
-environment — so they walk the same instantiated trees. -/
-def Row.ofAlias (alias : String) : (s : Schema) → Row s
+scope — so they walk the same instantiated trees. -/
+def Row.ofAlias (alias : String) : (s : Schema) → Row ts s
   | [] => .nil
   | (name, t) :: s => .cons (.field t alias name) (Row.ofAlias alias s)
 
 /-- Splice two rows; the natural result selector for `product`:
 `fun a b => a ++ b`. -/
-def Row.append : Row s₁ → Row s₂ → Row (s₁ ++ s₂)
+def Row.append : Row ts s₁ → Row ts s₂ → Row ts (s₁ ++ s₂)
   | .nil,       r₂ => r₂
   | .cons e r₁, r₂ => .cons e (r₁.append r₂)
 
-instance : HAppend (Row s₁) (Row s₂) (Row (s₁ ++ s₂)) := ⟨Row.append⟩
+instance : HAppend (Row ts s₁) (Row ts s₂) (Row ts (s₁ ++ s₂)) := ⟨Row.append⟩
 
 /-! ## Column access by name
 
@@ -85,7 +75,7 @@ reliably. A misspelled column fails at compile time with
 `failed to synthesize HasCol …`. -/
 
 class HasCol (s : Schema) (name : String) (t : outParam SqlType) where
-  getImpl : Row s → SqlExpr t
+  getImpl : {ts : Ctx} → Row ts s → SqlExpr ts t
 
 instance (priority := high) : HasCol ((name, t) :: s) name t where
   getImpl | .cons e _ => e
@@ -95,7 +85,7 @@ instance [c : HasCol s name t] : HasCol ((n', t') :: s) name t where
 
 /-- Column access by name: `r.col "Name"`. Prefer the bracket sugar
 `r["Name"]`. -/
-def Row.col (r : Row s) (name : String) [c : HasCol s name t] : SqlExpr t :=
+def Row.col (r : Row ts s) (name : String) [c : HasCol s name t] : SqlExpr ts t :=
   c.getImpl r
 
 /-- Bracket sugar for column access: `c["Name"]`. Overlaps with `GetElem`
@@ -107,7 +97,7 @@ scoped syntax:max (name := colGet) term noWs "[" term "]" : term
   `(LeanLinq.Row.col $(⟨stx[0]⟩) $(⟨stx[2]⟩))
 
 /-- Positional column access. -/
-def Row.nth : {s : Schema} → Row s → (i : Fin s.length) → SqlExpr (s.get i).2
+def Row.nth : {s : Schema} → Row ts s → (i : Fin s.length) → SqlExpr ts (s.get i).2
   | _, .nil,      i        => i.elim0
   | _, .cons e _, ⟨0, _⟩   => e
   | _, .cons _ r, ⟨i+1, h⟩ => r.nth ⟨i, Nat.lt_of_succ_lt_succ h⟩

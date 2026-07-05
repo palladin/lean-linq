@@ -11,7 +11,7 @@ as dialect-escaped literals *for execution only* — the library itself never
 inlines. Row results are normalized and checked three ways: against
 `Tests/golden/results-{db}.golden` (regenerate with
 `lake exe integration --update`); against the *evaluator* — every case's
-expected rows are computed by `Query.run` over `seedDb`, so the engines are
+expected rows are computed by `Query.run` over `seedEnv`, so the engines are
 differential-tested against the executable semantics; and against each other
 (cross-dialect agreement, modulo a known-variant allowlist — AVG division
 semantics).
@@ -284,14 +284,14 @@ def main (args : List String) : IO UInt32 := do
       results := results ++ [r]
     collected := collected ++ [(dn, results)]
     -- the evaluator as oracle: expected rows computed by `Query.run` over
-    -- `seedDb` from the same query value that produced the SQL (skipped only
+    -- `seedEnv` from the same query value that produced the SQL (skipped only
     -- where no single answer exists: time-dependent results self-skip as
     -- `<executed>`, engine-variant cases sit on the allowlist)
     for (entry, r) in allNamed.zip results do
       let (_, name, c) := entry
       if !r.isError && r.result != "<executed>" &&
          !crossDialectAllowlist.contains name then
-        let want := c.expected seedDb
+        let want := c.expected seedEnv
         if want != r.result then
           failures := failures + 1
           IO.eprintln s!"EVAL MISMATCH [{dn}] {name}\n  eval:   {want}\n  engine: {r.result}"

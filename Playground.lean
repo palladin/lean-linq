@@ -8,30 +8,37 @@ not part of the library or the test suites (`lake build Playground` builds
 just this file).
 
 Try breaking things: misspell a column, compare an `int` to a `string`,
-reference the aggregate binder before its `groupBy` — all elaboration errors. -/
+reference a table outside the context, reference the aggregate binder before
+its `groupBy` — all elaboration errors. -/
 
 open LeanLinq
 
-/-! ## Schemas
+/-! ## Schemas, tables, and the context
 
-Schemas must be `abbrev` (instance search needs to see through the name). -/
+Schemas and contexts must be `abbrev` (instance search needs to see through
+the name). A table carries its name and schema in its *type*; the context
+lists what the database provides, and every table reference is resolved
+against it by instance search (`HasTable`) at elaboration time. -/
 
 abbrev CustomersS : Schema :=
   [("Id", .long), ("Age", .int), ("Name", .string), ("IsActive", .bool)]
-def customers : Table CustomersS := ⟨"customers"⟩
+def customers : Table "customers" CustomersS := ⟨⟩
 
 abbrev OrdersS : Schema :=
   [("Id", .long), ("CustomerId", .long), ("ProductId", .long), ("Amount", .int)]
-def orders : Table OrdersS := ⟨"orders"⟩
+def orders : Table "orders" OrdersS := ⟨⟩
 
 abbrev ProductsS : Schema :=
   [("Id", .long), ("ProductName", .string), ("Price", .decimal),
    ("CreatedDate", .dateTime), ("UniqueId", .guid)]
-def products : Table ProductsS := ⟨"products"⟩
+def products : Table "products" ProductsS := ⟨⟩
+
+abbrev PlayCtx : Ctx :=
+  [("customers", CustomersS), ("orders", OrdersS), ("products", ProductsS)]
 
 /-! ## Pipeline style -/
 
-def adults := Query.from' customers
+def adults := Query.from' (ts := PlayCtx) customers
   |>.where' (fun c => 18 <. c["Age"] &&. c["IsActive"] ==. true)
   |>.orderBy (fun c => [c["Name"].asc])
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"])
@@ -42,16 +49,16 @@ def adults := Query.from' customers
 
 /-! ## query! comprehension style — same core, identical SQL -/
 
-def adults' := query! {
+def adults' := (query! {
   from c in customers
   where 18 <. c["Age"] &&. c["IsActive"] ==. true
   orderBy c["Name"].asc
   select ![c["Id"].as "Id", c["Name"].as "Name"]
-}
+} : Query PlayCtx _)
 
 #eval adults.toSql .sqlite == adults'.toSql .sqlite   -- true
 
-def spending := Query.from' customers
+def spending := Query.from' (ts := PlayCtx) customers
   |>.innerJoin orders (fun c o => c["Id"] ==. o["CustomerId"])
       (fun c o => ![c["Id"].as "CustId", c["Name"].as "Name", o["Amount"].as "Amount"])
   |>.groupBy (fun r => [r["CustId"].key, r["Name"].key])
@@ -62,7 +69,7 @@ def spending := Query.from' customers
 
 #eval (spending.toSql .sqlite).sql
 
-def spending' := query! {
+def spending' := (query! {
   from c in customers
   join o in orders on c["Id"] ==. o["CustomerId"]
   groupBy c["Id"].key, c["Name"].key into a
@@ -70,27 +77,27 @@ def spending' := query! {
   orderBy (a.sum o["Amount"]).desc
   select ![c["Name"].as "Name", (a.sum o["Amount"]).as "Total"]
   limit 10
-}
+} : Query PlayCtx _)
 
 #eval (spending'.toSql .sqlite).sql
 
-def cheapProducts := query! {
+def cheapProducts := (query! {
   from p in products
   where p["Price"] <. 100.00 ||. p["Price"].isNull
   orderBy p["Price"].asc
   select ![p["ProductName"].as "Name", p["Price"].as "Price"]
-}
+} : Query PlayCtx _)
 
 #eval cheapProducts.toSql .postgres
 
 /-! ## Subqueries and scalar aggregates -/
 
-def avgAmount := Query.from' orders
+def avgAmount := Query.from' (ts := PlayCtx) orders
   |>.select (fun o => ![o["Amount"].as "Amount"]) |>.avg
 
 #eval avgAmount.toSql .sqlite
 
-def bigSpenders := Query.from' customers
+def bigSpenders := Query.from' (ts := PlayCtx) customers
   |>.where' (fun c => c["Id"].inQuery (query! {
       from o in orders
       where o["Amount"] >. avgAmount.embed
@@ -102,42 +109,55 @@ def bigSpenders := Query.from' customers
 
 /-! ## Executable semantics — the same query value *runs* in pure Lean
 
-`Query.run : Query s → Db → List (Values s)` is the library's denotational
-semantics: an in-memory evaluator over the exact query value that compiles
-to SQL (the integration suite differential-tests all three engines against
-it). Handy as a scratch interpreter, too. -/
+`Query.run : Query ts s → TableEnv ts → List (Values s)` is the library's
+denotational semantics: a typed in-memory evaluator over the exact query
+value that compiles to SQL (the integration suite differential-tests all
+three engines against it). Table resolution happened at elaboration, so a
+`TableEnv PlayCtx` is all it takes — no names, no failure modes. -/
 
-def demoDb : Db := {
-  tables := [("customers", ⟨CustomersS,
+def demoEnv : TableEnv PlayCtx :=
+  .cons  -- customers
     [.cons (some 1) (.cons (some 25) (.cons (some "John Doe") (.cons (some true) .nil))),
      .cons (some 2) (.cons (some 30) (.cons (some "Jane Smith") (.cons (some true) .nil))),
-     .cons (some 3) (.cons (some 16) (.cons (some "Minor User") (.cons (some false) .nil)))]⟩)] }
+     .cons (some 3) (.cons (some 16) (.cons (some "Minor User") (.cons (some false) .nil)))] <|
+  .cons  -- orders
+    [.cons (some 1) (.cons (some 1) (.cons (some 1) (.cons (some 500) .nil))),
+     .cons (some 2) (.cons (some 2) (.cons (some 1) (.cons (some 300) .nil)))] <|
+  .cons [] .nil  -- products
 
-#eval adults.run demoDb              -- [(2, "Jane Smith"), (1, "John Doe")]
-#eval adults'.run demoDb == adults.run demoDb   -- twins agree at run time too
+#eval adults.run demoEnv             -- [(2, "Jane Smith"), (1, "John Doe")]
+#eval adults'.run demoEnv == adults.run demoEnv   -- twins agree at run time too
+#eval spending.run demoEnv           -- joins/grouping run in memory as well
 
 /-! ## Statements -/
 
-#eval (customers.insert
+#eval (customers.insert (ts := PlayCtx)
   |>.value "Id" 100 |>.value "Age" 30
   |>.value "Name" "Ada" |>.value "IsActive" true).toSql .sqlite
 
-#eval (customers.update
+#eval (customers.update (ts := PlayCtx)
   |>.setWith "Age" (fun c => c["Age"] + 1)
   |>.where' (fun c => c["IsActive"] ==. true)).toSql .sqlServer
 
-#eval (customers.delete |>.where' (fun c => c["Age"].isNull)).toSql .postgres
+#eval (customers.delete (ts := PlayCtx) |>.where' (fun c => c["Age"].isNull)).toSql .postgres
+
+-- statements also apply in memory, through the same `HasTable` instance:
+#eval ((customers.update (ts := PlayCtx)
+  |>.setWith "Age" (fun c => c["Age"] + 1)).apply demoEnv : TableEnv PlayCtx) |> fun _ => "applied"
 
 /-! ## The type system at work — uncomment any line for the error
 
-#eval (Query.from' customers |>.where' (fun c => c["Nmae"] ==. "Ada")).toSql .sqlite
---                                          typo ^^^^^^ : no HasCol instance
+#eval (Query.from' (ts := PlayCtx) customers |>.where' (fun c => c["Nmae"] ==. "Ada")).toSql .sqlite
+--                                                typo ^^^^^^ : no HasCol instance
 
-#eval (Query.from' customers |>.where' (fun c => c["Id"] ==. c["Name"])).toSql .sqlite
---                                     long vs string ^^^^^^^^^^^^^^^^ : type mismatch
+#eval (Query.from' (ts := PlayCtx) customers |>.where' (fun c => c["Id"] ==. c["Name"])).toSql .sqlite
+--                                           long vs string ^^^^^^^^^^^^^^^^ : type mismatch
 
-#eval (query! { from o in orders
-                where a.count >. 1     -- binder `a` not in scope before groupBy
-                groupBy o["CustomerId"].key into a
-                select ![o["CustomerId"].as "Cid"] }).toSql .sqlite
+#eval (Query.from' (ts := PlayCtx) (⟨⟩ : Table "ghost" CustomersS)).toSql .sqlite
+--     table not in the context ^^^^^^^^^^^^^^^^^^^^^^ : no HasTable instance
+
+#eval ((query! { from o in orders
+                 where a.count >. 1     -- binder `a` not in scope before groupBy
+                 groupBy o["CustomerId"].key into a
+                 select ![o["CustomerId"].as "Cid"] } : Query PlayCtx _)).toSql .sqlite
 -/

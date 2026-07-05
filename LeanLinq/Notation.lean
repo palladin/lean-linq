@@ -14,28 +14,28 @@ order use the explicit constructors (`SqlExpr.str`, `.int`, `.dec`, …). -/
 
 namespace LeanLinq
 
-instance : Add (SqlExpr .int) := ⟨.arith .add⟩
-instance : Add (SqlExpr .long) := ⟨.arith .add⟩
-instance : Add (SqlExpr .double) := ⟨.arith .add⟩
-instance : Add (SqlExpr .decimal) := ⟨.arith .add⟩
-instance : Sub (SqlExpr .int) := ⟨.arith .sub⟩
-instance : Sub (SqlExpr .long) := ⟨.arith .sub⟩
-instance : Sub (SqlExpr .double) := ⟨.arith .sub⟩
-instance : Sub (SqlExpr .decimal) := ⟨.arith .sub⟩
-instance : Mul (SqlExpr .int) := ⟨.arith .mul⟩
-instance : Mul (SqlExpr .long) := ⟨.arith .mul⟩
-instance : Mul (SqlExpr .double) := ⟨.arith .mul⟩
-instance : Mul (SqlExpr .decimal) := ⟨.arith .mul⟩
-instance : Div (SqlExpr .int) := ⟨.arith .div⟩
-instance : Div (SqlExpr .long) := ⟨.arith .div⟩
-instance : Div (SqlExpr .double) := ⟨.arith .div⟩
-instance : Div (SqlExpr .decimal) := ⟨.arith .div⟩
+instance : Add (SqlExpr ts .int) := ⟨.arith .add⟩
+instance : Add (SqlExpr ts .long) := ⟨.arith .add⟩
+instance : Add (SqlExpr ts .double) := ⟨.arith .add⟩
+instance : Add (SqlExpr ts .decimal) := ⟨.arith .add⟩
+instance : Sub (SqlExpr ts .int) := ⟨.arith .sub⟩
+instance : Sub (SqlExpr ts .long) := ⟨.arith .sub⟩
+instance : Sub (SqlExpr ts .double) := ⟨.arith .sub⟩
+instance : Sub (SqlExpr ts .decimal) := ⟨.arith .sub⟩
+instance : Mul (SqlExpr ts .int) := ⟨.arith .mul⟩
+instance : Mul (SqlExpr ts .long) := ⟨.arith .mul⟩
+instance : Mul (SqlExpr ts .double) := ⟨.arith .mul⟩
+instance : Mul (SqlExpr ts .decimal) := ⟨.arith .mul⟩
+instance : Div (SqlExpr ts .int) := ⟨.arith .div⟩
+instance : Div (SqlExpr ts .long) := ⟨.arith .div⟩
+instance : Div (SqlExpr ts .double) := ⟨.arith .div⟩
+instance : Div (SqlExpr ts .decimal) := ⟨.arith .div⟩
 
-instance : Append (SqlExpr .string) := ⟨.concat⟩
+instance : Append (SqlExpr ts .string) := ⟨.concat⟩
 
-instance : OfNat (SqlExpr .int) n := ⟨.intC (Int.ofNat n)⟩
-instance : OfNat (SqlExpr .long) n := ⟨.longC (Int.ofNat n)⟩
-instance : Neg (SqlExpr .int) := ⟨fun e => .arith .sub (.intC 0) e⟩
+instance : OfNat (SqlExpr ts .int) n := ⟨.intC (Int.ofNat n)⟩
+instance : OfNat (SqlExpr ts .long) n := ⟨.longC (Int.ofNat n)⟩
+instance : Neg (SqlExpr ts .int) := ⟨fun e => .arith .sub (.intC 0) e⟩
 
 /-- Render a scientific literal (`99.99`) as exact decimal digits. -/
 private def scientificDigits (m : Nat) (sign : Bool) (e : Nat) : String :=
@@ -47,13 +47,13 @@ private def scientificDigits (m : Nat) (sign : Bool) (e : Nat) : String :=
     let fracPart := s.takeEnd e |>.toString
     s!"{intPart}.{fracPart}"
 
-instance : OfScientific (SqlExpr .decimal) :=
+instance : OfScientific (SqlExpr ts .decimal) :=
   ⟨fun m sign e => .decimalC (scientificDigits m sign e)⟩
-instance : OfScientific (SqlExpr .double) :=
+instance : OfScientific (SqlExpr ts .double) :=
   ⟨fun m sign e => .doubleC (OfScientific.ofScientific m sign e)⟩
 
-instance : Coe String (SqlExpr .string) := ⟨.stringC⟩
-instance : Coe Bool (SqlExpr .bool) := ⟨.boolC⟩
+instance : Coe String (SqlExpr ts .string) := ⟨.stringC⟩
+instance : Coe Bool (SqlExpr ts .bool) := ⟨.boolC⟩
 
 /-- SQL equality: `a ==. b` compiles to `(a = b)`. -/
 scoped infix:50  " ==. " => SqlExpr.cmp CmpOp.eq

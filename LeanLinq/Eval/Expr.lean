@@ -106,7 +106,7 @@ mutual
 
 /-- Evaluate an expression over the environments of the current group
 (singleton = ungrouped row context). -/
-def SqlExpr.evalG (db : Db) : List Env → SqlExpr t → Option t.interp
+def SqlExpr.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts t → Option t.interp
   | _, .intC i => some i
   | _, .longC i => some i
   | _, .doubleC f => some f
@@ -116,106 +116,106 @@ def SqlExpr.evalG (db : Db) : List Env → SqlExpr t → Option t.interp
   | _, .dateTimeC s => some (normDateTime s)
   | _, .guidC g => some g.toLower
   | _, .nullC _ => none
-  | _, .param t' name => (db.params.lookup name).bind (SqlValue.toCell t' ·)
+  | _, .param t' name => (ee.params.lookup name).bind (SqlValue.toCell t' ·)
   | envs, .field t' alias name => envs.head?.bind fun env => env.get? alias name t'
   | envs, .arith op a b => do
-      let x ← a.evalG db envs
-      let y ← b.evalG db envs
+      let x ← a.evalG ee envs
+      let y ← b.evalG ee envs
       t.arithV op x y
   | envs, .concat a b => do
-      let x ← a.evalG db envs
-      let y ← b.evalG db envs
+      let x ← a.evalG ee envs
+      let y ← b.evalG ee envs
       pure (x ++ y)
   | envs, .cmp (t := t₀) op a b => do
-      let x ← a.evalG db envs
-      let y ← b.evalG db envs
+      let x ← a.evalG ee envs
+      let y ← b.evalG ee envs
       pure (op.holds (t₀.cmpV x y))
   | envs, .and a b =>
-      match a.evalG db envs, b.evalG db envs with
+      match a.evalG ee envs, b.evalG ee envs with
       | some false, _ => some false
       | _, some false => some false
       | some true, some true => some true
       | _, _ => none
   | envs, .or a b =>
-      match a.evalG db envs, b.evalG db envs with
+      match a.evalG ee envs, b.evalG ee envs with
       | some true, _ => some true
       | _, some true => some true
       | some false, some false => some false
       | _, _ => none
-  | envs, .not a => (a.evalG db envs).map (!·)
-  | envs, .isNull e => some (e.evalG db envs).isNone
-  | envs, .isNotNull e => some (e.evalG db envs).isSome
+  | envs, .not a => (a.evalG ee envs).map (!·)
+  | envs, .isNull e => some (e.evalG ee envs).isNone
+  | envs, .isNotNull e => some (e.evalG ee envs).isSome
   | envs, .like e p => do
-      let s ← e.evalG db envs
-      let pat ← p.evalG db envs
+      let s ← e.evalG ee envs
+      let pat ← p.evalG ee envs
       pure (likeMatch s pat)
   | envs, .inList (t := t₀) e es =>
-      match e.evalG db envs with
+      match e.evalG ee envs with
       | none => none
       | some v =>
-          let hits := (SqlExpr.evalGList db envs es).map fun ⟨u, c⟩ =>
+          let hits := (SqlExpr.evalGList ee envs es).map fun ⟨u, c⟩ =>
             if h : u = t₀ then (h ▸ c).map (fun w => t₀.cmpV v w == Ordering.eq)
             else some false
           if hits.any (· == some true) then some true
           else if hits.any (·.isNone) then none
           else some false
   | envs, .inSub (t := t₀) e sq =>
-      match e.evalG db envs with
+      match e.evalG ee envs with
       | none => none
       | some v =>
-          let hits := (sq.eval db).map (·.map (fun w => t₀.cmpV v w == Ordering.eq))
+          let hits := (sq.eval ee).map (·.map (fun w => t₀.cmpV v w == Ordering.eq))
           if hits.any (· == some true) then some true
           else if hits.any (·.isNone) then none
           else some false
   | _, .scalarSub sq =>
-      match sq.eval db with
+      match sq.eval ee with
       | c :: _ => c
       | [] => none
   | envs, .caseWhen c a b =>
-      if c.evalG db envs == some true then a.evalG db envs else b.evalG db envs
+      if c.evalG ee envs == some true then a.evalG ee envs else b.evalG ee envs
   | envs, .aggE op e =>
-      t.aggV op ((envs.map fun env => e.evalG db [env]).filterMap id)
+      t.aggV op ((envs.map fun env => e.evalG ee [env]).filterMap id)
   | envs, .countAll => some (envs.length : Int)
-  | envs, .abs e => (e.evalG db envs).bind t.absV
-  | envs, .round e digits => (e.evalG db envs).bind (t.roundV digits)
-  | envs, .ceiling e => (e.evalG db envs).bind t.ceilV
-  | envs, .floor e => (e.evalG db envs).bind t.floorV
-  | envs, .substring e start len => (e.evalG db envs).map (sqlSubstring · start len)
-  | envs, .upper e => (e.evalG db envs).map (·.toUpper)
-  | envs, .lower e => (e.evalG db envs).map (·.toLower)
-  | envs, .trim e => (e.evalG db envs).map (·.trimAscii.toString)
-  | envs, .length e => (e.evalG db envs).map (fun s => (s.length : Int))
-  | _, .now => db.now
+  | envs, .abs e => (e.evalG ee envs).bind t.absV
+  | envs, .round e digits => (e.evalG ee envs).bind (t.roundV digits)
+  | envs, .ceiling e => (e.evalG ee envs).bind t.ceilV
+  | envs, .floor e => (e.evalG ee envs).bind t.floorV
+  | envs, .substring e start len => (e.evalG ee envs).map (sqlSubstring · start len)
+  | envs, .upper e => (e.evalG ee envs).map (·.toUpper)
+  | envs, .lower e => (e.evalG ee envs).map (·.toLower)
+  | envs, .trim e => (e.evalG ee envs).map (·.trimAscii.toString)
+  | envs, .length e => (e.evalG ee envs).map (fun s => (s.length : Int))
+  | _, .now => ee.now
   | envs, .datePart u e =>
-      (e.evalG db envs).map fun s =>
+      (e.evalG ee envs).map fun s =>
         match u with
         | .year => (parseYMD s).1
         | .month => (parseYMD s).2.1
         | .day => (parseYMD s).2.2
   | envs, .dateAdd u e n =>
-      (e.evalG db envs).map fun s =>
+      (e.evalG ee envs).map fun s =>
         match u with
         | .day => dateAddDays s n
         | .month => dateAddMonths s n
         | .year => dateAddYears s n
   | envs, .dateDiff u a b => do
-      let x ← a.evalG db envs
-      let y ← b.evalG db envs
+      let x ← a.evalG ee envs
+      let y ← b.evalG ee envs
       pure (match u with
         | .day => dateDiffDays x y
         | .month => dateDiffMonths x y
         | .year => dateDiffYears x y)
 
-def SqlExpr.evalGList (db : Db) (envs : List Env) :
-    List ((u : SqlType) × SqlExpr u) → List ((u : SqlType) × Option u.interp)
+def SqlExpr.evalGList (ee : EvalEnv ts) (envs : List Scope) :
+    List ((u : SqlType) × SqlExpr ts u) → List ((u : SqlType) × Option u.interp)
   | [] => []
-  | ⟨u, e⟩ :: es => ⟨u, e.evalG db envs⟩ :: SqlExpr.evalGList db envs es
+  | ⟨u, e⟩ :: es => ⟨u, e.evalG ee envs⟩ :: SqlExpr.evalGList ee envs es
 
 end
 
 /-- Evaluate every cell of a projected row. -/
-def Row.evalRow (db : Db) (envs : List Env) : {s : Schema} → Row s → Values s
+def Row.evalRow (ee : EvalEnv ts) (envs : List Scope) : {s : Schema} → Row ts s → Values s
   | _, .nil => .nil
-  | _, .cons e r => .cons (e.evalG db envs) (r.evalRow db envs)
+  | _, .cons e r => .cons (e.evalG ee envs) (r.evalRow ee envs)
 
 end LeanLinq

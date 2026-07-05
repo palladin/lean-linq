@@ -5,7 +5,7 @@ import LeanLinq.Eval.Query
 namespace LeanLinq
 
 /-- Render a projected row as a SELECT list: `expr AS name` per column. -/
-def Row.selectList : {s : Schema} → Row s → CompileM (List String)
+def Row.selectList : {s : Schema} → Row ts s → CompileM (List String)
   | [], .nil => pure []
   | (name, _) :: _, .cons e r => do
       let item ← e.compile
@@ -13,7 +13,7 @@ def Row.selectList : {s : Schema} → Row s → CompileM (List String)
       return s!"{item} AS {← quote name}" :: rest
 
 /-- The default projection callback: render the yielded row, no extra tail. -/
-def Row.defaultSelect (r : Row s) : CompileM (String × String) := do
+def Row.defaultSelect (r : Row ts s) : CompileM (String × String) := do
   return (String.intercalate ", " (← r.selectList), "")
 
 def SetOp.token : SetOp → String
@@ -36,13 +36,13 @@ private def renderWheres (wheres : Array String) : String :=
   if wheres.isEmpty then ""
   else s!" WHERE {String.intercalate " AND " wheres.toList}"
 
-def compileOrderKeys (ks : List OrderKey) : CompileM String := do
+def compileOrderKeys (ks : List (OrderKey ts)) : CompileM String := do
   let items ← ks.mapM fun k => do
     let e ← k.expr.compile
     return s!"{e} {if k.dir == .asc then "ASC" else "DESC"}"
   return String.intercalate ", " items
 
-def compileGroupKeys (ks : List KeyExpr) : CompileM String := do
+def compileGroupKeys (ks : List (KeyExpr ts)) : CompileM String := do
   let items ← ks.mapM (·.expr.compile)
   return String.intercalate ", " items
 
@@ -59,21 +59,21 @@ structure StmtAcc where
 Purely structural: continuations are applied to a default row (the spine's
 shape does not depend on row values). ORDER BY inside a derived table
 (`fromQ`) does not count — it belongs to the inner statement. -/
-def SpineQ.hasOrder : SpineQ g s → Bool
+def SpineQ.hasOrder : SpineQ ts g s → Bool
   | .yield _ => false
   | .groupYield .. => false
   | .guard _ rest => rest.hasOrder
   | .order _ _ => true
-  | .fromT (g := .plain) _ f => (f default).hasOrder
-  | .fromT (g := .grouped) _ f => (f default).hasOrder
-  | .joinT (g := .plain) _ _ _ f => (f default).hasOrder
-  | .joinT (g := .grouped) _ _ _ f => (f default).hasOrder
+  | .fromT (g := .plain) (inst := _) _ f => (f default).hasOrder
+  | .fromT (g := .grouped) (inst := _) _ f => (f default).hasOrder
+  | .joinT (g := .plain) (inst := _) _ _ _ f => (f default).hasOrder
+  | .joinT (g := .grouped) (inst := _) _ _ _ f => (f default).hasOrder
   | .fromQ (g := .plain) _ f => (f default).hasOrder
   | .fromQ (g := .grouped) _ f => (f default).hasOrder
 
 /-- Does the statement produced for this query end with an ORDER BY clause
 (needed by SQL Server, whose OFFSET/FETCH requires one)? -/
-def Query.hasOrderBy : Query s → Bool
+def Query.hasOrderBy : Query ts s → Bool
   | .spine sp => sp.hasOrder
   | .distinctC q => q.hasOrderBy
   | .limitC q _ _ => q.hasOrderBy
@@ -85,15 +85,15 @@ terminals take a projection callback — select list plus statement tail —
 which is how scalar queries substitute `COUNT(*)` and pipeline grouping
 injects its `GROUP BY … HAVING …`; *grouped* terminals own their projection
 and tail, so there is nothing to pass. -/
-@[reducible] def SelectK : Terminal → Schema → Type
-  | .plain, s => Row s → CompileM (String × String)
-  | .grouped, _ => Unit
+@[reducible] def SelectK : Ctx → Terminal → Schema → Type
+  | ts, .plain, s => Row ts s → CompileM (String × String)
+  | _, .grouped, _ => Unit
 
 mutual
 
 /-- Compile a full query. Boundary clauses (DISTINCT, LIMIT, set ops,
 GROUP BY) decorate the statement produced by the spine underneath. -/
-def Query.compileStmt : Query s → CompileM String
+def Query.compileStmt : Query ts s → CompileM String
   | .spine (g := .plain) sp => sp.compileSpine {} Row.defaultSelect
   | .spine (g := .grouped) sp => sp.compileSpine {} ()
   -- spines assemble with the DISTINCT flag …
@@ -105,7 +105,8 @@ def Query.compileStmt : Query s → CompileM String
   | .distinctC (s := s₀) q => do
       let sub ← q.compileStmt
       let alias ← freshAlias
-      let (sel, _) ← Row.defaultSelect (Row.ofAlias alias s₀)
+      -- the marker row is render-only; pin its (otherwise unconstrained) ts
+      let (sel, _) ← Row.defaultSelect (Row.ofAlias alias s₀ : Row ts s₀)
       return s!"SELECT DISTINCT {sel} FROM ({sub}) {← quote alias}"
   | .limitC q lim? off? => do
       let inner ← q.compileStmt
@@ -151,7 +152,7 @@ def Query.compileStmt : Query s → CompileM String
 WHERE conjuncts until the terminal, then assemble one flat SELECT. The third
 argument's type follows the terminal (`SelectK`): a projection callback for
 plain spines, nothing for grouped ones. -/
-def SpineQ.compileSpine : SpineQ g s → StmtAcc → SelectK g s → CompileM String
+def SpineQ.compileSpine : SpineQ ts g s → StmtAcc → SelectK ts g s → CompileM String
   | .yield r, acc, k => do
       let (sel, tail) ← k r
       let head := if acc.distinct then "SELECT DISTINCT" else "SELECT"
@@ -180,16 +181,16 @@ def SpineQ.compileSpine : SpineQ g s → StmtAcc → SelectK g s → CompileM St
   | .order ks rest, acc, k => do
       let rendered ← compileOrderKeys ks
       rest.compileSpine { acc with orders := acc.orders.push rendered } k
-  | .fromT (s := s₀) t f, acc, k => do
+  | .fromT (n := nm) (s := s₀) (inst := _) _ f, acc, k => do
       let alias ← freshAlias
-      let item := s!"{← quote t.name} {← quote alias}"
+      let item := s!"{← quote nm} {← quote alias}"
       (f (Row.ofAlias alias s₀)).compileSpine
         { acc with froms := acc.froms.push (false, item) } k
-  | .joinT (s := s₀) kind t on' f, acc, k => do
+  | .joinT (n := nm) (s := s₀) (inst := _) kind _ on' f, acc, k => do
       let alias ← freshAlias
       let row := Row.ofAlias alias s₀
       let onStr ← (on' row).compile
-      let item := s!"{kind.token} {← quote t.name} {← quote alias} ON {onStr}"
+      let item := s!"{kind.token} {← quote nm} {← quote alias} ON {onStr}"
       (f row).compileSpine { acc with froms := acc.froms.push (true, item) } k
   | .fromQ (s := s₀) q f, acc, k => do
       let sub ← q.compileStmt
@@ -201,7 +202,7 @@ def SpineQ.compileSpine : SpineQ g s → StmtAcc → SelectK g s → CompileM St
 end
 
 /-- Compile a scalar aggregate query. -/
-def ScalarQuery.compile : ScalarQuery t → CompileM String
+def ScalarQuery.compile : ScalarQuery ts t → CompileM String
   | .countQ sp => sp.compileSpine {} fun _ => pure ("COUNT(*)", "")
   | .aggQ op sp => sp.compileSpine {} fun r =>
       match r with
@@ -212,26 +213,26 @@ private def runCompile (m : CompileM String) (db : DatabaseType) : CompiledSql :
   { sql, params := st.params }
 
 /-- Compile a query to SQL text plus named parameters for the given dialect. -/
-def Query.toSql (q : Query s) (db : DatabaseType := .sqlite) : CompiledSql :=
+def Query.toSql (q : Query ts s) (db : DatabaseType := .sqlite) : CompiledSql :=
   runCompile q.compileStmt db
 
-def Query.toSqlite (q : Query s) : CompiledSql := q.toSql .sqlite
-def Query.toSqlServer (q : Query s) : CompiledSql := q.toSql .sqlServer
-def Query.toPostgres (q : Query s) : CompiledSql := q.toSql .postgres
+def Query.toSqlite (q : Query ts s) : CompiledSql := q.toSql .sqlite
+def Query.toSqlServer (q : Query ts s) : CompiledSql := q.toSql .sqlServer
+def Query.toPostgres (q : Query ts s) : CompiledSql := q.toSql .postgres
 
 /-- Compile a scalar query for the given dialect. -/
-def ScalarQuery.toSql (sq : ScalarQuery t) (db : DatabaseType := .sqlite) : CompiledSql :=
+def ScalarQuery.toSql (sq : ScalarQuery ts t) (db : DatabaseType := .sqlite) : CompiledSql :=
   runCompile sq.compile db
 
 /-- `e IN (subquery)` — the subquery must project exactly one column of the
 same type. Stored as its staged actions (see `SubQuery`): compilation for
 `toSql`, evaluation for `run`. -/
-def SqlExpr.inQuery (e : SqlExpr t) (q : Query [(n, t)]) : SqlExpr .bool :=
-  .inSub e ⟨q.compileStmt, fun db => (q.run db).map fun | .cons c .nil => c⟩
+def SqlExpr.inQuery (e : SqlExpr ts t) (q : Query ts [(n, t)]) : SqlExpr ts .bool :=
+  .inSub e ⟨q.compileStmt, fun ee => (q.evalRows ee).map fun | .cons c .nil => c⟩
 
 /-- Embed a scalar aggregate query as an expression:
 `c["Age"] >. (customers' |>.select … |>.avg).embed`. -/
-def ScalarQuery.embed (sq : ScalarQuery t) : SqlExpr t :=
-  .scalarSub ⟨sq.compile, fun db => [sq.evalCell db]⟩
+def ScalarQuery.embed (sq : ScalarQuery ts t) : SqlExpr ts t :=
+  .scalarSub ⟨sq.compile, fun ee => [sq.evalCell ee]⟩
 
 end LeanLinq

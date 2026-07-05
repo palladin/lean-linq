@@ -83,43 +83,43 @@ def AnyCell.cmp : AnyCell → AnyCell → Ordering
 
 instance : BEq AnyCell := ⟨fun a b => a.cmp b == .eq⟩
 
-/-! ## Rows, environments, databases -/
+/-! ## Rows in scope, typed databases -/
 
 /-- Cell lookup by column name and expected type (mirrors `HasCol`, but at
 run time: absent column or type mismatch is `none`, indistinguishable from
 NULL — both are unreachable for schema-checked queries). -/
-def Values.get? : {s : List (String × SqlType)} → Values s →
+def Values.get? : {s : Schema} → Values s →
     (name : String) → (t : SqlType) → Option t.interp
   | _, .nil, _, _ => none
   | _, .cons (name := n') (t := t') c r, name, t =>
       if n' == name then (if h : t' = t then h ▸ c else none)
       else r.get? name t
 
-/-- An evaluation environment: source alias → its current value row (the
-value-level counterpart of the compiler's `Row.ofAlias` field markers). -/
-abbrev Env := List (String × ((s : List (String × SqlType)) × Values s))
+/-- The rows in scope during evaluation: source alias → its current value
+row (the value-level counterpart of the compiler's `Row.ofAlias` field
+markers). -/
+abbrev Scope := List (String × ((s : Schema) × Values s))
 
-def Env.get? (env : Env) (alias name : String) (t : SqlType) : Option t.interp := do
-  let ⟨_, v⟩ ← env.lookup alias
+def Scope.get? (sc : Scope) (alias name : String) (t : SqlType) : Option t.interp := do
+  let ⟨_, v⟩ ← sc.lookup alias
   v.get? name t
 
-/-- An in-memory database: named tables of value rows, plus the bindings for
-user-named parameters and the (optional) current timestamp. -/
-structure Db where
-  tables : List (String × ((s : List (String × SqlType)) × List (Values s))) := []
+/-- A typed database: one row-list per context entry. A query typed against
+`ts` evaluates against any `TableEnv ts` — resolution happened at
+elaboration (`HasTable`), so there is no name lookup, no schema check, and
+no failure mode at run time. -/
+inductive TableEnv : Ctx → Type where
+  | nil : TableEnv []
+  | cons : {n : String} → {s : Schema} → {ts : Ctx} →
+      List (Values s) → TableEnv ts → TableEnv ((n, s) :: ts)
+
+/-- Everything evaluation reads besides the query itself: the typed tables,
+the bindings for user-named parameters, and the (optional) current
+timestamp. -/
+structure EvalEnv (ts : Ctx) where
+  tables : TableEnv ts
   params : List (String × SqlValue) := []
   now : Option String := none
-
-def Db.rowsOf (db : Db) (name : String) (s : List (String × SqlType)) :
-    List (Values s) :=
-  match db.tables.lookup name with
-  | some ⟨s', rows⟩ => if h : s' = s then h ▸ rows else []
-  | none => []
-
-def Db.setTable (db : Db) (name : String) (s : List (String × SqlType))
-    (rows : List (Values s)) : Db :=
-  { db with tables := db.tables.map fun (n, pt) =>
-      if n == name then (n, ⟨s, rows⟩) else (n, pt) }
 
 /-! ## Decimals: exact milli-units (scale 3) -/
 

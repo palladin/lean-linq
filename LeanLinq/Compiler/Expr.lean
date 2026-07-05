@@ -26,7 +26,7 @@ def DateUnit.upperName : DateUnit → String
 opposed to a BIT-like value (column, parameter, literal, CASE). T-SQL has no
 first-class booleans: comparing a predicate requires converting it to a value
 first (`CASE WHEN p THEN 1 ELSE 0 END`). -/
-def SqlExpr.isPredicate : SqlExpr t → Bool
+def SqlExpr.isPredicate : SqlExpr ts t → Bool
   | .cmp .. | .and .. | .or .. | .not .. | .isNull .. | .isNotNull ..
   | .like .. | .inList .. | .inSub .. => true
   | _ => false
@@ -35,7 +35,7 @@ mutual
 
 /-- Render an expression to SQL text for the ambient dialect, allocating a
 named parameter for every literal (never inlining values). -/
-def SqlExpr.compile : SqlExpr t → CompileM String
+def SqlExpr.compile : SqlExpr ts t → CompileM String
   | .intC i        => pushParam (.int i)
   | .longC i       => pushParam (.long i)
   | .doubleC f     => pushParam (.double f)
@@ -57,7 +57,7 @@ def SqlExpr.compile : SqlExpr t → CompileM String
       let sa ← a.compile
       let sb ← b.compile
       -- SQL Server: predicates are not values; convert before comparing.
-      let wrap (e : SqlExpr t₀) (s : String) : String :=
+      let wrap (e : SqlExpr ts t₀) (s : String) : String :=
         if t₀ == .bool && e.isPredicate then s!"CASE WHEN {s} THEN 1 ELSE 0 END" else s
       if (← read) == .sqlServer then
         return s!"({wrap a sa} {op.token} {wrap b sb})"
@@ -135,7 +135,7 @@ def SqlExpr.compile : SqlExpr t → CompileM String
           | .month => s!"(EXTRACT(YEAR FROM {y}) - EXTRACT(YEAR FROM {x})) * 12 + (EXTRACT(MONTH FROM {y}) - EXTRACT(MONTH FROM {x}))"
           | .year => s!"(EXTRACT(YEAR FROM {y}) - EXTRACT(YEAR FROM {x}))"
 
-def SqlExpr.compileList : List ((u : SqlType) × SqlExpr u) → CompileM (List String)
+def SqlExpr.compileList : List ((u : SqlType) × SqlExpr ts u) → CompileM (List String)
   | [] => pure []
   | ⟨_, e⟩ :: es => return (← e.compile) :: (← SqlExpr.compileList es)
 

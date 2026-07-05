@@ -8,242 +8,246 @@ open LeanLinq
 
 namespace TQ
 
-def ParameterAsIntParam := Query.from' customers
+/- Definitions are pinned to `TestCtx` at each query head: an unannotated
+`def` cannot leave the context as a metavariable (instance search would be
+stuck), and the corpus only ever runs against the seed context. -/
+
+def ParameterAsIntParam := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["Age"] >. SqlExpr.param .int "minAge")
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"])
-def ParameterAsStringParam := Query.from' customers
+def ParameterAsStringParam := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["Name"] ==. SqlExpr.param .string "customerName")
   |>.select (fun c => ![c["Id"].as "Id", c["Age"].as "Age"])
-def ParameterAsBoolParam := Query.from' customers
+def ParameterAsBoolParam := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => (c["Age"] >. 18) ==. SqlExpr.param .bool "isAdult")
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age"])
-def BoolColumnDirectComparison := Query.from' customers
+def BoolColumnDirectComparison := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["IsActive"] ==. SqlExpr.param .bool "isActive")
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age",
                         c["IsActive"].as "IsActive"])
-def BoolColumnLiteralTrue := Query.from' customers
+def BoolColumnLiteralTrue := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["IsActive"] ==. true)
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age",
                         c["IsActive"].as "IsActive"])
-def BoolColumnLiteralFalse := Query.from' customers
+def BoolColumnLiteralFalse := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["IsActive"] ==. false)
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age",
                         c["IsActive"].as "IsActive"])
 
-def CaseStringExpression := Query.from' customers
+def CaseStringExpression := Query.from' (ts := TestCtx) customers
   |>.select (fun c => ![c["Id"].as "Id",
       (SqlExpr.caseWhen (c["Age"] >. 18) (SqlExpr.str "Adult") (SqlExpr.str "Minor")).as "AgeGroup"])
-def CaseIntExpression := Query.from' customers
+def CaseIntExpression := Query.from' (ts := TestCtx) customers
   |>.select (fun c => ![c["Id"].as "Id",
       (SqlExpr.caseWhen (c["Age"] >. 65) (SqlExpr.int 1) (SqlExpr.int 0)).as "IsSenior"])
-def CaseBoolExpression := Query.from' customers
+def CaseBoolExpression := Query.from' (ts := TestCtx) customers
   |>.select (fun c => ![c["Id"].as "Id",
       (SqlExpr.caseWhen (c["Age"] >. 18) (c["IsActive"]) (SqlExpr.bool false)).as "ActiveAdult"])
-def CaseInWhere := Query.from' customers
+def CaseInWhere := Query.from' (ts := TestCtx) customers
   |>.where' (fun c =>
       SqlExpr.caseWhen (c["Age"] >. 18) (SqlExpr.str "Adult") (SqlExpr.str "Minor") ==. "Adult")
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"])
 
-def LikeWildcard := Query.from' customers
+def LikeWildcard := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["Name"].like "Jo%")
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"])
-def LikeSingleChar := Query.from' customers
+def LikeSingleChar := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["Name"].like "J_n")
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"])
-def LikeBothWildcards := Query.from' customers
+def LikeBothWildcards := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["Name"].like "%o_n%")
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"])
-def LikeExact := Query.from' customers
+def LikeExact := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["Name"].like "John")
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"])
 
-def AbsColumn := Query.from' customers
+def AbsColumn := Query.from' (ts := TestCtx) customers
   |>.select (fun c => ![c["Id"].as "Id", (c["Age"].abs).as "AbsAge"])
-def AbsInWhere := Query.from' customers
+def AbsInWhere := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["Age"].abs >. 30)
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age"])
-def AbsExpression := Query.from' customers
+def AbsExpression := Query.from' (ts := TestCtx) customers
   |>.select (fun c => ![c["Id"].as "Id", ((c["Age"] - 50).abs).as "AbsDiff"])
-def AbsParameter := Query.from' customers
+def AbsParameter := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["Age"].abs >. (SqlExpr.param .int "minAge").abs)
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age"])
 
-def FromWhereDecimalComparison := Query.from' products
+def FromWhereDecimalComparison := Query.from' (ts := TestCtx) products
   |>.where' (fun p => p["Price"] >. 100.50)
-def FromSelectDecimalArithmetic := Query.from' products
+def FromSelectDecimalArithmetic := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![p["ProductName"].as "ProductName",
       (p["Price"] * 1.1).as "Marked", (p["Price"] + 10.0).as "Plus",
       (p["Price"] - 5.0).as "Minus"])
-def FromWhereDecimalIsNull := Query.from' products |>.where' (fun p => p["Price"].isNull)
-def FromWhereDecimalIsNotNull := Query.from' products |>.where' (fun p => p["Price"].isNotNull)
-def CaseDecimalExpression := Query.from' products
+def FromWhereDecimalIsNull := Query.from' (ts := TestCtx) products |>.where' (fun p => p["Price"].isNull)
+def FromWhereDecimalIsNotNull := Query.from' (ts := TestCtx) products |>.where' (fun p => p["Price"].isNotNull)
+def CaseDecimalExpression := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![p["ProductName"].as "ProductName",
       (SqlExpr.caseWhen (p["Price"] >. 1000.0) (SqlExpr.str "Expensive")
         (SqlExpr.caseWhen (p["Price"] >. 100.0) (SqlExpr.str "Moderate")
           (SqlExpr.str "Cheap"))).as "ExpensiveFlag"])
-def ParameterAsDecimalParam := Query.from' products
+def ParameterAsDecimalParam := Query.from' (ts := TestCtx) products
   |>.where' (fun p => p["Price"] >. SqlExpr.param .decimal "minPrice")
 
-def FromWhereCreatedDateComparison := Query.from' products
+def FromWhereCreatedDateComparison := Query.from' (ts := TestCtx) products
   |>.where' (fun p => p["CreatedDate"] >. SqlExpr.dt "2024-01-01")
-def FromWhereCreatedDateIsNull := Query.from' products
+def FromWhereCreatedDateIsNull := Query.from' (ts := TestCtx) products
   |>.where' (fun p => p["CreatedDate"].isNull)
-def FromWhereCreatedDateIsNotNull := Query.from' products
+def FromWhereCreatedDateIsNotNull := Query.from' (ts := TestCtx) products
   |>.where' (fun p => p["CreatedDate"].isNotNull)
-def FromSelectCreatedDateMinMax := Query.from' products
+def FromSelectCreatedDateMinMax := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![p["ProductName"].as "ProductName",
       p["CreatedDate"].as "EarliestDate", p["CreatedDate"].as "LatestDate"])
-def CaseDateTimeExpression := Query.from' products
+def CaseDateTimeExpression := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![p["ProductName"].as "ProductName",
       (SqlExpr.caseWhen (p["CreatedDate"] <. SqlExpr.dt "2020-01-01") (SqlExpr.str "Old")
         (SqlExpr.caseWhen (p["CreatedDate"] <. SqlExpr.dt "2024-01-01") (SqlExpr.str "Recent")
           (SqlExpr.str "New"))).as "Age"])
-def ParameterAsDateTimeParam := Query.from' products
+def ParameterAsDateTimeParam := Query.from' (ts := TestCtx) products
   |>.where' (fun p => p["CreatedDate"] >. SqlExpr.param .dateTime "startDate")
 
-def FromWhereUniqueIdEquals := Query.from' products
+def FromWhereUniqueIdEquals := Query.from' (ts := TestCtx) products
   |>.where' (fun p => p["UniqueId"] ==. SqlExpr.gd "12345678-1234-1234-1234-123456789012")
-def FromWhereUniqueIdNotEquals := Query.from' products
+def FromWhereUniqueIdNotEquals := Query.from' (ts := TestCtx) products
   |>.where' (fun p => p["UniqueId"] !=. SqlExpr.gd "00000000-0000-0000-0000-000000000000")
-def FromWhereUniqueIdIsNull := Query.from' products
+def FromWhereUniqueIdIsNull := Query.from' (ts := TestCtx) products
   |>.where' (fun p => p["UniqueId"].isNull)
-def FromWhereUniqueIdIsNotNull := Query.from' products
+def FromWhereUniqueIdIsNotNull := Query.from' (ts := TestCtx) products
   |>.where' (fun p => p["UniqueId"].isNotNull)
-def CaseGuidExpression := Query.from' products
+def CaseGuidExpression := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![p["ProductName"].as "ProductName",
       (SqlExpr.caseWhen (p["UniqueId"] ==. SqlExpr.gd "00000000-0000-0000-0000-000000000000")
         (SqlExpr.str "Empty") (SqlExpr.str "HasId")).as "Status"])
-def ParameterAsGuidParam := Query.from' products
+def ParameterAsGuidParam := Query.from' (ts := TestCtx) products
   |>.where' (fun p => p["UniqueId"] ==. SqlExpr.param .guid "targetId")
 
-def StringSubstring := Query.from' products
+def StringSubstring := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![(p["ProductName"].substring 1 5).as "Sub"])
-def StringUpper := Query.from' products
+def StringUpper := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![(p["ProductName"].upper).as "Upper"])
-def StringLower := Query.from' products
+def StringLower := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![(p["ProductName"].lower).as "Lower"])
-def StringTrim := Query.from' products
+def StringTrim := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![(p["ProductName"].trim).as "Trimmed"])
-def StringLength := Query.from' products
+def StringLength := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![(p["ProductName"].length).as "Len"])
-def StringFunctionsInWhere := Query.from' customers
+def StringFunctionsInWhere := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["Name"].upper ==. "JOHN" &&. c["Name"].length >. 3)
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"])
-def StringFunctionsInSelect := Query.from' customers
+def StringFunctionsInSelect := Query.from' (ts := TestCtx) customers
   |>.select (fun c => ![c["Id"].as "Id",
       (c["Name"].upper).as "UpperName", (c["Name"].lower).as "LowerName",
       (c["Name"].trim).as "TrimmedName", (c["Name"].length).as "NameLength",
       (c["Name"].substring 1 3).as "FirstThree"])
 
-def DateTimeNow := Query.from' products
+def DateTimeNow := Query.from' (ts := TestCtx) products
   |>.select (fun _ => ![(SqlExpr.now).as "Now"])
-def DateTimeYear := Query.from' products
+def DateTimeYear := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![(p["CreatedDate"].year).as "Year"])
-def DateTimeMonth := Query.from' products
+def DateTimeMonth := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![(p["CreatedDate"].month).as "Month"])
-def DateTimeDay := Query.from' products
+def DateTimeDay := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![(p["CreatedDate"].day).as "Day"])
-def DateTimeAddDays := Query.from' products
+def DateTimeAddDays := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![(p["CreatedDate"].addDays 30).as "Plus30"])
-def DateTimeAddMonths := Query.from' products
+def DateTimeAddMonths := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![(p["CreatedDate"].addMonths 6).as "Plus6M"])
-def DateTimeAddYears := Query.from' products
+def DateTimeAddYears := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![(p["CreatedDate"].addYears 1).as "Plus1Y"])
-def DateTimeDiffDays := Query.from' products
+def DateTimeDiffDays := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![(p["CreatedDate"].diffDays (SqlExpr.dt "2025-01-01")).as "Diff"])
-def DateTimeDiffMonths := Query.from' products
+def DateTimeDiffMonths := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![(p["CreatedDate"].diffMonths (SqlExpr.dt "2025-01-01")).as "Diff"])
-def DateTimeDiffYears := Query.from' products
+def DateTimeDiffYears := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![(p["CreatedDate"].diffYears (SqlExpr.dt "2025-01-01")).as "Diff"])
-def DateTimeFunctionsInWhere := Query.from' products
+def DateTimeFunctionsInWhere := Query.from' (ts := TestCtx) products
   |>.where' (fun p => p["CreatedDate"].year ==. 2024 &&. p["CreatedDate"].month >. 6)
   |>.select (fun p => ![p["Id"].as "Id", p["CreatedDate"].as "CreatedDate"])
-def DateTimeFunctionsInSelect := Query.from' products
+def DateTimeFunctionsInSelect := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![p["Id"].as "Id",
       (p["CreatedDate"].year).as "CreatedYear", (p["CreatedDate"].month).as "CreatedMonth",
       (p["CreatedDate"].day).as "CreatedDay", (p["CreatedDate"].addDays 7).as "NextWeek",
       (p["CreatedDate"].addMonths 1).as "NextMonth",
       (p["CreatedDate"].diffDays SqlExpr.now).as "DaysAgo"])
 
-def DecimalRound := Query.from' products
+def DecimalRound := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![(p["Price"].round 2).as "Rounded"])
-def DecimalCeiling := Query.from' products
+def DecimalCeiling := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![(p["Price"].ceiling).as "Ceil"])
-def DecimalFloor := Query.from' products
+def DecimalFloor := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![(p["Price"].floor).as "Floor"])
-def MathFunctionsInWhere := Query.from' products
+def MathFunctionsInWhere := Query.from' (ts := TestCtx) products
   |>.where' (fun p => p["Price"].round 0 >. 100.0 &&. p["Price"].ceiling <. 1000.0)
   |>.select (fun p => ![p["Id"].as "Id", p["Price"].as "Price"])
-def MathFunctionsInSelect := Query.from' products
+def MathFunctionsInSelect := Query.from' (ts := TestCtx) products
   |>.select (fun p => ![p["Id"].as "Id", p["Price"].as "OriginalPrice",
       (p["Price"].round 2).as "RoundedPrice", (p["Price"].ceiling).as "CeilingPrice",
       (p["Price"].floor).as "FloorPrice"])
 
-def FromLimitOffset := Query.from' customers
+def FromLimitOffset := Query.from' (ts := TestCtx) customers
   |>.orderBy (fun c => [c["Id"].asc]) |>.select (fun c => c)
   |>.limitOffset (some 5) (some 10)
-def FromSelectLimitOffset := Query.from' customers
+def FromSelectLimitOffset := Query.from' (ts := TestCtx) customers
   |>.orderBy (fun c => [c["Id"].asc])
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"])
   |>.limitOffset (some 3) (some 5)
-def FromWhereLimitOffset := Query.from' customers
+def FromWhereLimitOffset := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["Age"] >. 18)
   |>.orderBy (fun c => [c["Id"].asc]) |>.select (fun c => c)
   |>.limit 10
-def FromWhereSelectLimitOffset := Query.from' customers
+def FromWhereSelectLimitOffset := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["Age"] >=. 21)
   |>.orderBy (fun c => [c["Id"].asc])
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age"])
   |>.limitOffset (some 5) (some 15)
-def FromOrderByLimitOffset := Query.from' customers
+def FromOrderByLimitOffset := Query.from' (ts := TestCtx) customers
   |>.orderBy (fun c => [c["Name"].asc]) |>.select (fun c => c)
   |>.limitOffset (some 10) (some 5)
-def FromWhereOrderByLimitOffset := Query.from' customers
+def FromWhereOrderByLimitOffset := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["Age"] >. 18)
   |>.orderBy (fun c => [c["Age"].desc]) |>.select (fun c => c)
   |>.limitOffset (some 20) (some 10)
-def FromWhereOrderBySelectLimitOffset := Query.from' customers
+def FromWhereOrderBySelectLimitOffset := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["Name"] !=. "")
   |>.orderBy (fun c => [c["Name"].asc, c["Age"].desc])
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age"])
   |>.limit 5
-def FromLimitOffsetOnly := Query.from' customers
+def FromLimitOffsetOnly := Query.from' (ts := TestCtx) customers
   |>.orderBy (fun c => [c["Id"].asc]) |>.select (fun c => c)
   |>.limit 10
-def FromOffsetOnly := Query.from' customers
+def FromOffsetOnly := Query.from' (ts := TestCtx) customers
   |>.orderBy (fun c => [c["Id"].asc]) |>.select (fun c => c)
   |>.offset 5
-def FromLimitOffsetWithoutOrderBy := Query.from' customers
+def FromLimitOffsetWithoutOrderBy := Query.from' (ts := TestCtx) customers
   |>.select (fun c => c)
   |>.limit 10
 
-def FromSelectDistinct := Query.from' customers
+def FromSelectDistinct := Query.from' (ts := TestCtx) customers
   |>.select (fun c => ![c["Name"].as "Name"]) |>.distinct
-def FromSelectDistinctWhere := Query.from' customers
+def FromSelectDistinctWhere := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["Age"] >. 18)
   |>.select (fun c => ![c["Name"].as "Name"]) |>.distinct
-def FromSelectDistinctOrderBy := Query.from' customers
+def FromSelectDistinctOrderBy := Query.from' (ts := TestCtx) customers
   |>.orderBy (fun c => [c["Name"].asc])
   |>.select (fun c => ![c["Name"].as "Name"]) |>.distinct
-def FromSelectDistinctMultipleColumns := Query.from' customers
+def FromSelectDistinctMultipleColumns := Query.from' (ts := TestCtx) customers
   |>.orderBy (fun c => [c["Name"].asc])
   |>.select (fun c => ![c["Name"].as "Name", c["Age"].as "Age"]) |>.distinct
 
 /-- Chained limit/offset must merge into one clause, not stack two LIMITs. -/
-def LimitThenOffset := Query.from' customers
+def LimitThenOffset := Query.from' (ts := TestCtx) customers
   |>.orderBy (fun c => [c["Id"].asc]) |>.select (fun c => c)
   |>.limit 3 |>.offset 1
-def OffsetThenLimit := Query.from' customers
+def OffsetThenLimit := Query.from' (ts := TestCtx) customers
   |>.orderBy (fun c => [c["Id"].asc]) |>.select (fun c => c)
   |>.offset 1 |>.limit 2
 /-- Re-limiting a limited query wraps it as a derived table. -/
-def LimitThenLimit := Query.from' customers
+def LimitThenLimit := Query.from' (ts := TestCtx) customers
   |>.orderBy (fun c => [c["Id"].asc]) |>.select (fun c => c)
   |>.limit 3 |>.limit 2
 
 /-- DISTINCT over a boundary query (LIMIT): dedupe applies *after* the limit,
 so the limited query becomes a derived table under SELECT DISTINCT. -/
-def FromOrderByLimitDistinct := Query.from' customers
+def FromOrderByLimitDistinct := Query.from' (ts := TestCtx) customers
   |>.select (fun c => ![c["Name"].as "Name"])
   |>.orderBy (fun r => [r["Name"].asc])
   |>.limit 2
@@ -251,67 +255,67 @@ def FromOrderByLimitDistinct := Query.from' customers
   |>.orderBy (fun r => [r["Name"].asc])
 
 def UnionQ :=
-  (Query.from' customers
+  (Query.from' (ts := TestCtx) customers
     |>.where' (fun c => c["Age"] >. 30)
     |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"]))
   |>.union
-  (Query.from' customers
+  (Query.from' (ts := TestCtx) customers
     |>.where' (fun c => c["Name"] ==. "Alice")
     |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"]))
 def IntersectQ :=
-  (Query.from' customers
+  (Query.from' (ts := TestCtx) customers
     |>.where' (fun c => c["Age"] >. 25)
     |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"]))
   |>.intersect
-  (Query.from' customers
+  (Query.from' (ts := TestCtx) customers
     |>.where' (fun c => c["Name"] ==. "John")
     |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"]))
 def ExceptQ :=
-  (Query.from' customers
+  (Query.from' (ts := TestCtx) customers
     |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"]))
   |>.except
-  (Query.from' customers
+  (Query.from' (ts := TestCtx) customers
     |>.where' (fun c => c["Age"] <. 18)
     |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"]))
 
 /-! Comprehension-syntax parity cases: the same shapes expressed with
 `query!` clauses (join/leftJoin/orderBy/groupBy/having/distinct/limit). -/
 
-def LinqJoin := query! {
+def LinqJoin := (query! {
   from c in customers
   join o in orders on c["Id"] ==. o["CustomerId"]
   select ![c["Name"].as "Name", o["Amount"].as "Amount"]
-}
-def LinqLeftJoin := query! {
+} : Query TestCtx _)
+def LinqLeftJoin := (query! {
   from c in customers
   leftJoin o in orders on c["Id"] ==. o["CustomerId"]
   select ![c["Name"].as "Name", o["Amount"].as "Amount"]
-}
-def LinqOrderBy := query! {
+} : Query TestCtx _)
+def LinqOrderBy := (query! {
   from c in customers
   orderBy c["Name"].asc, c["Age"].desc
   select ![c["Id"].as "Id", c["Name"].as "Name"]
-}
-def LinqGroupBy := query! {
+} : Query TestCtx _)
+def LinqGroupBy := (query! {
   from o in orders
   groupBy o["CustomerId"].key into a
   select ![o["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "Total"]
-}
-def LinqGroupByHaving := query! {
+} : Query TestCtx _)
+def LinqGroupByHaving := (query! {
   from o in orders
   groupBy o["CustomerId"].key into a
   having a.count >. 1
   select ![o["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "Total"]
-}
-def LinqDistinctLimit := query! {
+} : Query TestCtx _)
+def LinqDistinctLimit := (query! {
   from c in customers
   where c["Age"] >. 18
   orderBy c["Name"].asc
   select ![c["Name"].as "Name"]
   distinct
   limit 2
-}
-def LinqComplex := query! {
+} : Query TestCtx _)
+def LinqComplex := (query! {
   from c in customers
   join o in orders on c["Id"] ==. o["CustomerId"]
   where c["Age"] >=. 18
@@ -320,13 +324,13 @@ def LinqComplex := query! {
   orderBy (a.sum o["Amount"]).desc
   select ![c["Id"].as "CustomerId", c["Name"].as "CustomerName",
            (a.sum o["Amount"]).as "TotalSpent"]
-}
-def LinqLimitOffset := query! {
+} : Query TestCtx _)
+def LinqLimitOffset := (query! {
   from c in customers
   orderBy c["Id"].asc
   select ![c["Id"].as "Id", c["Name"].as "Name"]
   limit 2 offset 1
-}
+} : Query TestCtx _)
 
 /-- The full query registry: name ↦ per-dialect compilation. -/
 def queryCases : List (String × Case) := [

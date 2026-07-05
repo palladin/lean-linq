@@ -2,11 +2,14 @@ import LeanLinq.Statements
 
 /-! # Statement evaluation
 
-INSERT/UPDATE/DELETE as `Db → Db` table transforms, completing the
-executable semantics: the statement value that compiles to SQL also applies
-in memory. WHERE follows the same three-valued discipline as queries (a row
-is affected only when the predicate is `some true`); rows are addressed via
-the empty-alias marker row, exactly as the statement compiler renders them. -/
+INSERT/UPDATE/DELETE as `TableEnv ts → TableEnv ts` transforms, completing
+the executable semantics: the statement value that compiles to SQL also
+applies in memory. The target table is read and written through its
+`HasTable` instance — resolution happened at elaboration, so applying a
+statement to a database lacking its table is a type error, not a silent
+no-op. WHERE follows the same three-valued discipline as queries (a row is
+affected only when the predicate is `some true`); rows are addressed via the
+empty-alias marker row, exactly as the statement compiler renders them. -/
 
 namespace LeanLinq
 
@@ -21,42 +24,50 @@ private def Values.setCol (name : String) (t' : SqlType) (cell : Option t'.inter
       else .cons c (r.setCol name t' cell)
 
 /-- Build the inserted row in schema order: unmentioned columns are NULL. -/
-private def buildInsertRow (db : Db) (vs : List (String × ((u : SqlType) × SqlExpr u))) :
+private def buildInsertRow (ee : EvalEnv ts)
+    (vs : List (String × ((u : SqlType) × SqlExpr ts u))) :
     (s : Schema) → Values s
   | [] => .nil
   | (n, t) :: rest =>
       let cell : Option t.interp :=
         match vs.find? (·.1 == n) with
-        | some (_, ⟨u, e⟩) => if h : u = t then h ▸ (e.evalG db [([] : Env)]) else none
+        | some (_, ⟨u, e⟩) => if h : u = t then h ▸ (e.evalG ee [([] : Scope)]) else none
         | none => none
-      .cons cell (buildInsertRow db vs rest)
+      .cons cell (buildInsertRow ee vs rest)
 
-def InsertStmt.apply (i : InsertStmt s) (db : Db) : Db :=
-  db.setTable i.table.name s (db.rowsOf i.table.name s ++ [buildInsertRow db i.values s])
+def InsertStmt.apply (i : InsertStmt ts n s) [inst : HasTable ts n s]
+    (env : TableEnv ts) (params : List (String × SqlValue) := [])
+    (now : Option String := none) : TableEnv ts :=
+  let ee : EvalEnv ts := ⟨env, params, now⟩
+  inst.set env (inst.rows env ++ [buildInsertRow ee i.values s])
 
-def UpdateStmt.apply (u : UpdateStmt s) (db : Db) : Db :=
+def UpdateStmt.apply (u : UpdateStmt ts n s) [inst : HasTable ts n s]
+    (env : TableEnv ts) (params : List (String × SqlValue) := [])
+    (now : Option String := none) : TableEnv ts :=
+  let ee : EvalEnv ts := ⟨env, params, now⟩
   let marker := Row.ofAlias "" s
-  let rows := (db.rowsOf u.table.name s).map fun v =>
-    let env : Env := [("", ⟨s, v⟩)]
+  inst.set env <| (inst.rows env).map fun v =>
+    let sc : Scope := [("", ⟨s, v⟩)]
     let hit := match u.where? with
       | none => true
-      | some p => (p marker).evalG db [env] == some true
+      | some p => (p marker).evalG ee [sc] == some true
     if hit then
       -- every SET expression sees the pre-update row (SQL semantics)
-      u.sets.foldl (init := v) fun acc (n, f) =>
+      u.sets.foldl (init := v) fun acc (nm, f) =>
         match f marker with
-        | ⟨t', e⟩ => acc.setCol n t' (e.evalG db [env])
+        | ⟨t', e⟩ => acc.setCol nm t' (e.evalG ee [sc])
     else v
-  db.setTable u.table.name s rows
 
-def DeleteStmt.apply (d : DeleteStmt s) (db : Db) : Db :=
+def DeleteStmt.apply (d : DeleteStmt ts n s) [inst : HasTable ts n s]
+    (env : TableEnv ts) (params : List (String × SqlValue) := [])
+    (now : Option String := none) : TableEnv ts :=
+  let ee : EvalEnv ts := ⟨env, params, now⟩
   let marker := Row.ofAlias "" s
-  let rows := (db.rowsOf d.table.name s).filter fun v =>
+  inst.set env <| (inst.rows env).filter fun v =>
     match d.where? with
     | none => false                     -- unconditional DELETE clears the table
     | some p =>
-        let env : Env := [("", ⟨s, v⟩)]
-        (p marker).evalG db [env] != some true
-  db.setTable d.table.name s rows
+        let sc : Scope := [("", ⟨s, v⟩)]
+        (p marker).evalG ee [sc] != some true
 
 end LeanLinq

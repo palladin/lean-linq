@@ -17,9 +17,11 @@ import LeanLinq
 open LeanLinq
 
 abbrev CustomersS : Schema := [("Id", .int), ("Name", .string), ("Age", .int)]
-def customers : Table CustomersS := ⟨"Customers"⟩
+def customers : Table "Customers" CustomersS := ⟨⟩
 
-def adults := Query.from' customers
+abbrev MyDb : Ctx := [("Customers", CustomersS)]
+
+def adults := Query.from' (ts := MyDb) customers
   |>.where' (fun c => 18 <. c["Age"])
   |>.orderBy (fun c => [c["Name"].asc])
   |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"])
@@ -34,18 +36,21 @@ def adults := Query.from' customers
 The same query in `query!` comprehension syntax — both surfaces normalize to *identical* SQL:
 
 ```lean
-def adults' := query! {
+def adults' := (query! {
   from c in customers
   where 18 <. c["Age"]
   orderBy c["Name"].asc
   select ![c["Id"].as "Id", c["Name"].as "Name"]
-}
+} : Query MyDb _)
 
 #eval adults.toSql .sqlite == adults'.toSql .sqlite   -- true
 ```
 
 Ill-typed queries don't compile: a misspelled column name, comparing an `int` column to a
-`string`, or adding two `string` columns are all elaboration errors.
+`string`, adding two `string` columns, or referencing a table outside the declared context
+(`Ctx`) are all elaboration errors. A query's type records the database context it is
+written against; each table reference is resolved by instance search (`HasTable`) at
+elaboration time, the way columns are resolved by `HasCol`.
 
 **Scope**: lean-linq compiles queries to `CompiledSql` (SQL text + parameter bindings) for a
 database driver to execute — it does not ship a driver. The docker-based integration harness
@@ -206,14 +211,21 @@ customers.delete |>.where' (fun c => c["Age"] <. 18)
 ## Running queries in memory
 
 Queries are total, deeply-embedded values, so they carry a denotational
-semantics: `Query.run : Query s → Db → List (Values s)` evaluates the exact
-query value that compiles to SQL against an in-memory database — SQL
-semantics included (three-valued NULL logic, LEFT JOIN padding, GROUP
-BY/HAVING with aggregates, exact fixed-point decimals, civil-calendar date
-arithmetic). Statements apply as `Db → Db`.
+semantics: `Query.run : Query ts s → TableEnv ts → List (Values s)` evaluates
+the exact query value that compiles to SQL against a *typed* in-memory
+database — SQL semantics included (three-valued NULL logic, LEFT JOIN
+padding, GROUP BY/HAVING with aggregates, exact fixed-point decimals,
+civil-calendar date arithmetic). Statements apply as `TableEnv ts →
+TableEnv ts`.
+
+Because every table reference was resolved against the context at
+elaboration time (the `HasTable` instance stored in the query *is* the
+accessor), evaluation performs no name lookup and has no failure mode:
+running a query against a database that lacks one of its tables is not an
+error case — it is untypeable.
 
 ```lean
-def db : Db := { tables := [("customers", ⟨CustomersS, [/- value rows -/]⟩)] }
+def db : TableEnv MyDb := .cons [/- value rows -/] .nil
 
 #eval adults.run db      -- [(2, "Jane Smith"), (1, "John Doe")]
 ```
@@ -242,16 +254,24 @@ return `Bool`/`Prop`, so SQL needs its own).
 
 ## Rules of the road
 
-- **Schemas must be `abbrev`**, not `def` — column lookup and instance search must see through
-  the schema name.
+- **Schemas and contexts must be `abbrev`**, not `def` — column lookup (`HasCol`) and table
+  lookup (`HasTable`) resolve by instance search over the literal lists.
+- **Pin the context at the query head** (`Query.from' (ts := MyDb) t`, or ascribe a `query!`
+  block with `: Query MyDb _`): an unannotated definition would leave the context as a
+  metavariable, and instance search cannot run against an undetermined context.
 - **Literals go on the right** of `==.`/`!=.` (`c["Name"] ==. "Alice"`): coercions only fire
   against a known expected type. For literal-first, use `SqlExpr.str`/`.int`/`.bool`.
   (Monomorphic operators like `<.`/`>.`/`+` take literals on either side.)
 
 ## Design
 
-- `SqlType` universe; `SqlExpr : SqlType → Type` GADT — ill-typed SQL is unrepresentable.
-- `Schema := List (String × SqlType)`; `Row : Schema → Type` heterogeneous tuple of expressions.
+- `SqlType` universe; `SqlExpr : Ctx → SqlType → Type` GADT — ill-typed SQL is unrepresentable.
+- `Schema := List (String × SqlType)`; `Ctx := List (String × Schema)`;
+  `Row : Ctx → Schema → Type` heterogeneous tuple of expressions.
+- Table names live at the type level (`Table (n : String) (s : Schema)`); queries are indexed
+  by their ambient context, and `fromT`/`joinT` *store* the `HasTable` membership instance
+  resolved at elaboration — a query carries its referenced tables as capabilities, so the
+  evaluator reads rows through them with no run-time resolution.
 - Two-level query algebra: `SpineQ` (the comprehension spine: `yield`/`guard`/`fromT`/
   `joinT`/`order`/`fromQ`) and `Query` (boundary nodes: `distinct`, `limit`, grouped
   selects, set ops). Separate inductives so the statement ↔ spine compiler recursion is

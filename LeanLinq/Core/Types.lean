@@ -34,4 +34,22 @@ inductive DatabaseType where
   | postgres
   deriving DecidableEq, Repr
 
+/-- A relation schema: ordered column names with their SQL types.
+
+IMPORTANT: concrete schemas must be declared with `abbrev` (not `def`) so that
+elaboration — column lookup, projection typing — can see through the name:
+
+```
+abbrev Customers : Schema := [("Id", .int), ("Name", .string), ("Age", .int)]
+```
+-/
+abbrev Schema := List (String × SqlType)
+
+/-- A table context: the named tables (with schemas) a query is typed
+against. Queries carry a `Ctx` index; the membership of each referenced
+table is established by instance search (`HasTable`) at construction, and a
+`TableEnv ts` supplies the rows at evaluation. Like schemas, concrete
+contexts must be `abbrev`. -/
+abbrev Ctx := List (String × Schema)
+
 end LeanLinq
