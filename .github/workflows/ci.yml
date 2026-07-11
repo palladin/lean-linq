@@ -42,11 +42,17 @@ jobs:
       - name: Start databases
         run: docker compose up -d --wait
 
+      # the driver exes exit 0 when the engine is unreachable (probe-skip, for
+      # local dev) — in CI the engines must be there, so require the verdict line
       - name: Native PostgreSQL driver tests (typed, over the wire protocol)
-        run: lake exe pgdriver
+        run: |
+          lake exe pgdriver | tee pg-sweep.out
+          grep -q "all green" pg-sweep.out
 
       - name: Native SQL Server driver tests (typed, over TDS RPC)
-        run: lake exe mssqldriver
+        run: |
+          lake exe mssqldriver | tee ms-sweep.out
+          grep -q "all green" ms-sweep.out
 
       - name: Integration tests (execute against live SQLite/PostgreSQL/SQL Server)
         run: lake exe integration
