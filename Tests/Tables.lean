@@ -93,14 +93,40 @@ def renderTableRows (rows : List (Values s)) : String :=
 integration harness applies to engine output. -/
 def sniffOrdered (c : CompiledSql) : Bool := (c.sql.splitOn " ORDER BY ").length > 1
 
+/-- Lexicographic row order over all cells — the canonical order for
+comparing unordered result sets `Values`-to-`Values`. -/
+def rowLe : {s : Schema} → Values s → Values s → Bool
+  | _, .nil, .nil => true
+  | _, .cons (t := t) a r, .cons b r' =>
+      match cellCmp t a b with
+      | .lt => true
+      | .gt => false
+      | .eq => rowLe r r'
+
 /-! ## Registry entries -/
 
-/-- A registered test case: how it compiles, and what rows it must produce —
-the latter computed by the evaluator over the typed seed database. -/
+/-- The typed value behind a registry entry — what the native-driver sweep
+executes and compares against the evaluator (the compile/expected closures
+erase it). Statement constructors capture their `HasTable` instance, the
+same capability pattern as `fromT`. -/
+inductive Registered where
+  | query {s : Schema} (q : Query TestCtx s)
+  | scalar {t : SqlType} (sc : ScalarQuery TestCtx t)
+  | ins {n : String} {s : Schema} [inst : HasTable TestCtx.tables n s]
+      (i : InsertStmt TestCtx n s)
+  | upd {n : String} {s : Schema} [inst : HasTable TestCtx.tables n s]
+      (u : UpdateStmt TestCtx n s)
+  | del {n : String} {s : Schema} [inst : HasTable TestCtx.tables n s]
+      (d : DeleteStmt TestCtx n s)
+
+/-- A registered test case: how it compiles, what rows it must produce
+(computed by the evaluator over the typed seed database), and the typed
+value itself. -/
 structure Case where
   compile : DatabaseType → CompiledSql
   expected : TableEnv TestCtx.tables → String
   ordered : Bool
+  payload : Registered
 
 /-- Rendered when evaluation aborts (`EvalError`) — never matches engine
 output, so it surfaces as a loud mismatch. No registered case errors today;
@@ -115,7 +141,8 @@ def q (query : Query TestCtx s) : Case :=
       match query.run env seedParams with
       | .ok rows => renderRows ordered (rows.map cellsOf)
       | .error e => evalFailure e
-    ordered }
+    ordered
+    payload := .query query }
 
 /-- Register a scalar aggregate query: one row, one cell. -/
 def sq (sc : ScalarQuery TestCtx t) : Case :=
@@ -124,6 +151,7 @@ def sq (sc : ScalarQuery TestCtx t) : Case :=
       match sc.run env seedParams with
       | .ok cell => renderCell t cell
       | .error e => evalFailure e
-    ordered := false }
+    ordered := false
+    payload := .scalar sc }
 
 end TQ

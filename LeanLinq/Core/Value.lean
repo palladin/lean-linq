@@ -153,6 +153,13 @@ instance (priority := high) : HasParam ((n, t) :: ps) n t where
 instance [h : HasParam ps n t] : HasParam ((n', t') :: ps) n t where
   get | .cons _ env => h.get env
 
+/-- Names zipped with typed cells — what a driver walks to bind the
+user-named parameters natively. -/
+def ParamEnv.toCells : {ps : List (String × SqlType)} → ParamEnv ps →
+    List (String × ((t : SqlType) × Nullable t))
+  | _, .nil => []
+  | _, .cons (n := n) (t := t) v rest => (n, ⟨t, v⟩) :: rest.toCells
+
 /-- Everything evaluation reads besides the query itself: the typed tables,
 the typed parameter bindings, and the (optional) current timestamp. -/
 structure EvalEnv (c : Ctx) where

@@ -59,21 +59,24 @@ def si (i : InsertStmt TestCtx n s) [inst : HasTable TestCtx.tables n s] : Case 
       match i.apply env seedParams with
       | .ok env' => renderTableRows (inst.rows env')
       | .error e => evalFailure e
-    ordered := true }
+    ordered := true
+    payload := .ins i }
 def su (u : UpdateStmt TestCtx n s) [inst : HasTable TestCtx.tables n s] : Case :=
   { compile := fun db => u.toSql db
     expected := fun env =>
       match u.apply env seedParams with
       | .ok env' => renderTableRows (inst.rows env')
       | .error e => evalFailure e
-    ordered := true }
+    ordered := true
+    payload := .upd u }
 def sd (d : DeleteStmt TestCtx n s) [inst : HasTable TestCtx.tables n s] : Case :=
   { compile := fun db => d.toSql db
     expected := fun env =>
       match d.apply env seedParams with
       | .ok env' => renderTableRows (inst.rows env')
       | .error e => evalFailure e
-    ordered := true }
+    ordered := true
+    payload := .del d }
 
 /-- The statement registry: name ↦ per-dialect compilation + expected state. -/
 def statementCases : List (String × Case) := [

@@ -53,9 +53,11 @@ type records the database context it is written against — its tables *and* its
 parameters — and each reference is resolved by instance search (`HasTable`/`HasParam`) at
 elaboration time, the way columns are resolved by `HasCol`.
 
-**Scope**: lean-linq compiles queries to `CompiledSql` (SQL text + parameter bindings) for a
-database driver to execute — it does not ship a driver. The docker-based integration harness
-executes every case against live databases for testing, not production use.
+**Scope**: lean-linq compiles queries to `CompiledSql` (SQL text + parameter bindings) for
+any driver to execute, and ships a **native SQLite driver** (C FFI over the system
+sqlite3): typed queries in, typed rows out, parameters bound natively — see
+"Executing for real" below. PostgreSQL/SQL Server execution currently lives in the
+docker-based integration harness (testing); a libpq driver is the natural phase 2.
 
 ## Building
 
@@ -208,6 +210,32 @@ customers.update
 customers.delete |>.where' (fun c => c["Age"] <. 18)
 -- DELETE FROM "Customers" WHERE ("Age" < :p0)
 ```
+
+## Executing for real: the native SQLite driver
+
+`import LeanLinq.Driver.Sqlite` (a separate lib target — the core library stays
+FFI-free) talks to the system sqlite3 library:
+
+```lean
+open LeanLinq.Sqlite
+
+def demo : IO Unit := do
+  let conn ← Sqlite.connect "app.db"
+  let rows ← conn.query adults          -- IO (List (Values s)): typed rows out
+  let _ ← conn.execInsert someInsert    -- statements too
+  conn.close
+```
+
+- **Parameters are bound natively** — auto parameters from the compiled statement's
+  values, user-named parameters from the same typed `ParamEnv c.params` the evaluator
+  reads. Nothing is ever inlined, at compile time or execution time.
+- **Rows decode schema-directed into `Values s`** using the `SqlType.interp`
+  conventions, so driver output is cell-for-cell comparable with `Query.run` — and the
+  test suite does exactly that: `lake exe driver` runs all registered cases through the
+  driver and compares against the evaluator **at the `Values` level** (statements
+  verified inside rolled-back transactions).
+- **`DbFetch` programs run over the wire**: `f.execIO conn budget` interprets the same
+  round-budgeted tree `runWith` interprets in memory, with the same proof discipline.
 
 ## Running queries in memory
 
