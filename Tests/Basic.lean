@@ -155,13 +155,13 @@ def sampleRounds : (n : Nat) → DbFetch BasicCtx n (List Nat)
 so `omega` discharges it for *every* `n` — the door demands proof, not
 literals. Contrast N+1's `ids.length ≤ 8`, which is simply not provable. -/
 example (n : Nat) : Except EvalError (List Nat) :=
-  (sampleRounds n).exec (2 * n + 1) demoEnv .nil none (by omega)
+  (sampleRounds n).exec (2 * n + 1) demoEnv .nil none (Bound.fin_le_fin (by omega))
 
 /-- Bounded fan-out is allowed — proof-carrying: `take 3` makes
 `(ids.take 3).length ≤ 8` provable, and the caller supplies the proof. -/
 example (ids : List Int) : Except EvalError (List (List (Values OrdersS))) :=
   (perRow (ids.take 3)).exec 8 demoEnv .nil none
-    (by rw [List.length_take]; omega)
+    (Bound.fin_le_fin (by rw [List.length_take]; omega))
 
 /-- `for x in xs do` is that idiom as sugar — the per-row loop with the
 exact grade `1 * ks.length` in the type: closed lists close it
@@ -178,12 +178,13 @@ def perRowAll (ks : List Int) := fetch! {
 `1 * ks.length + 0 ≤ ks.length` is a theorem, so `omega` closes it for
 every `ks` — the rounds are visible, priced, and proved, not hidden. -/
 example (ks : List Int) : Except EvalError (List Nat) :=
-  (perRowAll ks).exec ks.length demoEnv .nil none (by omega)
+  (perRowAll ks).exec ks.length demoEnv .nil none
+    (Bound.fin_le_fin (a := 1 * ks.length) (by omega))
 
 /-- The bounded post-fetch loop: `fetchLimit` puts the row bound in the
 type (`{xs // xs.length ≤ 3}` — `LIMIT` really limits, by
 `Query.run_limit_length_le`), and looping over `.val` fuses into
-`DbFetch.forRows`, whose budget proof is the refinement itself. Grade
+`DbFetch.forRows`, whose budget proof is the refinement itself. Bound
 `1 + 1 * 3 = 4`, closed, silent — and the two-row table exercises the
 loop-shorter-than-bound path. -/
 def perRowBounded : DbFetch BasicCtx 4 (List Nat) := fetch! {

@@ -235,10 +235,10 @@ sequential and the `max` grade is an upper bound — same budget discipline
 as everywhere. -/
 def DbFetch.execMs (f : DbFetch c r α) (conn : Ms.Conn) (budget : Nat)
     (ps : ParamEnv c.params := by exact .nil)
-    (_h : r ≤ budget := by decide) : IO α :=
+    (_h : r ≤ .fin budget := by decide) : IO α :=
   go f
 where
-  go : {r' : Nat} → {β : Type} → DbFetch c r' β → IO β
+  go : {r' : Bound} → {β : Type} → DbFetch c r' β → IO β
     | _, _, .pure a => Pure.pure a
     | _, _, .fetch q => conn.query q ps
     | _, _, .fetchCell sc => conn.queryCell sc ps
@@ -246,5 +246,6 @@ where
     | _, _, .bind x k => do go (k (← go x))
     | _, _, .forAll xs f => xs.mapM fun a => go (f a)
     | _, _, .bindD x f _ _ => do go (f (← go x))
+    | _, _, .forRowsAll x f => do (← go x).mapM fun a => go (f a)
 
 end LeanLinq

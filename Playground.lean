@@ -171,7 +171,7 @@ def ordersFor (ids : List Int) :
 }
 -- the annotation states `ids.length` even though the loop's raw index
 -- is `1 * ids.length` (the constructor's exact arithmetic): `fetch!`
--- wraps its expansion in `withGrade`, and `omega` closes the gap
+-- wraps its expansion in `withBound`, and `simp` closes the gap
 
 #eval (ordersFor [1, 2]).exec 2 demoEnv   -- Except.ok [1, 1] — grade 2
 
@@ -184,7 +184,7 @@ bound can itself be a parameter: the grade is `n + 1` — one round for
 the parents, at most `n` for the fan-out — and `p["Id"]` embeds the
 fetched cell as a typed literal. N+1 written deliberately: the bounded
 query pays for the fan-out. -/
-def topSpendersDetail (n : Nat) :
+def topSpendersDetail (n : Bound) :
     DbFetch PlayCtx (n + 1) (List (String × Nat)) := fetch! {
   let spenders ← adults.fetchLimit n
   let report ← for s in spenders.val do
@@ -200,7 +200,64 @@ def topSpendersDetail (n : Nat) :
 
 -- and under a *symbolic* budget the door takes a proof, for every n:
 example (n : Nat) : Except EvalError (List (String × Nat)) :=
-  (topSpendersDetail n).exec (n + 1) demoEnv .nil none (by omega)
+  (topSpendersDetail n).exec (n + 1) demoEnv .nil none
+    (Bound.le_refl _)
+
+/- The same report in **two rounds flat**, any number of spenders: the
+batched door replaces the per-row loop — every order arrives in one
+`IN (…)` statement and the counting happens in Lean. Note the brackets
+playing both roles: `o["CustomerId"].inValues ks` embeds into SQL,
+`o["CustomerId"] == s["Id"]` compares fetched values. -/
+def topSpendersDetail2 (n : Nat) :
+    DbFetch PlayCtx 2 (List (String × Nat)) := fetch! {
+  let spenders ← adults.fetchLimit n
+  let allOrders ← .fetchFor (spenders.val.map (·["Id"])) fun ks =>
+    Query.from' (ts := PlayCtx) orders
+      |>.where' (fun o => o["CustomerId"].inValues ks)
+  return spenders.val.map fun s =>
+    (s["Name"], (allOrders.filter (fun o => o["CustomerId"] == s["Id"])).length)
+}
+
+#eval (topSpendersDetail2 5).exec 2 demoEnv
+-- Except.ok [("Jane Smith", 1), ("John Doe", 1)] — grade 1 + 1, any n
+
+-- and the SAME definition takes ⊤: no LIMIT emitted, grade 1 + 1 * ⊤ = ⊤,
+-- runnable only through the unbounded door
+#eval (topSpendersDetail ⊤).execAll demoEnv
+-- Except.ok [("Jane Smith", 1), ("John Doe", 1)]
+#check_failure (topSpendersDetail ⊤).exec 1000 demoEnv
+
+/- Or state no bound at all: looping over the fetched rows themselves
+grades the program ⊤ — every finite door refuses it statically, and the
+explicit `execAll` door runs it knowingly. All records, per-row, no
+count — the opt-out visible in the type and at the call site. -/
+def topSpendersDetailAll : DbFetch PlayCtx ⊤ (List (String × Nat)) := fetch! {
+  let spenders ← adults.fetch
+  let report ← for s in spenders do
+    Query.from' (ts := PlayCtx) orders
+      |>.where' (fun o => o["CustomerId"] ==. s["Id"])
+      |>.fetch
+      |>.map (fun orders => (s["Name"], orders.length))
+  return report
+}
+
+#eval topSpendersDetailAll.execAll demoEnv
+-- Except.ok [("Jane Smith", 1), ("John Doe", 1)]
+-- and no finite budget admits it:
+#check_failure topSpendersDetailAll.exec 1000 demoEnv
+
+/- "All the records" is two phases: you cannot know the fan-out before
+asking, so ask first — the count becomes the loop's bound and the
+budget, and `omega` proves the door for every n. Between the two `exec`s
+is the moment you *learn* n; no single program can promise a round count
+before that. -/
+def allSpendersDetail : Except EvalError (List (String × Nat)) := do
+  let cnt ← (adults.count).fetch.exec 1 demoEnv        -- round 1: how many?
+  let n := (cnt.getD 0).toNat
+  (topSpendersDetail n).exec (n + 1) demoEnv .nil none
+    (Bound.le_refl _)
+
+#eval allSpendersDetail   -- Except.ok [("Jane Smith", 1), ("John Doe", 1)]
 
 /- Under-budgeting the loop is caught at elaboration —
 `(ordersFor [1, 2]).exec 1 demoEnv` fails `by decide` (grade 2 > 1). An

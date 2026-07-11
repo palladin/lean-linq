@@ -253,7 +253,8 @@ def demo : IO Unit := do
 `DbFetch` prices round trips in the type (`fetch` = 1, independent `seq` = `max`,
 data-dependent `bind` = `+`, per-row `for` = body grade × collection length), and
 execution demands a budget plus a proof — the philosophy being that everything is
-representable and the *proof* is the gate. That gives N+1 three doors and one wall:
+representable and the *proof* is the gate. Bounds live in the lattice ℕ∞ (`Bound`:
+numerals, Nat expressions, `⊤`). That gives N+1 four doors, none accidental:
 `fetchFor` batches a whole key set into one `IN (…)` round (grade 1);
 `let ys ← for x in xs do body` loops per row with the **exact dynamic grade**
 `k * xs.length` — for collections already in hand, proved at the door (`by decide`
@@ -262,9 +263,13 @@ is legal exactly when the fetch is bounded — `fetchLimit q n` returns a
 length-refined list (`{xs // xs.length ≤ n}`, backed by the first theorem about the
 executable semantics: `Query.run_limit_length_le`, `LIMIT` really limits), and
 looping over its `.val` fuses into `DbFetch.forRows`, whose budget proof *is* the
-refinement — grade `m + k * n`, closed, silent. The wall: over an unbounded fetch no
-evidence exists, and the program never elaborates. You can write N+1 when you mean
-it — priced by a bounded query — and you cannot write it by accident. (Loops are
+refinement — grade `m + k * n`, closed, silent. And over an *unbounded* fetch no
+finite evidence exists, so the loop types at `⊤` — absorbing, one unbounded part
+makes the whole program visibly unbounded; every finite door (`exec budget`) refuses
+it statically and only the explicit `execAll` runs it (`fetchLimit q ⊤` fetches
+everything, no `LIMIT` emitted — one definition serves both worlds). You can write
+N+1 when you mean it — priced by a bounded query, or declared unbounded at the call
+site — and you cannot write it by accident. (Loops are
 first-class constructors with independent bodies, so the pipelining PostgreSQL
 driver batches them into shared rounds — the declared grade is an upper bound.)
 
