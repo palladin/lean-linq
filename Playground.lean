@@ -137,10 +137,12 @@ def demoEnv : TableEnv PlayCtx.tables :=
 /-! ## DbFetch — round-budgeted database programs
 
 The round-trip bill is a type index: `fetch` costs 1, independent `seq`s
-share rounds (`max`), data-dependent `bind`s add. `exec` demands a budget
-and a proof `r ≤ budget` (`by decide` for closed grades). A per-row fetch
-loop over a runtime collection has grade `xs.length` — undischargeable —
-so classic N+1 never elaborates; the batched door (`fetchFor`, one
+share rounds (`max`), data-dependent `bind`s add, and the per-row loop
+`for x in xs do …` costs exactly `xs.length` bodies' worth. `exec`
+demands a budget and a proof `r ≤ budget` — `by decide` for closed
+grades, `omega` for computed budgets. The one thing with no proof is a
+loop over rows a fetch *inside the same program* returned — classic
+N+1 — which never elaborates; the batched door (`fetchFor`, one
 `IN (…)` statement) costs 1 for any collection size. -/
 
 def spendersReport : DbFetch PlayCtx 2 (Nat × Nat) := fetch! {
@@ -156,9 +158,9 @@ def spendersReport : DbFetch PlayCtx 2 (Nat × Nat) := fetch! {
 
 /- The per-row loop *is* expressible — explicitly, over data you already
 hold (a parameter, a literal, a previous result). `for x in xs do …`
-carries the *exact* dynamic grade `1 * ids.length` in the type, and the
-door takes a proof — `by decide` once the list is a literal, `by omega`
-for a computed budget. -/
+carries the *exact* dynamic round count in the type, and the door takes
+a proof — `by decide` once the list is a literal, `by omega` for a
+computed budget. -/
 def ordersFor (ids : List Int) :
     DbFetch PlayCtx ids.length (List Nat) := fetch! {
   let waves ← for k in ids do
@@ -166,11 +168,11 @@ def ordersFor (ids : List Int) :
       |>.where' (fun o => o["CustomerId"] ==. SqlExpr.long k))
   return waves.map (·.length)
 }
--- the loop's raw index is `1 * ids.length` (the constructor's exact
--- arithmetic); `fetch!` restates it against the annotation, `omega`
--- closing the gap
+-- the annotation states `ids.length` even though the loop's raw index
+-- is `1 * ids.length` (the constructor's exact arithmetic): `fetch!`
+-- wraps its expansion in `withGrade`, and `omega` closes the gap
 
-#eval (ordersFor [1, 2]).exec 2 demoEnv   -- Except.ok [1, 1] — grade 1 * 2
+#eval (ordersFor [1, 2]).exec 2 demoEnv   -- Except.ok [1, 1] — grade 2
 
 /- Under-budgeting the loop is caught at elaboration —
 `(ordersFor [1, 2]).exec 1 demoEnv` fails `by decide` (grade 2 > 1). And

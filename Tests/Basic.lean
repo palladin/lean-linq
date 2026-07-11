@@ -121,8 +121,10 @@ def demoEnv : TableEnv BasicCtx.tables :=
 /-! ## DbFetch: the round budget is in the type — N+1 is unprovable.
 
 The per-row loop *is* writable (Lean is dependently typed: its grade is
-`ks.length`), but `exec`'s budget obligation is only auto-dischargeable for
-closed grades. A runtime length has no proof — unless you bound it. -/
+`ks.length`), but `exec`'s budget obligation is only auto-dischargeable
+for closed grades. A runtime length is provable exactly when the
+collection is in scope at the door — bound it, or compute the budget
+from it; rows fetched *inside* the program admit no proof at all. -/
 
 def ordersOf (k : Int) := Query.from' (ts := BasicCtx) orders
   |>.where' (fun o => o["CustomerId"] ==. SqlExpr.int k)

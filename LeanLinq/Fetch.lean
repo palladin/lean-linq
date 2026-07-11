@@ -5,8 +5,9 @@ import LeanLinq.Eval.Query
 The N+1 problem needs the ability to run a query per row of a previous
 result. Inside the query language that is unrepresentable (one `Query` value
 ⇒ one statement); `DbFetch` closes the *host-language* half: a program that
-talks to the database carries a static upper bound on its round trips as a
-type index, and the grading prices composition honestly —
+talks to the database carries its round-trip bound as a type index — a
+closed numeral for batched programs, an exact data-dependent expression
+for per-row loops — and the grading prices composition honestly —
 
 - `fetch` costs `1`;
 - `seq` (independent computations) costs `max m n`: a batching driver runs
@@ -16,14 +17,14 @@ type index, and the grading prices composition honestly —
 
 Execution demands a *bound plus proof*: `exec` takes a budget and an
 obligation `r ≤ budget`, auto-discharged by `decide` when the grade is a
-closed numeral (every batched program). Because Lean is dependently typed, a
-per-row loop over a runtime collection *is* writable — its grade is
-`xs.length` — but at `exec` the obligation `xs.length ≤ budget` is not
-decidable at elaboration and must be **proved by the user**, which is only
-possible after explicitly bounding the collection (`xs.take k`). Unbounded
-data-dependent fan-out — classic N+1 — admits no proof, so it never
-elaborates. (Haxl repairs N+1 dynamically by batching; the grade rejects it
-statically instead.)
+closed numeral (every batched program). A data-dependent grade
+(`xs.length`) is not decidable at elaboration, so the user proves the
+obligation — possible exactly when the collection is in scope at the
+door: bound it (`xs.take k`), or compute the budget from it and let
+`omega` close the goal. What has no proof is a grade over data that
+exists only *inside* the program — rows a previous fetch returned —
+which is classic N+1, and it never elaborates. (Haxl repairs N+1
+dynamically by batching; the grade rejects it statically instead.)
 
 The loop has first-class sugar: `let ys ← for x in xs do body`
 (`DbFetch.forAll`) carries the *exact* dynamic grade `k * xs.length` in
@@ -86,8 +87,10 @@ def runWith (ee : EvalEnv c) : {r : Nat} → {α : Type} → DbFetch c r α →
 /-- The execution door: declare a round budget, prove you fit in it. For
 closed grades (every batched program) the obligation discharges silently by
 `decide`; a data-dependent grade (`xs.length` for runtime `xs`) is not
-decidable at elaboration, so the caller must bound the collection and
-supply the proof — unbounded N+1 has no proof to give. -/
+decidable at elaboration, so the caller supplies the proof — by bounding
+the collection or computing the budget from it. A grade over data that
+exists only inside the program (just-fetched rows) has no proof to
+give: that is N+1, rejected. -/
 def exec (f : DbFetch c r α) (budget : Nat) (env : TableEnv c.tables)
     (ps : ParamEnv c.params := by exact .nil) (now : Option String := none)
     (_h : r ≤ budget := by decide) : Except EvalError α :=
@@ -146,10 +149,14 @@ def report : DbFetch c 2 _ := fetch! {
 
 `let x ← e` is `DbFetch.bind`, `let x := e` a plain `let`,
 `let ys ← for x in xs do body` is `DbFetch.forAll` (the per-row loop,
-exact dynamic grade `k * xs.length`), and the final
-`return e` is `DbFetch.pure` — grades compose as `m + n + … + 0`, which is
-definitionally the closed sum for batched programs, so `exec`'s `by decide`
-still discharges silently. -/
+exact dynamic grade `k * xs.length`), and the final `return e` is
+`DbFetch.pure` — grades compose as `m + n + …`, definitionally the
+closed sum for batched programs, so `exec`'s `by decide` discharges
+silently. Two niceties keep inferred grades readable: the final
+`let ys ← e; return f ys` pair fuses into `map` (no trailing `+ 0`),
+and the whole block is wrapped in `withGrade`, so a type annotation may
+state any provably equal spelling of the grade — `ids.length` where the
+raw index is `1 * ids.length`. -/
 
 syntax (name := fetchBind) "let " ident " ← " term : fetchClause
 syntax (name := fetchForAll) "let " ident " ← " "for " ident " in " term:max

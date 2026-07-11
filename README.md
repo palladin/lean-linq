@@ -238,7 +238,8 @@ def demo : IO Unit := do
   round-budgeted tree `runWith` interprets in memory, with the same proof discipline.
 
 `DbFetch` prices round trips in the type (`fetch` = 1, independent `seq` = `max`,
-data-dependent `bind` = `+`), and execution demands a budget plus a proof. That gives
+data-dependent `bind` = `+`, per-row `for` = body grade × collection length), and
+execution demands a budget plus a proof. That gives
 N+1 two doors and one wall: `fetchFor` batches a whole key set into one `IN (…)`
 round (grade 1), and `let ys ← for x in xs do body` loops per row with the **exact
 dynamic grade** `k * xs.length` in the type — for collections already in hand,
@@ -254,10 +255,10 @@ a conninfo string; requires libpq — `brew install libpq` / `libpq-dev`): the d
 rewrites the compiled `:name` placeholders to the wire's `$N` form and sends every
 parameter with an explicit type OID, which resolves `EXTRACT(YEAR FROM $1)`-style
 inference properly. And on PostgreSQL the `DbFetch` grading pays off for real:
-`f.execPg conn budget` interprets `seq` with libpq **pipeline mode** — independent
-fetches share round trips, so the `max` grade is an actual latency bound, not just an
-upper estimate. `lake exe pgdriver` sweeps the full corpus against live PostgreSQL,
-typed `Values`-to-`Values` against the evaluator.
+`f.execPg conn budget` interprets independence through libpq **pipeline mode** —
+`seq` sides and `for` loop bodies share round trips, so the declared grade is an
+actual latency bound, not just an upper estimate. `lake exe pgdriver` sweeps the full
+corpus against live PostgreSQL, typed `Values`-to-`Values` against the evaluator.
 
 **SQL Server** completes the trilogy (`import LeanLinq.Driver.Mssql`, `Ms.connect`
 with host/port/credentials; requires FreeTDS — `brew install freetds` /
