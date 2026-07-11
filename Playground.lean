@@ -134,6 +134,44 @@ def demoEnv : TableEnv PlayCtx.tables :=
   |>.select (fun c => ![(c["Age"] / 0).as "Boom"])).run demoEnv
 -- Except.error LeanLinq.EvalError.divByZero
 
+/-! ## DbFetch — round-budgeted database programs
+
+The round-trip bill is a type index: `fetch` costs 1, independent `seq`s
+share rounds (`max`), data-dependent `bind`s add. `exec` demands a budget
+and a proof `r ≤ budget` (`by decide` for closed grades). A per-row fetch
+loop over a runtime collection has grade `xs.length` — undischargeable —
+so classic N+1 never elaborates; the batched door (`fetchFor`, one
+`IN (…)` statement) costs 1 for any collection size. -/
+
+def spendersReport : DbFetch PlayCtx 2 (Nat × Nat) := fetch! {
+  let parents ← .fetch adults
+  let ids := parents.filterMap fun v => (v.get? "Id" .long).bind id
+  let children ← .fetchFor ids fun ks =>
+    Query.from' (ts := PlayCtx) orders
+      |>.where' (fun o => o["CustomerId"].inValues ks)
+  return (parents.length, children.length)
+}
+
+#eval spendersReport.exec 2 demoEnv   -- Except.ok (2, 2) — 1+1 rounds, any N
+
+/- The budget need not be a constant: the door demands a *proof*, not a
+literal. With an abstract budget the obligation `2 ≤ budget` has a free
+variable — `by decide` cannot fire — so the caller supplies the hypothesis. -/
+example (budget : Nat) (h : 2 ≤ budget) : Except EvalError (Nat × Nat) :=
+  spendersReport.exec budget demoEnv .nil none h
+
+/- And the same report written per-row — the natural N+1 — is *rejected*:
+`mapM` needs a `Monad` instance, and `DbFetch` cannot have one, because
+hiding the grade inside a fixed `m : Type → Type` would blind the budget
+check. The checker below verifies this fails to elaborate. -/
+#check_failure fun (ids : List Int) => fetch! {
+  let parents ← .fetch adults
+  let children ← ids.mapM fun k => DbFetch.fetch
+    (Query.from' (ts := PlayCtx) orders
+      |>.where' (fun o => o["CustomerId"] ==. SqlExpr.long k))
+  return (parents.length, children.length)
+}
+
 /-! ## Statements -/
 
 #eval (customers.insert (ts := PlayCtx)

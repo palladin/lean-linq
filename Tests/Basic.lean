@@ -118,6 +118,49 @@ def demoEnv : TableEnv BasicCtx.tables :=
   |>.select (fun c => ![c["Name"].as "Name"])).run demoEnv
     |>.toOption.map (·.length)) == some 1
 
+/-! ## DbFetch: the round budget is in the type — N+1 is unprovable.
+
+The per-row loop *is* writable (Lean is dependently typed: its grade is
+`ks.length`), but `exec`'s budget obligation is only auto-dischargeable for
+closed grades. A runtime length has no proof — unless you bound it. -/
+
+def ordersOf (k : Int) := Query.from' (ts := BasicCtx) orders
+  |>.where' (fun o => o["CustomerId"] ==. SqlExpr.int k)
+
+def perRow : (ks : List Int) → DbFetch BasicCtx ks.length (List (List (Values OrdersS)))
+  | [] => .pure []
+  | k :: ks => (perRow ks).bind fun acc =>
+      (DbFetch.fetch (ordersOf k)).map (· :: acc)
+
+/-- Batched programs have closed grades: `1 + 1`, discharged silently
+(`fetch!` is do-sugar over the graded combinators — grades stay visible). -/
+def batched : DbFetch BasicCtx 2 (Nat × Nat) := fetch! {
+  let cs ← .fetch (Query.from' (ts := BasicCtx) customers)
+  let os ← .fetch (Query.from' (ts := BasicCtx) orders)
+  return (cs.length, os.length)
+}
+
+#guard (batched.exec 2 demoEnv |>.toOption) == some (2, 0)
+
+/-- A program whose grade is itself a parameter: `n` sampling rounds. -/
+def sampleRounds : (n : Nat) → DbFetch BasicCtx n (List Nat)
+  | 0 => .pure []
+  | n + 1 => (sampleRounds n).bind fun acc =>
+      (DbFetch.fetch (Query.from' (ts := BasicCtx) customers)).map
+        fun cs => cs.length :: acc
+
+/-- Symbolic grade under a symbolic budget: `n ≤ 2 * n + 1` is a theorem,
+so `omega` discharges it for *every* `n` — the door demands proof, not
+literals. Contrast N+1's `ids.length ≤ 8`, which is simply not provable. -/
+example (n : Nat) : Except EvalError (List Nat) :=
+  (sampleRounds n).exec (2 * n + 1) demoEnv .nil none (by omega)
+
+/-- Bounded fan-out is allowed — proof-carrying: `take 3` makes
+`(ids.take 3).length ≤ 8` provable, and the caller supplies the proof. -/
+example (ids : List Int) : Except EvalError (List (List (Values OrdersS))) :=
+  (perRow (ids.take 3)).exec 8 demoEnv .nil none
+    (by rw [List.length_take]; omega)
+
 /-! ## Negative tests: these must NOT elaborate. -/
 
 #check_failure fun (c : Row BasicCtx CustomersS) => c["Nmae"]             -- misspelled column
@@ -128,3 +171,12 @@ def demoEnv : TableEnv BasicCtx.tables :=
 -- a parameter outside the context: no HasParam instance — unbound is untypeable,
 -- not silently NULL
 #check_failure (SqlExpr.param (ts := BasicCtx) "ghost")
+-- classic N+1: one fetch per row of a runtime collection — the grade is
+-- `ids.length`, the budget obligation is undischargeable, no proof exists
+#check_failure fun (ids : List Int) => (perRow ids).exec 8 demoEnv
+-- the fetch! sugar changes nothing: a dependent-grade sub-program still
+-- leaves an obligation with free variables at the door
+#check_failure fun (ids : List Int) => (fetch! {
+  let rows ← perRow ids
+  return rows.length
+}).exec 8 demoEnv
