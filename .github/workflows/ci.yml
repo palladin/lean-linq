@@ -15,6 +15,7 @@ jobs:
         run: |
           command -v sqlite3 || { sudo apt-get update && sudo apt-get install -y sqlite3; }
           dpkg -s libsqlite3-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y libsqlite3-dev; }
+          dpkg -s libpq-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y libpq-dev; }
 
       - name: Install elan
         run: |
@@ -34,11 +35,14 @@ jobs:
       - name: Unit golden tests (SQL text + params, 3 dialects)
         run: lake test
 
-      - name: Native driver tests (typed, Values-to-Values vs the evaluator)
-        run: lake exe driver
+      - name: Native SQLite driver tests (typed, Values-to-Values vs the evaluator)
+        run: lake exe sqlitedriver
 
       - name: Start databases
         run: docker compose up -d --wait
+
+      - name: Native PostgreSQL driver tests (typed, over the wire protocol)
+        run: lake exe pgdriver
 
       - name: Integration tests (execute against live SQLite/PostgreSQL/SQL Server)
         run: lake exe integration

@@ -231,11 +231,21 @@ def demo : IO Unit := do
   reads. Nothing is ever inlined, at compile time or execution time.
 - **Rows decode schema-directed into `Values s`** using the `SqlType.interp`
   conventions, so driver output is cell-for-cell comparable with `Query.run` — and the
-  test suite does exactly that: `lake exe driver` runs all registered cases through the
+  test suite does exactly that: `lake exe sqlitedriver` runs all registered cases through the
   driver and compares against the evaluator **at the `Values` level** (statements
   verified inside rolled-back transactions).
 - **`DbFetch` programs run over the wire**: `f.execIO conn budget` interprets the same
   round-budgeted tree `runWith` interprets in memory, with the same proof discipline.
+
+**PostgreSQL** works the same way (`import LeanLinq.Driver.Postgres`, `Pg.connect` with
+a conninfo string; requires libpq — `brew install libpq` / `libpq-dev`): the driver
+rewrites the compiled `:name` placeholders to the wire's `$N` form and sends every
+parameter with an explicit type OID, which resolves `EXTRACT(YEAR FROM $1)`-style
+inference properly. And on PostgreSQL the `DbFetch` grading pays off for real:
+`f.execPg conn budget` interprets `seq` with libpq **pipeline mode** — independent
+fetches share round trips, so the `max` grade is an actual latency bound, not just an
+upper estimate. `lake exe pgdriver` sweeps the full corpus against live PostgreSQL,
+typed `Values`-to-`Values` against the evaluator.
 
 ## Running queries in memory
 

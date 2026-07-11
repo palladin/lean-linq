@@ -1,6 +1,10 @@
 services:
   postgres:
     image: postgres:16-alpine
+    ports:
+      # native libpq driver (Tests/PgDriverT.lean); 5433 to avoid clashing
+      # with any local PostgreSQL
+      - "127.0.0.1:5433:5432"
     environment:
       POSTGRES_DB: testdb
       POSTGRES_USER: testuser

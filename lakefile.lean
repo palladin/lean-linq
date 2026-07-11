@@ -1,20 +1,41 @@
 import Lake
 open Lake DSL
 
--- Link arguments for the system sqlite3 library. The toolchain's bundled
--- linker has its own sysroot and cannot see the macOS SDK, so on macOS the
--- SDK's library directory is resolved at configuration time via `xcrun`;
--- on Linux `-lsqlite3` suffices (libsqlite3-dev).
+-- Link arguments for the system database libraries (sqlite3, libpq). The
+-- toolchain's bundled linker has its own sysroot and cannot see the macOS
+-- SDK or Homebrew kegs, so their library directories are resolved at
+-- configuration time (`xcrun`, `brew --prefix libpq`); on Linux the system
+-- linker finds both (libsqlite3-dev, libpq-dev).
 open Lean Elab Term in
-elab "sqliteLinkArgs%" : term => do
-  let base := #["-lsqlite3"]
+elab "dbLinkArgs%" : term => do
+  let base := #["-lsqlite3", "-lpq"]
   let args ←
     if System.Platform.isOSX then do
-      let out ← IO.Process.output { cmd := "xcrun", args := #["--show-sdk-path"] }
-      pure (#["-L" ++ out.stdout.trimAscii.toString ++ "/usr/lib"] ++ base)
+      let sdk ← IO.Process.output { cmd := "xcrun", args := #["--show-sdk-path"] }
+      let pq ← IO.Process.output { cmd := "brew", args := #["--prefix", "libpq"] }
+      pure (#["-L" ++ sdk.stdout.trimAscii.toString ++ "/usr/lib",
+              "-L" ++ pq.stdout.trimAscii.toString ++ "/lib"] ++ base)
     else
       pure base
   return Lean.toExpr args
+
+-- Include directory for libpq headers, resolved the same way (Linux:
+-- `pg_config --includedir`, falling back to the Debian default).
+open Lean Elab Term in
+elab "pqIncludeDir%" : term => do
+  let dir ←
+    if System.Platform.isOSX then do
+      let pq ← IO.Process.output { cmd := "brew", args := #["--prefix", "libpq"] }
+      pure (pq.stdout.trimAscii.toString ++ "/include")
+    else do
+      try
+        let out ← IO.Process.output { cmd := "pg_config", args := #["--includedir"] }
+        pure out.stdout.trimAscii.toString
+      catch _ =>
+        pure "/usr/include/postgresql"
+  return Lean.toExpr dir
+
+def pqIncludeDir : String := pqIncludeDir%
 
 package «lean-linq» where
   version := v!"0.1.0"
@@ -23,7 +44,7 @@ package «lean-linq» where
   homepage := "https://github.com/palladin/lean-linq"
   license := "MIT"
   testDriver := "tests"
-  moreLinkArgs := sqliteLinkArgs%
+  moreLinkArgs := dbLinkArgs%
 
 @[default_target]
 lean_lib LeanLinq
@@ -44,8 +65,11 @@ lean_exe tests where
 lean_exe integration where
   root := `Tests.Integration
 
-lean_exe driver where
-  root := `Tests.DriverT
+lean_exe sqlitedriver where
+  root := `Tests.SqliteDriverT
+
+lean_exe pgdriver where
+  root := `Tests.PgDriverT
 
 /-- C shim wrapping the sqlite3 API into Lean-ABI functions. Compiled with
 the *system* C compiler (which knows where `sqlite3.h` lives — the
@@ -57,3 +81,11 @@ extern_lib sqlite3_shim pkg := do
   let leanInclude := (← getLeanInstall).includeDir
   let o ← buildO oFile src #["-I", leanInclude.toString] #["-O2"] "cc"
   buildStaticLib (pkg.staticLibDir / nameToStaticLib "sqlite3_shim") #[o]
+
+extern_lib libpq_shim pkg := do
+  let src ← inputTextFile <| pkg.dir / "native" / "libpq_shim.c"
+  let oFile := pkg.buildDir / "native" / "libpq_shim.o"
+  let leanInclude := (← getLeanInstall).includeDir
+  let o ← buildO oFile src
+    #["-I", leanInclude.toString, "-I", pqIncludeDir] #["-O2"] "cc"
+  buildStaticLib (pkg.staticLibDir / nameToStaticLib "libpq_shim") #[o]
