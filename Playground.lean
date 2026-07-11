@@ -191,7 +191,7 @@ def topSpendersDetail (n : Nat) :
     Query.from' (ts := PlayCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. s["Id"])
       |>.fetch
-      |>.map (fun orders => (s.get "Name", orders.length))
+      |>.map (fun orders => (s["Name"], orders.length))
   return report
 }
 

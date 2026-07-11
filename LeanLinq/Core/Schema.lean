@@ -133,8 +133,20 @@ open Lean Elab Term Meta in
   -- columns in nullable positions — then coerce into the expectation
   -- (inserting `widen`/`CellLit` embedding as needed)
   let e ←
-    if rTy.isAppOfArity ``LeanLinq.Values 1 then
-      elabTerm (← `(LeanLinq.Values.cellLit $(⟨stx[0]⟩) $(⟨stx[2]⟩))) none
+    if rTy.isAppOfArity ``LeanLinq.Values 1 then do
+      -- fetched rows: an SqlExpr-expecting position embeds the cell as a
+      -- typed literal; every other position reads the honest value
+      -- (`String` when the schema says NOT NULL, `Option` under `.null`)
+      let wantsExpr ←
+        match expectedType? with
+        | some exp => do
+            let expW ← instantiateMVars (← whnf exp)
+            pure (expW.isAppOf ``LeanLinq.SqlExpr)
+        | none => pure false
+      if wantsExpr then
+        elabTerm (← `(LeanLinq.Values.cellLit $(⟨stx[0]⟩) $(⟨stx[2]⟩))) none
+      else
+        elabTerm (← `(LeanLinq.Values.get $(⟨stx[0]⟩) $(⟨stx[2]⟩))) none
     else
       elabTerm (← `(LeanLinq.Row.col $(⟨stx[0]⟩) $(⟨stx[2]⟩))) none
   match expectedType? with
