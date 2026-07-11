@@ -15,8 +15,17 @@ elab "dbLinkArgs%" : term => do
       let pq ← IO.Process.output { cmd := "brew", args := #["--prefix", "libpq"] }
       pure (#["-L" ++ sdk.stdout.trimAscii.toString ++ "/usr/lib",
               "-L" ++ pq.stdout.trimAscii.toString ++ "/lib"] ++ base)
-    else
-      pure base
+    else do
+      -- the bundled ld.lld does not search the system library dirs either:
+      -- offer the common candidates (missing -L dirs are ignored) plus
+      -- pg_config's libdir when available
+      let mut dirs := #["-L/usr/lib/x86_64-linux-gnu", "-L/usr/lib/aarch64-linux-gnu",
+                        "-L/usr/lib64", "-L/usr/lib"]
+      try
+        let out ← IO.Process.output { cmd := "pg_config", args := #["--libdir"] }
+        dirs := dirs.push ("-L" ++ out.stdout.trimAscii.toString)
+      catch _ => pure ()
+      pure (dirs ++ base)
   return Lean.toExpr args
 
 -- Include directory for libpq headers, resolved the same way (Linux:
