@@ -10,6 +10,7 @@
 
 #include <lean/lean.h>
 #include <sqlite3.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,15 +44,20 @@ static void ll_stmt_finalize(void *ptr) {
 
 static void ll_noop_foreach(void *ptr, b_lean_obj_arg fn) { (void)ptr; (void)fn; }
 
+static pthread_once_t g_class_once = PTHREAD_ONCE_INIT;
+
+static void ll_register_classes(void) {
+    g_conn_class = lean_register_external_class(ll_conn_finalize, ll_noop_foreach);
+    g_stmt_class = lean_register_external_class(ll_stmt_finalize, ll_noop_foreach);
+}
+
 static lean_external_class *conn_class(void) {
-    if (!g_conn_class)
-        g_conn_class = lean_register_external_class(ll_conn_finalize, ll_noop_foreach);
+    pthread_once(&g_class_once, ll_register_classes);
     return g_conn_class;
 }
 
 static lean_external_class *stmt_class(void) {
-    if (!g_stmt_class)
-        g_stmt_class = lean_register_external_class(ll_stmt_finalize, ll_noop_foreach);
+    pthread_once(&g_class_once, ll_register_classes);
     return g_stmt_class;
 }
 

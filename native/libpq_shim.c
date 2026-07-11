@@ -9,6 +9,7 @@
 
 #include <lean/lean.h>
 #include <libpq-fe.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,15 +41,20 @@ static void ll_pgres_finalize(void *ptr) {
 
 static void ll_pg_noop_foreach(void *ptr, b_lean_obj_arg fn) { (void)ptr; (void)fn; }
 
+static pthread_once_t g_class_once = PTHREAD_ONCE_INIT;
+
+static void ll_pg_register_classes(void) {
+    g_pgconn_class = lean_register_external_class(ll_pgconn_finalize, ll_pg_noop_foreach);
+    g_pgres_class = lean_register_external_class(ll_pgres_finalize, ll_pg_noop_foreach);
+}
+
 static lean_external_class *pgconn_class(void) {
-    if (!g_pgconn_class)
-        g_pgconn_class = lean_register_external_class(ll_pgconn_finalize, ll_pg_noop_foreach);
+    pthread_once(&g_class_once, ll_pg_register_classes);
     return g_pgconn_class;
 }
 
 static lean_external_class *pgres_class(void) {
-    if (!g_pgres_class)
-        g_pgres_class = lean_register_external_class(ll_pgres_finalize, ll_pg_noop_foreach);
+    pthread_once(&g_class_once, ll_pg_register_classes);
     return g_pgres_class;
 }
 

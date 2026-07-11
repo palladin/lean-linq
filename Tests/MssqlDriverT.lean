@@ -47,6 +47,15 @@ def main : IO UInt32 := do
     failures := failures + 1
   unless ← checkBothTables (← bothTables.execMs conn 1 seedParams) do
     failures := failures + 1
+  -- error routing: a server error must surface as an IO error carrying the
+  -- server's message text (per-connection buffers in native/freetds_shim.c)
+  let errText ← try
+    conn.execRaw "SELECT 1 +"
+    pure ""
+  catch e => pure (toString e)
+  unless errText.startsWith "freetds" && errText.length > 20 do
+    IO.eprintln s!"ERROR-ROUTING CHECK failed: got {repr errText}"
+    failures := failures + 1
   conn.close
   if failures == 0 then
     IO.println s!"driver(mssql): {passed} cases match the evaluator (typed), {skipped} skipped — all green"
