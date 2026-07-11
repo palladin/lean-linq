@@ -1,3 +1,4 @@
+import Lean
 import LeanLinq.Core.Expr
 
 namespace LeanLinq
@@ -88,13 +89,44 @@ instance [c : HasCol s name t] : HasCol ((n', t') :: s) name t where
 def Row.col (r : Row ts s) (name : String) [c : HasCol s name t] : SqlExpr ts t :=
   c.getImpl r
 
-/-- Bracket sugar for column access: `c["Name"]`. Overlaps with `GetElem`
-indexing syntax; resolved against the receiver (rows here, arrays/lists via
-core `getElem`). -/
+/-- A fetched cell, ready to embed as a typed literal wherever an
+expression is expected: `some x` embeds via `SqlLit`, NULL embeds as SQL
+NULL (comparisons with it are three-valued, exactly as the data would
+behave in SQL). Like other literals, it needs an expected type to land —
+put it on the right of `==.`/`!=.`. -/
+structure CellLit (t : SqlType) where
+  cell : Nullable t
+
+instance [SqlLit t] : Coe (CellLit t) (SqlExpr ts t) :=
+  ⟨fun c => match c.cell with
+    | some x => SqlLit.lit x
+    | none => .nullC t⟩
+
+/-- Cell access by name on fetched rows: `v.cellLit "Id"`. Prefer the
+bracket sugar `v["Id"]`. -/
+def Values.cellLit (v : Values s) (name : String) [c : HasCell s name t] :
+    CellLit t :=
+  ⟨c.get v⟩
+
+/-- Bracket sugar for column access: `c["Name"]` on staged rows (`Row` —
+a column *reference*), `p["Name"]` on fetched rows (`Values` — the cell
+as a typed *literal*). Dispatch is semantic — a term elaborator inspects
+the receiver's type — so `Row` elaborates exactly as it always has
+(class-based dispatch would let `binop%` operators solve the result type
+before instance search runs). Overlaps with `GetElem` indexing syntax;
+arrays/lists still go via core `getElem`. -/
 scoped syntax:max (name := colGet) term noWs "[" term "]" : term
 
-@[macro colGet] def expandColGet : Lean.Macro := fun stx =>
-  `(LeanLinq.Row.col $(⟨stx[0]⟩) $(⟨stx[2]⟩))
+open Lean Elab Term Meta in
+@[term_elab colGet] def elabColGet : TermElab := fun stx expectedType? => do
+  let r ← elabTerm stx[0] none
+  let rTy ← whnf (← instantiateMVars (← inferType r))
+  if rTy.getAppFn.isMVar then
+    tryPostpone
+  if rTy.isAppOfArity ``LeanLinq.Values 1 then
+    elabTerm (← `(LeanLinq.Values.cellLit $(⟨stx[0]⟩) $(⟨stx[2]⟩))) expectedType?
+  else
+    elabTerm (← `(LeanLinq.Row.col $(⟨stx[0]⟩) $(⟨stx[2]⟩))) expectedType?
 
 /-- Positional column access. -/
 def Row.nth : {s : Schema} → Row ts s → (i : Fin s.length) → SqlExpr ts (s.get i).2

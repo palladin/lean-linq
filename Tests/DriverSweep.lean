@@ -134,8 +134,23 @@ def bothTables : DbFetch TestCtx 1 (List (Values CustomersS) × List (Values Ord
 list — exact grade `1 * 3 + 0 = 3`, one sequential fetch per key. -/
 def perRowLoop : DbFetch TestCtx 3 (List Nat) := fetch! {
   let waves ← for k in ([1, 2, 3] : List Int) do
-    .fetch (Query.from' (ts := TestCtx) orders
-      |>.where' (fun o => o["CustomerId"] ==. SqlExpr.long k))
+    Query.from' (ts := TestCtx) orders
+      |>.where' (fun o => o["CustomerId"] ==. SqlExpr.long k)
+      |>.fetch
+  return waves.map (·.length)
+}
+
+/-- The bounded post-fetch loop smoke: `fetchLimit` + the `for … .val`
+fusion (`DbFetch.forRows`) — grade `1 + 1 * 3 = 4`; parents ordered so
+every engine visits the same rows. -/
+def boundedFanOut : DbFetch TestCtx 4 (List Nat) := fetch! {
+  let parents ← Query.from' (ts := TestCtx) customers
+    |>.orderBy (fun c => [c["Id"].asc])
+    |>.fetchLimit 3
+  let waves ← for p in parents.val do
+    Query.from' (ts := TestCtx) orders
+      |>.where' (fun o => o["CustomerId"] ==. p["Id"])
+      |>.fetch
   return waves.map (·.length)
 }
 
@@ -174,6 +189,17 @@ def checkPerRowLoop (live : List Nat) : IO Bool := do
       if live == mem then pure true
       else do
         IO.eprintln s!"DRIVER MISMATCH perRowLoop (DbFetch for/do): {live} vs {mem}"
+        pure false
+
+def checkBoundedFanOut (live : List Nat) : IO Bool := do
+  match boundedFanOut.runWith ⟨seedEnv, seedParams, none⟩ with
+  | .error e =>
+      IO.eprintln s!"EVAL ERROR boundedFanOut (DbFetch forRows): {repr e}"
+      pure false
+  | .ok mem =>
+      if live == mem then pure true
+      else do
+        IO.eprintln s!"DRIVER MISMATCH boundedFanOut (DbFetch forRows): {live} vs {mem}"
         pure false
 
 end TQ

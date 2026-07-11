@@ -239,15 +239,20 @@ def demo : IO Unit := do
 
 `DbFetch` prices round trips in the type (`fetch` = 1, independent `seq` = `max`,
 data-dependent `bind` = `+`, per-row `for` = body grade × collection length), and
-execution demands a budget plus a proof. That gives
-N+1 two doors and one wall: `fetchFor` batches a whole key set into one `IN (…)`
-round (grade 1), and `let ys ← for x in xs do body` loops per row with the **exact
-dynamic grade** `k * xs.length` in the type — for collections already in hand,
-proved at the door (`by decide` for literals, `omega` for computed budgets). The
-wall: `bind`'s continuation grade cannot mention a fetched value, so a per-row loop
-over just-fetched rows never elaborates. You can write N+1 if you mean it — over
-data you hold — and you cannot write it by accident. (The loop is a first-class
-`DbFetch` constructor, and its bodies are independent, so the pipelining PostgreSQL
+execution demands a budget plus a proof — the philosophy being that everything is
+representable and the *proof* is the gate. That gives N+1 three doors and one wall:
+`fetchFor` batches a whole key set into one `IN (…)` round (grade 1);
+`let ys ← for x in xs do body` loops per row with the **exact dynamic grade**
+`k * xs.length` — for collections already in hand, proved at the door (`by decide`
+for literals, `omega` for computed budgets); and over *just-fetched* rows the loop
+is legal exactly when the fetch is bounded — `fetchLimit q n` returns a
+length-refined list (`{xs // xs.length ≤ n}`, backed by the first theorem about the
+executable semantics: `Query.run_limit_length_le`, `LIMIT` really limits), and
+looping over its `.val` fuses into `DbFetch.forRows`, whose budget proof *is* the
+refinement — grade `m + k * n`, closed, silent. The wall: over an unbounded fetch no
+evidence exists, and the program never elaborates. You can write N+1 when you mean
+it — priced by a bounded query — and you cannot write it by accident. (Loops are
+first-class constructors with independent bodies, so the pipelining PostgreSQL
 driver batches them into shared rounds — the declared grade is an upper bound.)
 
 **PostgreSQL** works the same way (`import LeanLinq.Driver.Postgres`, `Pg.connect` with

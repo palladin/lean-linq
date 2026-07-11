@@ -14,3 +14,4 @@ import LeanLinq.Compiler.Query
 import LeanLinq.Statements
 import LeanLinq.Eval.Statements
 import LeanLinq.Fetch
+import LeanLinq.Theorems

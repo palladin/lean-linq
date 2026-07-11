@@ -100,6 +100,21 @@ instance : Inhabited (SqlExpr ts t) := ⟨.field t "" ""⟩
 /-- Explicit literal constructors, for positions where the expected type is
 not yet known and coercions cannot fire (e.g. a literal on the left of `==.`). -/
 def SqlExpr.int (i : Int) : SqlExpr ts .int := .intC i
+
+/-- Inject a runtime value as a literal expression — the bridge from
+fetched data back into queries (`fetchFor`'s `IN (…)` lists, `Values`
+cell embedding via `v["col"]`). -/
+class SqlLit (t : SqlType) where
+  lit : {ts : Ctx} → t.interp → SqlExpr ts t
+
+instance : SqlLit .int := ⟨.intC⟩
+instance : SqlLit .long := ⟨.longC⟩
+instance : SqlLit .double := ⟨.doubleC⟩
+instance : SqlLit .decimal := ⟨fun m => .decimalC (renderDecimal m)⟩
+instance : SqlLit .string := ⟨.stringC⟩
+instance : SqlLit .bool := ⟨.boolC⟩
+instance : SqlLit .dateTime := ⟨.dateTimeC⟩
+instance : SqlLit .guid := ⟨.guidC⟩
 def SqlExpr.long (i : Int) : SqlExpr ts .long := .longC i
 def SqlExpr.dbl (f : Float) : SqlExpr ts .double := .doubleC f
 def SqlExpr.dec (digits : String) : SqlExpr ts .decimal := .decimalC digits

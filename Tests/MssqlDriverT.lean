@@ -49,6 +49,8 @@ def main : IO UInt32 := do
     failures := failures + 1
   unless ← checkPerRowLoop (← perRowLoop.execMs conn 3 seedParams) do
     failures := failures + 1
+  unless ← checkBoundedFanOut (← boundedFanOut.execMs conn 4 seedParams) do
+    failures := failures + 1
   -- error routing: a server error must surface as an IO error carrying the
   -- server's message text (per-connection buffers in native/freetds_shim.c)
   let errText ← try

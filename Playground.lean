@@ -146,7 +146,7 @@ N+1 — which never elaborates; the batched door (`fetchFor`, one
 `IN (…)` statement) costs 1 for any collection size. -/
 
 def spendersReport : DbFetch PlayCtx 2 (Nat × Nat) := fetch! {
-  let parents ← .fetch adults
+  let parents ← adults.fetch
   let ids := parents.filterMap fun v => (v.get? "Id" .long).bind id
   let children ← .fetchFor ids fun ks =>
     Query.from' (ts := PlayCtx) orders
@@ -164,8 +164,9 @@ computed budget. -/
 def ordersFor (ids : List Int) :
     DbFetch PlayCtx ids.length (List Nat) := fetch! {
   let waves ← for k in ids do
-    .fetch (Query.from' (ts := PlayCtx) orders
-      |>.where' (fun o => o["CustomerId"] ==. SqlExpr.long k))
+    Query.from' (ts := PlayCtx) orders
+      |>.where' (fun o => o["CustomerId"] ==. SqlExpr.long k)
+      |>.fetch
   return waves.map (·.length)
 }
 -- the annotation states `ids.length` even though the loop's raw index
@@ -174,10 +175,37 @@ def ordersFor (ids : List Int) :
 
 #eval (ordersFor [1, 2]).exec 2 demoEnv   -- Except.ok [1, 1] — grade 2
 
+/- And the per-row loop over *just-fetched* rows — with the fetch bounded.
+`fetchLimit q n` puts the bound in the type (`{xs // xs.length ≤ n}`,
+realized by `LIMIT n` — a theorem about the semantics,
+`Query.run_limit_length_le`), and looping over `parents.val` fuses into
+`DbFetch.forRows`, whose budget proof comes from the refinement. The
+bound can itself be a parameter: the grade is `n + 1` — one round for
+the parents, at most `n` for the fan-out — and `p["Id"]` embeds the
+fetched cell as a typed literal. N+1 written deliberately: the bounded
+query pays for the fan-out. -/
+def topSpendersDetail (n : Nat) :
+    DbFetch PlayCtx (n + 1) (List (String × Nat)) := fetch! {
+  let spenders ← adults.fetchLimit n
+  let report ← for s in spenders.val do
+    Query.from' (ts := PlayCtx) orders
+      |>.where' (fun o => o["CustomerId"] ==. s["Id"])
+      |>.fetch
+      |>.map (fun orders => ((s.get "Name").getD "?", orders.length))
+  return report
+}
+
+#eval (topSpendersDetail 5).exec 6 demoEnv
+-- Except.ok [("Jane Smith", 1), ("John Doe", 1)] — grade 5+1, by decide
+
+-- and under a *symbolic* budget the door takes a proof, for every n:
+example (n : Nat) : Except EvalError (List (String × Nat)) :=
+  (topSpendersDetail n).exec (n + 1) demoEnv .nil none (by omega)
+
 /- Under-budgeting the loop is caught at elaboration —
-`(ordersFor [1, 2]).exec 1 demoEnv` fails `by decide` (grade 2 > 1). And
-a per-row loop over *just-fetched* rows — the natural N+1 — is rejected
-outright:
+`(ordersFor [1, 2]).exec 1 demoEnv` fails `by decide` (grade 2 > 1). An
+*unbounded* fetch gives the loop no proof to fuse with, so it still never
+elaborates; and the fully implicit N+1 is rejected too:
 `mapM` needs a `Monad` instance, and `DbFetch` cannot have one, because
 hiding the grade inside a fixed `m : Type → Type` would blind the budget
 check. The checker below verifies this fails to elaborate. -/

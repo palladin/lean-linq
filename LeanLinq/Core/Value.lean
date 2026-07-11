@@ -114,6 +114,25 @@ def Values.get? : {s : Schema} → Values s →
       if n' == name then (if h : t' = t then some (h ▸ c) else none)
       else r.get? name t
 
+/-- `HasCell s name t` resolves a column name against the schema for
+*value* rows, by the same literal-list instance search as `HasCol` — a
+misspelled column on fetched data fails at compile time. -/
+class HasCell (s : Schema) (name : String) (t : outParam SqlType) where
+  get : Values s → Nullable t
+
+instance (priority := high) : HasCell ((name, t) :: s) name t where
+  get | .cons cell _ => cell
+
+instance [c : HasCell s name t] : HasCell ((n', t') :: s) name t where
+  get | .cons _ v => c.get v
+
+/-- Typed cell access on a fetched row: `v.get "Name" : Nullable t`, the
+column resolved against the schema at compile time (contrast `get?`, the
+runtime string lookup). -/
+def Values.get (v : Values s) (name : String) [c : HasCell s name t] :
+    Nullable t :=
+  c.get v
+
 /-- The rows in scope during evaluation: source alias → its current value
 row (the value-level counterpart of the compiler's `Row.ofAlias` field
 markers). -/

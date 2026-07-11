@@ -180,6 +180,23 @@ every `ks` — the rounds are visible, priced, and proved, not hidden. -/
 example (ks : List Int) : Except EvalError (List Nat) :=
   (perRowAll ks).exec ks.length demoEnv .nil none (by omega)
 
+/-- The bounded post-fetch loop: `fetchLimit` puts the row bound in the
+type (`{xs // xs.length ≤ 3}` — `LIMIT` really limits, by
+`Query.run_limit_length_le`), and looping over `.val` fuses into
+`DbFetch.forRows`, whose budget proof is the refinement itself. Grade
+`1 + 1 * 3 = 4`, closed, silent — and the two-row table exercises the
+loop-shorter-than-bound path. -/
+def perRowBounded : DbFetch BasicCtx 4 (List Nat) := fetch! {
+  let parents ← Query.from' (ts := BasicCtx) customers |>.fetchLimit 3
+  let waves ← for p in parents.val do
+    Query.from' (ts := BasicCtx) orders
+      |>.where' (fun o => o["CustomerId"] ==. p["Id"])
+      |>.fetch
+  return waves.map (·.length)
+}
+
+#guard (perRowBounded.exec 4 demoEnv |>.toOption) == some [0, 0]
+
 /-! ## Negative tests: these must NOT elaborate. -/
 
 #check_failure fun (c : Row BasicCtx CustomersS) => c["Nmae"]             -- misspelled column
@@ -204,6 +221,19 @@ example (ks : List Int) : Except EvalError (List Nat) :=
 #check_failure fun (ids : List Int) => (perRowAll ids).exec 8 demoEnv
 -- under-budgeting a closed loop is caught the same way: grade 2 > 1
 #check_failure ((perRowAll [1, 2]).exec 1 demoEnv)
+-- an *unbounded* fetch gives the loop no refinement to fuse with — no
+-- `.val`, no bound, and the raw loop's grade would mention the fetched
+-- value, which `bind` cannot type
+#check_failure (fetch! {
+  let parents ← Query.from' (ts := BasicCtx) customers |>.fetch
+  let waves ← for p in parents.val do
+    Query.from' (ts := BasicCtx) orders
+      |>.where' (fun o => o["CustomerId"] ==. p["Id"])
+      |>.fetch
+  return waves.map (·.length)
+} : DbFetch BasicCtx 4 (List Nat))
+-- under-budgeting the bounded fan-out: grade 4 > 3
+#check_failure (perRowBounded.exec 3 demoEnv)
 -- and `for … do` cannot follow a fetch inside one program:
 -- the loop's grade would mention the fetched rows, which `bind` cannot
 -- type — the N+1 rejection is structural, not a lint
