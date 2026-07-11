@@ -48,7 +48,7 @@ private def intArith (op : ArithOp) (a b : Int) : Except EvalError (Nullable .in
 /-- Arithmetic per SQL type. Decimals are milli-units, so multiplication
 rescales and division pre-scales; integer division truncates toward zero;
 division by zero is an `EvalError`, not NULL. -/
-def SqlType.arithV : (t : SqlType) → ArithOp → t.interp → t.interp →
+def SqlPrim.arithV : (t : SqlPrim) → ArithOp → t.interp → t.interp →
     Except EvalError (Nullable t)
   | .int, op, a, b => intArith op a b
   | .long, op, a, b => intArith op a b
@@ -63,14 +63,14 @@ def SqlType.arithV : (t : SqlType) → ArithOp → t.interp → t.interp →
       | .div => if b == 0 then .error .divByZero else pure (some (a * 1000 / b))
   | t, op, _, _ => .error (.unsupported s!"arith {repr op}" t)
 
-private def SqlType.sumV : (t : SqlType) → List t.interp → Except EvalError (Nullable t)
+private def SqlPrim.sumV : (t : SqlPrim) → List t.interp → Except EvalError (Nullable t)
   | .int, vs => pure (some (vs.foldl (· + ·) 0))
   | .long, vs => pure (some (vs.foldl (· + ·) 0))
   | .double, vs => pure (some (vs.foldl (· + ·) 0))
   | .decimal, vs => pure (some (vs.foldl (· + ·) 0))
   | t, _ => .error (.unsupported "SUM" t)
 
-private def SqlType.avgV : (t : SqlType) → List t.interp → Except EvalError (Nullable t)
+private def SqlPrim.avgV : (t : SqlPrim) → List t.interp → Except EvalError (Nullable t)
   | .int, vs => pure (some (vs.foldl (· + ·) 0 / vs.length))
   | .long, vs => pure (some (vs.foldl (· + ·) 0 / vs.length))
   | .double, vs => pure (some (vs.foldl (· + ·) 0 / Float.ofNat vs.length))
@@ -80,7 +80,7 @@ private def SqlType.avgV : (t : SqlType) → List t.interp → Except EvalError 
 /-- Fold an aggregate over the non-NULL values of a group (SQL semantics:
 NULLs are ignored, an all-NULL/empty group aggregates to NULL). MIN/MAX use
 the column order, so they work for every type; SUM/AVG only for numeric. -/
-def SqlType.aggV : (t : SqlType) → AggOp → List t.interp → Except EvalError (Nullable t)
+def SqlPrim.aggV : (t : SqlPrim) → AggOp → List t.interp → Except EvalError (Nullable t)
   | _, _, [] => pure none
   | t, .min, v :: vs =>
       pure (some (vs.foldl (fun acc x => if t.cmpV x acc == .lt then x else acc) v))
@@ -89,26 +89,26 @@ def SqlType.aggV : (t : SqlType) → AggOp → List t.interp → Except EvalErro
   | t, .sum, vs => t.sumV vs
   | t, .avg, vs => t.avgV vs
 
-def SqlType.absV : (t : SqlType) → t.interp → Except EvalError (Nullable t)
+def SqlPrim.absV : (t : SqlPrim) → t.interp → Except EvalError (Nullable t)
   | .int, a => pure (some (a.natAbs : Int))
   | .long, a => pure (some (a.natAbs : Int))
   | .double, a => pure (some a.abs)
   | .decimal, a => pure (some (a.natAbs : Int))
   | t, _ => .error (.unsupported "ABS" t)
 
-def SqlType.roundV : (t : SqlType) → Int → t.interp → Except EvalError (Nullable t)
+def SqlPrim.roundV : (t : SqlPrim) → Int → t.interp → Except EvalError (Nullable t)
   | .int, _, a => pure (some a)
   | .long, _, a => pure (some a)
   | .decimal, d, a => pure (some (decimalRound d.toNat a))
   | t, _, _ => .error (.unsupported "ROUND" t)
 
-def SqlType.ceilV : (t : SqlType) → t.interp → Except EvalError (Nullable t)
+def SqlPrim.ceilV : (t : SqlPrim) → t.interp → Except EvalError (Nullable t)
   | .int, a => pure (some a)
   | .long, a => pure (some a)
   | .decimal, a => pure (some (decimalCeil a))
   | t, _ => .error (.unsupported "CEILING" t)
 
-def SqlType.floorV : (t : SqlType) → t.interp → Except EvalError (Nullable t)
+def SqlPrim.floorV : (t : SqlPrim) → t.interp → Except EvalError (Nullable t)
   | .int, a => pure (some a)
   | .long, a => pure (some a)
   | .decimal, a => pure (some (decimalFloor a))
@@ -132,7 +132,7 @@ mutual
 
 /-- Evaluate an expression over the scopes of the current group
 (singleton = ungrouped row context). -/
-def SqlExpr.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts t n →
+def SqlExpr.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts ⟨t, n⟩ →
     Except EvalError (Nullable t)
   | _, .intC i => pure (some i)
   | _, .longC i => pure (some i)
@@ -143,9 +143,9 @@ def SqlExpr.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts t n →
   | _, .dateTimeC s => pure (some (normDateTime s))
   | _, .guidC g => pure (some g.toLower)
   | _, .nullC _ => pure none
-  | _, .paramE (inst := i) _ => pure (SqlCol.toNullable (i.get ee.params))
+  | _, .paramE (inst := i) _ => pure (SqlType.toNullable (i.get ee.params))
   | scs, .widen e => e.evalG ee scs
-  | scs, .field t' _ alias name =>
+  | scs, .field ⟨t', _⟩ alias name =>
       match scs.head? with
       | none => .error (.internal s!"no row in scope for {alias}.{name}")
       | some sc =>
@@ -177,12 +177,13 @@ def SqlExpr.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts t n →
   | scs, .like e p => do
       strict2 (← e.evalG ee scs) (← p.evalG ee scs) fun s pat =>
         pure (some (likeMatch s pat))
-  | scs, .inList (t := t₀) e es => do
+  | scs, .inList (c := ⟨t₀, _⟩) e es => do
       match (← e.evalG ee scs) with
       | none => pure none
       | some v =>
-          let hits := (← SqlExpr.evalGList ee scs es).map fun ⟨u, c⟩ =>
-            if h : u = t₀ then (h ▸ c).map (fun w => t₀.cmpV v w == Ordering.eq)
+          let hits := (← SqlExpr.evalGList ee scs es).map fun ⟨u, cell⟩ =>
+            if h : u = t₀ then
+              (h ▸ cell).map (fun w => t₀.cmpV v w == Ordering.eq)
             else some false
           pure (if hits.any (· == some true) then some true
                 else if hits.any (·.isNone) then none
@@ -203,8 +204,8 @@ def SqlExpr.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts t n →
   -- evaluates, so a guarded division cannot error
   | scs, .caseWhen c a b => do
       if (← c.evalG ee scs) == some true then a.evalG ee scs else b.evalG ee scs
-  | scs, .aggE op e => do
-      t.aggV op ((← scs.mapM fun sc => e.evalG ee [sc]).filterMap id)
+  | scs, .aggE (t := t₁) op e => do
+      t₁.aggV op ((← scs.mapM fun sc => e.evalG ee [sc]).filterMap id)
   | scs, .countAll => pure (some (scs.length : Int))
   | scs, .abs e => do strict1 (← e.evalG ee scs) t.absV
   | scs, .round e digits => do strict1 (← e.evalG ee scs) (t.roundV digits)
@@ -240,11 +241,11 @@ def SqlExpr.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts t n →
           | .year => dateDiffYears x y))
 
 def SqlExpr.evalGList (ee : EvalEnv ts) (scs : List Scope) :
-    List ((p : SqlType × Bool) × SqlExpr ts p.1 p.2) →
-    Except EvalError (List ((u : SqlType) × Nullable u))
+    List ((p : SqlType) × SqlExpr ts p) →
+    Except EvalError (List ((u : SqlPrim) × Nullable u))
   | [] => pure []
-  | ⟨(u, _), e⟩ :: es => do
-      pure (⟨u, ← e.evalG ee scs⟩ :: (← SqlExpr.evalGList ee scs es))
+  | ⟨p, e⟩ :: es => do
+      pure (⟨p.ty, ← e.evalG ee scs⟩ :: (← SqlExpr.evalGList ee scs es))
 
 end
 
@@ -257,6 +258,6 @@ def Row.evalRow (ee : EvalEnv ts) (scs : List Scope) :
     {s : Schema} → Row ts s → Except EvalError (Values s)
   | _, .nil => pure .nil
   | _, .cons (name := nm) e r => do
-      pure (.cons (← SqlCol.ofNullable nm _ (← e.evalG ee scs)) (← r.evalRow ee scs))
+      pure (.cons (← SqlType.ofNullable nm _ (← e.evalG ee scs)) (← r.evalRow ee scs))
 
 end LeanLinq

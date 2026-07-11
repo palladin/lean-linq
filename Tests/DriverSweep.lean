@@ -20,7 +20,7 @@ namespace TQ
 /-- What a native driver must provide to be swept. -/
 structure DriverOps where
   query : {s : Schema} → Query TestCtx s → IO (List (Values s))
-  queryCell : {t : SqlType} → {n : Bool} → ScalarQuery TestCtx t n → IO (Nullable t)
+  queryCell : {t : SqlPrim} → {n : Bool} → ScalarQuery TestCtx ⟨t, n⟩ → IO (Nullable t)
   execIns : {n : String} → {s : Schema} → InsertStmt TestCtx n s → IO Unit
   execUpd : {n : String} → {s : Schema} → UpdateStmt TestCtx n s → IO Unit
   execDel : {n : String} → {s : Schema} → DeleteStmt TestCtx n s → IO Unit

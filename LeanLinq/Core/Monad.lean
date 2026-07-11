@@ -25,7 +25,7 @@ ties the subquery to the ambient context of the expression it embeds into
 and `t` types the evaluated cells. Both are therefore visible in the AST,
 not just enforced at the smart constructors (`SqlExpr.inQuery` /
 `ScalarQuery.embed` — the only intended producers). -/
-structure SubQuery (ts : Ctx) (t : SqlType) where
+structure SubQuery (ts : Ctx) (t : SqlPrim) where
   compile : CompileM String
   eval : EvalEnv ts → Except EvalError (List (Nullable t))
 

@@ -1,7 +1,7 @@
 namespace LeanLinq
 
 /-- SQL column/expression types. -/
-inductive SqlType where
+inductive SqlPrim where
   | int
   | long
   | double
@@ -40,28 +40,28 @@ says so explicitly: `("SignupDate", .null .dateTime)`. This is a deliberate
 divergence from SQL's default (nullable), in the direction application
 schemas actually lean — and it is what lets fetched cells carry honest
 types (`s.get "Name" : String`, no `Option`). -/
-structure SqlCol where
-  ty : SqlType
+structure SqlType where
+  ty : SqlPrim
   nullable : Bool := false
   deriving DecidableEq, Repr
 
-namespace SqlCol
+namespace SqlType
 
-@[reducible] def int : SqlCol := ⟨.int, false⟩
-@[reducible] def long : SqlCol := ⟨.long, false⟩
-@[reducible] def double : SqlCol := ⟨.double, false⟩
-@[reducible] def decimal : SqlCol := ⟨.decimal, false⟩
-@[reducible] def string : SqlCol := ⟨.string, false⟩
-@[reducible] def bool : SqlCol := ⟨.bool, false⟩
-@[reducible] def dateTime : SqlCol := ⟨.dateTime, false⟩
-@[reducible] def guid : SqlCol := ⟨.guid, false⟩
+@[reducible] def int : SqlType := ⟨.int, false⟩
+@[reducible] def long : SqlType := ⟨.long, false⟩
+@[reducible] def double : SqlType := ⟨.double, false⟩
+@[reducible] def decimal : SqlType := ⟨.decimal, false⟩
+@[reducible] def string : SqlType := ⟨.string, false⟩
+@[reducible] def bool : SqlType := ⟨.bool, false⟩
+@[reducible] def dateTime : SqlType := ⟨.dateTime, false⟩
+@[reducible] def guid : SqlType := ⟨.guid, false⟩
 
 /-- A NULL-capable column: `("Price", .null .decimal)`. -/
-@[reducible] def null (t : SqlType) : SqlCol := ⟨t, true⟩
+@[reducible] def null (t : SqlPrim) : SqlType := ⟨t, true⟩
 
-end SqlCol
+end SqlType
 
-instance : Coe SqlType SqlCol := ⟨(⟨·, false⟩)⟩
+instance : Coe SqlPrim SqlType := ⟨(⟨·, false⟩)⟩
 
 /-- A relation schema: ordered column names with their column types
 (SQL type + nullability; bare means NOT NULL).
@@ -74,7 +74,7 @@ abbrev Customers : Schema :=
   [("Id", .int), ("Name", .string), ("SignupDate", .null .dateTime)]
 ```
 -/
-abbrev Schema := List (String × SqlCol)
+abbrev Schema := List (String × SqlType)
 
 /-- The schema with every column made NULL-capable — the type-level truth
 of a LEFT JOIN's right side. Reducible structural recursion (not
@@ -92,6 +92,6 @@ referenced table/parameter is established by instance search
 concrete contexts must be `abbrev`. -/
 structure Ctx where
   tables : List (String × Schema)
-  params : List (String × SqlCol) := []
+  params : List (String × SqlType) := []
 
 end LeanLinq

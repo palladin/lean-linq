@@ -4,7 +4,7 @@ import LeanLinq
 
 PostgreSQL (text result format) and SQL Server (every cell read via
 `dbconvert → SYBCHAR`) both move cells as text; these are the common
-codecs, aligned with the `SqlType.interp` conventions so decoded rows are
+codecs, aligned with the `SqlPrim.interp` conventions so decoded rows are
 cell-for-cell comparable with `Query.run`. -/
 
 namespace LeanLinq.Driver
@@ -31,7 +31,7 @@ def parseFloat (s : String) : Float :=
 
 /-- Decode one non-NULL text cell at its schema type. Bool accepts the
 engines' spellings (`t`/`true` from PostgreSQL, `1` from SQL Server). -/
-def parseCell (t : SqlType) (txt : String) : Nullable t :=
+def parseCell (t : SqlPrim) (txt : String) : Nullable t :=
   match t with
   | .int => some (parseIntText txt)
   | .long => some (parseIntText txt)
@@ -44,7 +44,7 @@ def parseCell (t : SqlType) (txt : String) : Nullable t :=
 
 /-- Render a typed parameter cell as wire text. `1`/`0` for booleans — valid
 boolean input text on PostgreSQL and the native form for SQL Server `bit`. -/
-def cellText : (t : SqlType) → t.interp → String
+def cellText : (t : SqlPrim) → t.interp → String
   | .int, i => toString i
   | .long, i => toString i
   | .double, f => toString f
@@ -57,7 +57,7 @@ def cellText : (t : SqlType) → t.interp → String
 /-- Store a decoded wire cell into its column: a NULL arriving in a NOT
 NULL column is a protocol error — the driver refuses what the schema
 forbids. -/
-def cellFromWire (name : String) (c : SqlCol) (v : Nullable c.ty) :
+def cellFromWire (name : String) (c : SqlType) (v : Nullable c.ty) :
     IO c.interp :=
   match c, v with
   | ⟨_, true⟩, v => pure v

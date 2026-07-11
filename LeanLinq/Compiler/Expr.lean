@@ -26,7 +26,7 @@ def DateUnit.upperName : DateUnit → String
 opposed to a BIT-like value (column, parameter, literal, CASE). T-SQL has no
 first-class booleans: comparing a predicate requires converting it to a value
 first (`CASE WHEN p THEN 1 ELSE 0 END`). -/
-def SqlExpr.isPredicate : SqlExpr ts t n → Bool
+def SqlExpr.isPredicate : SqlExpr ts c → Bool
   | .cmp .. | .and .. | .or .. | .not .. | .isNull .. | .isNotNull ..
   | .like .. | .inList .. | .inSub .. => true
   | .widen e => e.isPredicate
@@ -36,7 +36,7 @@ mutual
 
 /-- Render an expression to SQL text for the ambient dialect, allocating a
 named parameter for every literal (never inlining values). -/
-def SqlExpr.compile : SqlExpr ts t n → CompileM String
+def SqlExpr.compile : SqlExpr ts c → CompileM String
   | .intC i        => pushParam (.int i)
   | .longC i       => pushParam (.long i)
   | .doubleC f     => pushParam (.double f)
@@ -48,7 +48,7 @@ def SqlExpr.compile : SqlExpr ts t n → CompileM String
   | .nullC _       => pure "NULL"
   | .paramE (inst := _) name => refParam name
   | .widen e => e.compile
-  | .field _ _ alias name => do
+  | .field _ alias name => do
       if alias.isEmpty then quote name
       else return s!"{← quote alias}.{← quote name}"
   | .arith op a b  => return s!"({← a.compile} {op.token} {← b.compile})"
@@ -59,7 +59,7 @@ def SqlExpr.compile : SqlExpr ts t n → CompileM String
       let sa ← a.compile
       let sb ← b.compile
       -- SQL Server: predicates are not values; convert before comparing.
-      let wrap {n' : Bool} (e : SqlExpr ts t₀ n') (s : String) : String :=
+      let wrap (e : SqlExpr ts ⟨t₀, true⟩) (s : String) : String :=
         if t₀ == .bool && e.isPredicate then s!"CASE WHEN {s} THEN 1 ELSE 0 END" else s
       if (← read) == .sqlServer then
         return s!"({wrap a sa} {op.token} {wrap b sb})"
@@ -138,7 +138,7 @@ def SqlExpr.compile : SqlExpr ts t n → CompileM String
           | .year => s!"(EXTRACT(YEAR FROM {y}) - EXTRACT(YEAR FROM {x}))"
 
 def SqlExpr.compileList :
-    List ((p : SqlType × Bool) × SqlExpr ts p.1 p.2) → CompileM (List String)
+    List ((p : SqlType) × SqlExpr ts p) → CompileM (List String)
   | [] => pure []
   | ⟨_, e⟩ :: es => return (← e.compile) :: (← SqlExpr.compileList es)
 

@@ -35,7 +35,7 @@ abbrev TestCtx : Ctx := {
              ("startDate", .dateTime), ("targetId", .guid)] }
 
 /-- Test values for user-named parameters, aligned with the seed data —
-the typed bindings the evaluator reads (`SqlType.interp` conventions:
+the typed bindings the evaluator reads (`SqlPrim.interp` conventions:
 milli-unit decimals, normalized date-times, lower-case guids). -/
 def seedParams : ParamEnv TestCtx.params :=
   .cons 18 <| .cons 65 <| .cons "John Doe" <|
@@ -56,7 +56,7 @@ def bindings : List (String × SqlValue) := [
 
 /-! ## Rendering evaluated rows (the harness's normalized cell format) -/
 
-def renderCell : (t : SqlType) → Nullable t → String
+def renderCell : (t : SqlPrim) → Nullable t → String
   | _, none => "NULL"
   | .int, some i => toString i
   | .long, some i => toString i
@@ -70,7 +70,7 @@ def renderCell : (t : SqlType) → Nullable t → String
 def cellsOf : {s : Schema} → Values s → List String
   | _, .nil => []
   | _, .cons (c := c) cell r =>
-      renderCell c.ty (SqlCol.toNullable cell) :: cellsOf r
+      renderCell c.ty (SqlType.toNullable cell) :: cellsOf r
 
 /-- Rows to one comparable line: cells comma-joined, rows pipe-joined;
 unordered results are compared after a lexicographic sort, mirroring the
@@ -85,7 +85,7 @@ order. -/
 def firstCellLe : {s : Schema} → Values s → Values s → Bool
   | _, .nil, .nil => true
   | _, .cons (c := c) a _, .cons b _ =>
-      cellCmp c.ty (SqlCol.toNullable a) (SqlCol.toNullable b) != .gt
+      cellCmp c.ty (SqlType.toNullable a) (SqlType.toNullable b) != .gt
 
 /-- A table's rows ordered by first column — mirrors the harness's
 statement-verification `SELECT * FROM t ORDER BY Id`. -/
@@ -101,7 +101,7 @@ comparing unordered result sets `Values`-to-`Values`. -/
 def rowLe : {s : Schema} → Values s → Values s → Bool
   | _, .nil, .nil => true
   | _, .cons (c := c) a r, .cons b r' =>
-      match cellCmp c.ty (SqlCol.toNullable a) (SqlCol.toNullable b) with
+      match cellCmp c.ty (SqlType.toNullable a) (SqlType.toNullable b) with
       | .lt => true
       | .gt => false
       | .eq => rowLe r r'
@@ -114,7 +114,7 @@ erase it). Statement constructors capture their `HasTable` instance, the
 same capability pattern as `fromT`. -/
 inductive Registered where
   | query {s : Schema} (q : Query TestCtx s)
-  | scalar {t : SqlType} {n : Bool} (sc : ScalarQuery TestCtx t n)
+  | scalar {t : SqlPrim} {n : Bool} (sc : ScalarQuery TestCtx ⟨t, n⟩)
   | ins {n : String} {s : Schema} [inst : HasTable TestCtx.tables n s]
       (i : InsertStmt TestCtx n s)
   | upd {n : String} {s : Schema} [inst : HasTable TestCtx.tables n s]
@@ -148,7 +148,7 @@ def q (query : Query TestCtx s) : Case :=
     payload := .query query }
 
 /-- Register a scalar aggregate query: one row, one cell. -/
-def sq (sc : ScalarQuery TestCtx t n) : Case :=
+def sq (sc : ScalarQuery TestCtx ⟨t, n⟩) : Case :=
   { compile := fun db => sc.toSql db
     expected := fun env =>
       match sc.run env seedParams with

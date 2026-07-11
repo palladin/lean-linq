@@ -30,7 +30,7 @@ yield a projected row; grouped spines yield keys, HAVING, and the grouped
 projection. -/
 @[reducible] def BranchData : Ctx → Terminal → Schema → Type
   | ts, .plain, s => Row ts s
-  | ts, .grouped, s => List (KeyExpr ts) × Option (SqlExpr ts .bool true) × Row ts s
+  | ts, .grouped, s => List (KeyExpr ts) × Option (SqlExpr ts ⟨.bool, true⟩) × Row ts s
 
 /-- One surviving source-row combination of a spine walk. All branches of a
 spine share the same instantiated syntax trees (`orderKeys`, `data`) — only
@@ -61,7 +61,7 @@ def finishPlain (ee : EvalEnv ts) (brs : List (Branch ts .plain s)) :
     Except EvalError (List (Values s)) := do
   let tagged ← brs.mapM fun br => do
     let ks ← br.orderKeys.mapM fun k => do
-      pure (k.dir, (⟨k.type, ← k.expr.evalG ee [br.scope]⟩ : AnyCell))
+      pure (k.dir, (⟨k.col.ty, ← k.expr.evalG ee [br.scope]⟩ : AnyCell))
     pure (ks, ← br.data.evalRow ee [br.scope])
   pure (sortTagged tagged)
 
@@ -72,7 +72,7 @@ comprehension's `groupYield` terminal and the pipeline's `groupedC` boundary
 structure GBranch (ts : Ctx) (s : Schema) where
   scope : Scope
   keys : List (KeyExpr ts)
-  having? : Option (SqlExpr ts .bool true)
+  having? : Option (SqlExpr ts ⟨.bool, true⟩)
   orderKeys : List (OrderKey ts)
   row : Row ts s
 
@@ -91,7 +91,7 @@ def groupedCore (ee : EvalEnv ts) (brs : List (GBranch ts s)) :
     Except EvalError (List (Values s)) := do
   let keyed ← brs.mapM fun br => do
     let ks ← br.keys.mapM fun k => do
-      pure (⟨k.type, ← k.expr.evalG ee [br.scope]⟩ : AnyCell)
+      pure (⟨k.col.ty, ← k.expr.evalG ee [br.scope]⟩ : AnyCell)
     pure (ks, br)
   let groups := keyed.foldl (init := []) fun acc (kv, br) => insertGrouped acc kv br
   let rows? ← groups.mapM fun (_, ms) => do
@@ -104,7 +104,7 @@ def groupedCore (ee : EvalEnv ts) (brs : List (GBranch ts s)) :
           | some h => do pure ((← h.evalG ee scopes) == some true)
         if ok then
           let ks ← tree.orderKeys.mapM fun k => do
-            pure (k.dir, (⟨k.type, ← k.expr.evalG ee scopes⟩ : AnyCell))
+            pure (k.dir, (⟨k.col.ty, ← k.expr.evalG ee scopes⟩ : AnyCell))
           pure (some (ks, ← tree.row.evalRow ee scopes))
         else pure none
   pure (sortTagged (rows?.filterMap id))
@@ -210,7 +210,7 @@ def Query.run (q : Query ts s) (env : TableEnv ts.tables)
   q.evalRows ⟨env, ps, now⟩
 
 /-- Evaluate a scalar aggregate query: the spine's branches are the group. -/
-def ScalarQuery.evalCell : ScalarQuery ts t n → EvalEnv ts → Except EvalError (Nullable t)
+def ScalarQuery.evalCell : ScalarQuery ts ⟨t, n⟩ → EvalEnv ts → Except EvalError (Nullable t)
   | .countQ sp, ee => do pure (some (((← sp.evalSpine ee 0 [])).length : Int))
   | .aggQ op sp, ee => do
       match (← sp.evalSpine ee 0 []) with
@@ -221,7 +221,7 @@ def ScalarQuery.evalCell : ScalarQuery ts t n → EvalEnv ts → Except EvalErro
 
 /-- Scalar counterpart of `Query.run`; the result cell is `none` for SQL
 NULL (e.g. SUM over no rows). -/
-def ScalarQuery.run (sc : ScalarQuery ts t n) (env : TableEnv ts.tables)
+def ScalarQuery.run (sc : ScalarQuery ts ⟨t, n⟩) (env : TableEnv ts.tables)
     (ps : ParamEnv ts.params := by exact .nil) (now : Option String := none) :
     Except EvalError (Nullable t) :=
   sc.evalCell ⟨env, ps, now⟩

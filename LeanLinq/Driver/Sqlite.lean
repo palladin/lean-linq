@@ -9,7 +9,7 @@ compile side never inlined a literal, and now the execution side doesn't
 either: auto parameters carry their `SqlValue`s in `CompiledSql.params`, and
 user-named parameters come from the same typed `ParamEnv c.params` the
 evaluator reads. Rows are decoded schema-directed into `Values s` using the
-`SqlType.interp` conventions (milli-unit decimals, normalized date-times,
+`SqlPrim.interp` conventions (milli-unit decimals, normalized date-times,
 lower-case guids), so driver output is cell-for-cell comparable with
 `Query.run`.
 
@@ -94,7 +94,7 @@ private def bindValue (st : Stmt) (idx : UInt32) : SqlValue → IO Unit
 
 /-- Bind a typed parameter cell (`ParamEnv` conventions: milli-unit
 decimals rendered back to digit text, NULL cell → SQL NULL). -/
-private def bindCell (st : Stmt) (idx : UInt32) : (t : SqlType) → Nullable t → IO Unit
+private def bindCell (st : Stmt) (idx : UInt32) : (t : SqlPrim) → Nullable t → IO Unit
   | _, none => bindNull st idx
   | .int, some i => bindInt64 st idx (.ofInt i)
   | .long, some i => bindInt64 st idx (.ofInt i)
@@ -109,7 +109,7 @@ private def bindCell (st : Stmt) (idx : UInt32) : (t : SqlType) → Nullable t �
 their values; user-named ones (recorded with a `.null` placeholder — see
 `refParam`) resolve from the typed cells. -/
 private def bindParams (st : Stmt) (compiled : CompiledSql)
-    (cells : List (String × ((t : SqlType) × Nullable t))) : IO Unit := do
+    (cells : List (String × ((t : SqlPrim) × Nullable t))) : IO Unit := do
   for (name, v) in compiled.params do
     let idx ← bindParameterIndex st name
     if idx == 0 then
@@ -125,7 +125,7 @@ private def bindParams (st : Stmt) (compiled : CompiledSql)
 
 /-! ## Row decoding -/
 
-private def readCell (st : Stmt) (i : UInt32) : (t : SqlType) → IO (Nullable t) := fun t => do
+private def readCell (st : Stmt) (i : UInt32) : (t : SqlPrim) → IO (Nullable t) := fun t => do
   if (← columnType st i) == 5 then
     pure none
   else
@@ -165,7 +165,7 @@ def Conn.query (conn : Conn) (q : Query c s)
   collectRows st s
 
 /-- Execute a scalar aggregate query: one row, one cell (no row = NULL). -/
-def Conn.queryCell (conn : Conn) (sc : ScalarQuery c t n)
+def Conn.queryCell (conn : Conn) (sc : ScalarQuery c ⟨t, n⟩)
     (ps : ParamEnv c.params := by exact .nil) : IO (Nullable t) := do
   let compiled := sc.toSql .sqlite
   let st ← prepareRaw conn compiled.sql
@@ -174,7 +174,7 @@ def Conn.queryCell (conn : Conn) (sc : ScalarQuery c t n)
   else readCell st 0 t
 
 private def execCompiled (conn : Conn) (compiled : CompiledSql)
-    (cells : List (String × ((t : SqlType) × Nullable t))) : IO Unit := do
+    (cells : List (String × ((t : SqlPrim) × Nullable t))) : IO Unit := do
   let st ← prepareRaw conn compiled.sql
   bindParams st compiled cells
   let _ ← step st   -- statements step straight to DONE

@@ -210,7 +210,7 @@ def SpineQ.compileSpine : SpineQ ts g s → StmtAcc → SelectK ts g s → Compi
 end
 
 /-- Compile a scalar aggregate query. -/
-def ScalarQuery.compile : ScalarQuery ts t n → CompileM String
+def ScalarQuery.compile : ScalarQuery ts c → CompileM String
   | .countQ sp => sp.compileSpine {} fun _ => pure ("COUNT(*)", "")
   | .aggQ op sp => sp.compileSpine {} fun r =>
       match r with
@@ -229,20 +229,20 @@ def Query.toSqlServer (q : Query ts s) : CompiledSql := q.toSql .sqlServer
 def Query.toPostgres (q : Query ts s) : CompiledSql := q.toSql .postgres
 
 /-- Compile a scalar query for the given dialect. -/
-def ScalarQuery.toSql (sq : ScalarQuery ts t n) (db : DatabaseType := .sqlite) : CompiledSql :=
+def ScalarQuery.toSql (sq : ScalarQuery ts c) (db : DatabaseType := .sqlite) : CompiledSql :=
   runCompile sq.compile db
 
 /-- `e IN (subquery)` — the subquery must project exactly one column of the
 same type. Stored as its staged actions (see `SubQuery`): compilation for
 `toSql`, evaluation for `run`. -/
-def SqlExpr.inQuery (e : SqlExpr ts t nf) (q : Query ts [(cn, ⟨t, m⟩)]) :
-    SqlExpr ts .bool true :=
+def SqlExpr.inQuery (e : SqlExpr ts ⟨t, nf⟩) (q : Query ts [(cn, ⟨t, m⟩)]) :
+    SqlExpr ts ⟨.bool, true⟩ :=
   .inSub e ⟨q.compileStmt, fun ee => (q.evalRows ee).map fun rows =>
-    rows.map fun | .cons cell .nil => SqlCol.toNullable cell⟩
+    rows.map fun | .cons cell .nil => SqlType.toNullable cell⟩
 
 /-- Embed a scalar aggregate query as an expression:
 `c["Age"] >. (customers' |>.select … |>.avg).embed`. -/
-def ScalarQuery.embed (sq : ScalarQuery ts t n) : SqlExpr ts t true :=
+def ScalarQuery.embed (sq : ScalarQuery ts ⟨t, n⟩) : SqlExpr ts ⟨t, true⟩ :=
   .scalarSub ⟨sq.compile, fun ee => (sq.evalCell ee).map fun c => [c]⟩
 
 end LeanLinq

@@ -203,7 +203,7 @@ def perRowBounded : DbFetch BasicCtx 4 (List Nat) := fetch! {
 example (v : Values CustomersS) : String := v.get "Name"
 example (v : Values [("X", .null .int)]) : Option Int := v.get "X"
 -- LEFT JOIN lifts the joined row's columns to nullable, in the type
-example (o : Row BasicCtx OrdersS.asNull) : SqlExpr BasicCtx .int true :=
+example (o : Row BasicCtx OrdersS.asNull) : SqlExpr BasicCtx ⟨.int, true⟩ :=
   o["OrderId"]
 
 /-! ## Negative tests: these must NOT elaborate. -/

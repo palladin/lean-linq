@@ -58,7 +58,7 @@ namespace LeanLinq
 inductive DbFetch (c : Ctx) : Nat → Type → Type 1 where
   | pure : {α : Type} → α → DbFetch c 0 α
   | fetch : {s : Schema} → Query c s → DbFetch c 1 (List (Values s))
-  | fetchCell : {t : SqlType} → {n : Bool} → ScalarQuery c t n → DbFetch c 1 (Nullable t)
+  | fetchCell : {t : SqlPrim} → {n : Bool} → ScalarQuery c ⟨t, n⟩ → DbFetch c 1 (Nullable t)
   -- independent computations: a batching driver shares their rounds
   | seq : {m n : Nat} → {α β : Type} →
       DbFetch c m (α → β) → DbFetch c n α → DbFetch c (max m n) β
@@ -155,7 +155,7 @@ end DbFetch
 the keys become an `IN (…)` list inside a single statement, so a thousand
 parents still cost grade 1. This is how N+1 collapses to 1+1. -/
 def DbFetch.fetchFor [SqlLit t] (keys : List t.interp)
-    (mk : List (SqlExpr c t true) → Query c s) : DbFetch c 1 (List (Values s)) :=
+    (mk : List (SqlExpr c ⟨t, true⟩) → Query c s) : DbFetch c 1 (List (Values s)) :=
   .fetch (mk (keys.map fun k => .widen (SqlLit.lit k)))
 
 /-- Fetch at most `n` rows, **with the bound in the type**: applies
@@ -178,7 +178,7 @@ def Query.fetch (q : Query c s) : DbFetch c 1 (List (Values s)) :=
   .fetch q
 
 /-- `sc.fetch` — a scalar query as a one-round program. -/
-def ScalarQuery.fetch (sc : ScalarQuery c t n) : DbFetch c 1 (Nullable t) :=
+def ScalarQuery.fetch (sc : ScalarQuery c ⟨t, n⟩) : DbFetch c 1 (Nullable t) :=
   .fetchCell sc
 
 /-- `q.fetchLimit n` — the length-refined fetch, flowing:

@@ -17,13 +17,13 @@ namespace LeanLinq
 value — unreachable for `HasCol`-checked statements). A write boundary:
 NULL into a NOT NULL column is a loud error (unreachable through the
 flag-checked builders). -/
-private def Values.setCol (name : String) (t' : SqlType) (cell : Nullable t') :
+private def Values.setCol (name : String) (t' : SqlPrim) (cell : Nullable t') :
     {s : Schema} → Values s → Except EvalError (Values s)
   | _, .nil => pure .nil
   | _, .cons (name := nc) (c := cc) old r =>
       if nc == name then
         (if h : t' = cc.ty then do
-          pure (.cons (← SqlCol.ofNullable name cc (h ▸ cell)) r)
+          pure (.cons (← SqlType.ofNullable name cc (h ▸ cell)) r)
         else pure (.cons old r))
       else do pure (.cons old (← r.setCol name t' cell))
 
@@ -31,17 +31,17 @@ private def Values.setCol (name : String) (t' : SqlType) (cell : Nullable t') :
 column is NULL; an unmentioned NOT NULL column is a loud error — never a
 silent NULL. -/
 private def buildInsertRow (ee : EvalEnv ts)
-    (vs : List (String × ((p : SqlType × Bool) × SqlExpr ts p.1 p.2))) :
+    (vs : List (String × ((p : SqlType) × SqlExpr ts p))) :
     (s : Schema) → Except EvalError (Values s)
   | [] => pure .nil
   | (nm, c) :: rest => do
       let cell ←
         match vs.find? (·.1 == nm) with
-        | some (_, ⟨(u, _), e⟩) =>
+        | some (_, ⟨⟨u, _⟩, e⟩) =>
             if h : u = c.ty then
-              do SqlCol.ofNullable nm c (h ▸ (← e.evalG ee [([] : Scope)]))
-            else SqlCol.ofNullable nm c none
-        | none => SqlCol.ofNullable nm c none
+              do SqlType.ofNullable nm c (h ▸ (← e.evalG ee [([] : Scope)]))
+            else SqlType.ofNullable nm c none
+        | none => SqlType.ofNullable nm c none
       pure (.cons cell (← buildInsertRow ee vs rest))
 
 def InsertStmt.apply (i : InsertStmt ts n s) [inst : HasTable ts.tables n s]
@@ -64,7 +64,7 @@ def UpdateStmt.apply (u : UpdateStmt ts n s) [inst : HasTable ts.tables n s]
       -- every SET expression sees the pre-update row (SQL semantics)
       u.sets.foldlM (init := v) fun acc (nm, f) =>
         match f marker with
-        | ⟨(t', _), e⟩ => do acc.setCol nm t' (← e.evalG ee [sc])
+        | ⟨⟨t', _⟩, e⟩ => do acc.setCol nm t' (← e.evalG ee [sc])
     else pure v
   pure (inst.set env rows)
 

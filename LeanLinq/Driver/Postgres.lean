@@ -84,7 +84,7 @@ private def toWire (compiled : CompiledSql) : String :=
   let entries := entries.mergeSort (fun a b => a.1.length ≥ b.1.length)
   entries.foldl (fun sql (n, ph) => sql.replace n ph) compiled.sql
 
-private def oidOf : SqlType → UInt32
+private def oidOf : SqlPrim → UInt32
   | .int => 23      -- int4 (function overloads resolve against int4, e.g. SUBSTRING)
   | .long => 20     -- int8
   | .double => 701  -- float8
@@ -109,7 +109,7 @@ private def valueWire : SqlValue → UInt32 × Option String
 auto parameters carry their values; user-named ones resolve from the typed
 cells. -/
 private def wireParams (compiled : CompiledSql)
-    (cells : List (String × ((t : SqlType) × Nullable t))) :
+    (cells : List (String × ((t : SqlPrim) × Nullable t))) :
     IO (Array UInt32 × Array (Option String)) := do
   let mut oids := #[]
   let mut vals := #[]
@@ -130,7 +130,7 @@ private def wireParams (compiled : CompiledSql)
 
 /-! ## Text decode → `Values` -/
 
-private def readCell (res : PgResult) (row col : UInt32) (t : SqlType) :
+private def readCell (res : PgResult) (row col : UInt32) (t : SqlPrim) :
     IO (Nullable t) := do
   if ← getisnull res row col then pure none
   else pure (Driver.parseCell t (← getvalue res row col))
@@ -158,7 +158,7 @@ def Conn.query (conn : Conn) (q : Query c s)
   let res ← execParamsRaw conn (toWire compiled) oids vals
   readRows res s
 
-def Conn.queryCell (conn : Conn) (sc : ScalarQuery c t n)
+def Conn.queryCell (conn : Conn) (sc : ScalarQuery c ⟨t, n⟩)
     (ps : ParamEnv c.params := by exact .nil) : IO (Nullable t) := do
   let compiled := sc.toSql .postgres
   let (oids, vals) ← wireParams compiled ps.toCells
@@ -167,7 +167,7 @@ def Conn.queryCell (conn : Conn) (sc : ScalarQuery c t n)
   else readCell res 0 0 t
 
 private def execCompiled (conn : Conn) (compiled : CompiledSql)
-    (cells : List (String × ((t : SqlType) × Nullable t))) : IO Unit := do
+    (cells : List (String × ((t : SqlPrim) × Nullable t))) : IO Unit := do
   let (oids, vals) ← wireParams compiled cells
   let _ ← execParamsRaw conn (toWire compiled) oids vals
 
@@ -204,7 +204,7 @@ unreachable. -/
 /-- A pipelined request together with the ref its result will fill. -/
 private inductive Req (c : Ctx) : Type where
   | q : (s : Schema) → IO.Ref (Option (List (Values s))) → Req c
-  | sc : (t : SqlType) → IO.Ref (Option (Nullable t)) → Req c
+  | sc : (t : SqlPrim) → IO.Ref (Option (Nullable t)) → Req c
 
 private abbrev SendM (c : Ctx) := StateT (Array (Req c)) IO
 
@@ -245,7 +245,7 @@ private def awaitRef (ref : IO.Ref (Option δ)) : IO δ := do
 /-- Walk the tree for one round: send every ready fetch, produce its
 blocked stage; `bind` may continue within the round; `seq` batches. -/
 private def sendPhase (conn : Conn)
-    (cells : List (String × ((t : SqlType) × Nullable t))) :
+    (cells : List (String × ((t : SqlPrim) × Nullable t))) :
     DbFetch c r α → (fuel : Nat) → SendM c (Stage c α fuel)
   | .pure a, fuel => pure (stageDone a fuel)
   | .fetch (s := s) q, fuel => do

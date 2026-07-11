@@ -79,7 +79,7 @@ private opaque colText (conn : @&Conn) (i : UInt32) : IO String
 
 /-! ## sp_executesql marshaling -/
 
-private def declType : SqlType → String
+private def declType : SqlPrim → String
   | .int => "int"
   | .long => "bigint"
   | .double => "float"
@@ -89,7 +89,7 @@ private def declType : SqlType → String
   | .dateTime => "datetime2"
   | .guid => "uniqueidentifier"
 
-private def valueTypeOf : SqlValue → SqlType
+private def valueTypeOf : SqlValue → SqlPrim
   | .int _ => .int
   | .long _ => .long
   | .double _ => .double
@@ -116,7 +116,7 @@ private def valueText : SqlValue → String
 ones resolve from the typed cells. Names already carry the `@` prefix
 (the sqlServer dialect's `paramPrefix`). -/
 private def rpcArgs (compiled : CompiledSql)
-    (cells : List (String × ((t : SqlType) × Nullable t))) :
+    (cells : List (String × ((t : SqlPrim) × Nullable t))) :
     IO (String × Array (String × Bool × String)) := do
   let mut decls := #[]
   let mut args := #[]
@@ -146,7 +146,7 @@ travel as an RPC parameter (it arrives NULL). The batch keeps `@stmt`
 verbatim and the same server-side conversion discipline; only the argument
 tail carries `N'...'` literals (one escaping rule: `'` doubles). -/
 private def execRpc (conn : Conn) (compiled : CompiledSql)
-    (cells : List (String × ((t : SqlType) × Nullable t))) : IO Unit := do
+    (cells : List (String × ((t : SqlPrim) × Nullable t))) : IO Unit := do
   let (decl, args) ← rpcArgs compiled cells
   if args.any (fun (_, isNull, txt) => !isNull && txt.isEmpty) then
     let assigns := args.map fun (name, isNull, txt) =>
@@ -195,7 +195,7 @@ def Conn.query (conn : Conn) (q : Query c s)
   execRpc conn (q.toSql .sqlServer) ps.toCells
   collectRows conn s
 
-def Conn.queryCell (conn : Conn) (sc : ScalarQuery c t n)
+def Conn.queryCell (conn : Conn) (sc : ScalarQuery c ⟨t, n⟩)
     (ps : ParamEnv c.params := by exact .nil) : IO (Nullable t) := do
   execRpc conn (sc.toSql .sqlServer) ps.toCells
   if (← resultsNext conn) == 0 then pure none
@@ -211,7 +211,7 @@ def Conn.queryCell (conn : Conn) (sc : ScalarQuery c t n)
       pure cell
 
 private def execStmt (conn : Conn) (compiled : CompiledSql)
-    (cells : List (String × ((t : SqlType) × Nullable t))) : IO Unit := do
+    (cells : List (String × ((t : SqlPrim) × Nullable t))) : IO Unit := do
   execRpc conn compiled cells
   drain conn
 

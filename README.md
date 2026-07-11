@@ -363,9 +363,10 @@ return `Bool`/`Prop`, so SQL needs its own).
 ## Design
 
 - `SqlType` universe; `SqlExpr : Ctx → SqlType → Type` GADT — ill-typed SQL is unrepresentable.
-- `Schema := List (String × SqlCol)` where `SqlCol = {ty : SqlType, nullable : Bool}`
-  (bare = NOT NULL); `Ctx := { tables : List (String × Schema), params : List (String ×
-  SqlCol) }`; `SqlExpr : Ctx → SqlType → Bool → Type` carries nullability as an index;
+- `SqlType = {ty : SqlPrim, nullable : Bool}` — the SQL type *is* its primitive plus
+  its nullability, one value that travels together (bare = NOT NULL). `Schema := List
+  (String × SqlType)`; `Ctx := { tables, params }` both over `SqlType`;
+  `SqlExpr : Ctx → SqlType → Type` — nullability rides the single index;
   `Row : Ctx → Schema → Type` heterogeneous tuple of expressions; `Values` cells have
   per-column honest types (`Option` only where `.null`).
 - Table names live at the type level (`Table (n : String) (s : Schema)`); queries are indexed

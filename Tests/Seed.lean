@@ -5,7 +5,7 @@ import Tests.Tables
 The same rows the integration runner installs in every engine (`setupSql`),
 as evaluator input: expected results for all registered cases are computed
 over this value. Decimals are milli-units, date-times normalized, guids
-lower-case — the `SqlType.interp` conventions. The entry order is the
+lower-case — the `SqlPrim.interp` conventions. The entry order is the
 context's, by construction. -/
 
 open LeanLinq

@@ -20,34 +20,34 @@ constructors (`SqlExpr.str`, `.int`, `.dec`, …). -/
 namespace LeanLinq
 
 /-- A never-NULL expression at whatever flag the position expects. -/
-@[reducible] def SqlExpr.atFlag (n : Bool) (e : SqlExpr ts t false) :
-    SqlExpr ts t n :=
+@[reducible] def SqlExpr.atFlag (n : Bool) (e : SqlExpr ts ⟨t, false⟩) :
+    SqlExpr ts ⟨t, n⟩ :=
   match n with
   | false => e
   | true => .widen e
 
-instance : Add (SqlExpr ts .int n) := ⟨.arith .add⟩
-instance : Add (SqlExpr ts .long n) := ⟨.arith .add⟩
-instance : Add (SqlExpr ts .double n) := ⟨.arith .add⟩
-instance : Add (SqlExpr ts .decimal n) := ⟨.arith .add⟩
-instance : Sub (SqlExpr ts .int n) := ⟨.arith .sub⟩
-instance : Sub (SqlExpr ts .long n) := ⟨.arith .sub⟩
-instance : Sub (SqlExpr ts .double n) := ⟨.arith .sub⟩
-instance : Sub (SqlExpr ts .decimal n) := ⟨.arith .sub⟩
-instance : Mul (SqlExpr ts .int n) := ⟨.arith .mul⟩
-instance : Mul (SqlExpr ts .long n) := ⟨.arith .mul⟩
-instance : Mul (SqlExpr ts .double n) := ⟨.arith .mul⟩
-instance : Mul (SqlExpr ts .decimal n) := ⟨.arith .mul⟩
-instance : Div (SqlExpr ts .int n) := ⟨.arith .div⟩
-instance : Div (SqlExpr ts .long n) := ⟨.arith .div⟩
-instance : Div (SqlExpr ts .double n) := ⟨.arith .div⟩
-instance : Div (SqlExpr ts .decimal n) := ⟨.arith .div⟩
+instance : Add (SqlExpr ts ⟨.int, n⟩) := ⟨.arith .add⟩
+instance : Add (SqlExpr ts ⟨.long, n⟩) := ⟨.arith .add⟩
+instance : Add (SqlExpr ts ⟨.double, n⟩) := ⟨.arith .add⟩
+instance : Add (SqlExpr ts ⟨.decimal, n⟩) := ⟨.arith .add⟩
+instance : Sub (SqlExpr ts ⟨.int, n⟩) := ⟨.arith .sub⟩
+instance : Sub (SqlExpr ts ⟨.long, n⟩) := ⟨.arith .sub⟩
+instance : Sub (SqlExpr ts ⟨.double, n⟩) := ⟨.arith .sub⟩
+instance : Sub (SqlExpr ts ⟨.decimal, n⟩) := ⟨.arith .sub⟩
+instance : Mul (SqlExpr ts ⟨.int, n⟩) := ⟨.arith .mul⟩
+instance : Mul (SqlExpr ts ⟨.long, n⟩) := ⟨.arith .mul⟩
+instance : Mul (SqlExpr ts ⟨.double, n⟩) := ⟨.arith .mul⟩
+instance : Mul (SqlExpr ts ⟨.decimal, n⟩) := ⟨.arith .mul⟩
+instance : Div (SqlExpr ts ⟨.int, n⟩) := ⟨.arith .div⟩
+instance : Div (SqlExpr ts ⟨.long, n⟩) := ⟨.arith .div⟩
+instance : Div (SqlExpr ts ⟨.double, n⟩) := ⟨.arith .div⟩
+instance : Div (SqlExpr ts ⟨.decimal, n⟩) := ⟨.arith .div⟩
 
-instance : Append (SqlExpr ts .string n) := ⟨.concat⟩
+instance : Append (SqlExpr ts ⟨.string, n⟩) := ⟨.concat⟩
 
-instance : OfNat (SqlExpr ts .int n) k := ⟨.atFlag n (.intC (Int.ofNat k))⟩
-instance : OfNat (SqlExpr ts .long n) k := ⟨.atFlag n (.longC (Int.ofNat k))⟩
-instance : Neg (SqlExpr ts .int n) := ⟨fun e => .arith .sub (.atFlag n (.intC 0)) e⟩
+instance : OfNat (SqlExpr ts ⟨.int, n⟩) k := ⟨.atFlag n (.intC (Int.ofNat k))⟩
+instance : OfNat (SqlExpr ts ⟨.long, n⟩) k := ⟨.atFlag n (.longC (Int.ofNat k))⟩
+instance : Neg (SqlExpr ts ⟨.int, n⟩) := ⟨fun e => .arith .sub (.atFlag n (.intC 0)) e⟩
 
 /-- Render a scientific literal (`99.99`) as exact decimal digits. -/
 private def scientificDigits (m : Nat) (sign : Bool) (e : Nat) : String :=
@@ -59,19 +59,19 @@ private def scientificDigits (m : Nat) (sign : Bool) (e : Nat) : String :=
     let fracPart := s.takeEnd e |>.toString
     s!"{intPart}.{fracPart}"
 
-instance : OfScientific (SqlExpr ts .decimal n) :=
+instance : OfScientific (SqlExpr ts ⟨.decimal, n⟩) :=
   ⟨fun m sign e => .atFlag n (.decimalC (scientificDigits m sign e))⟩
-instance : OfScientific (SqlExpr ts .double n) :=
+instance : OfScientific (SqlExpr ts ⟨.double, n⟩) :=
   ⟨fun m sign e => .atFlag n (.doubleC (OfScientific.ofScientific m sign e))⟩
 
 /- Two mono instances per literal coercion: the strict one wins when the
 position leaves the flag free (the analogue of the numeric
 `default_instance`), the widened one serves positions that pin the flag
 nullable. -/
-instance : Coe String (SqlExpr ts .string true) := ⟨fun s => .widen (.stringC s)⟩
-instance : Coe Bool (SqlExpr ts .bool true) := ⟨fun b => .widen (.boolC b)⟩
-instance (priority := high) : Coe String (SqlExpr ts .string false) := ⟨.stringC⟩
-instance (priority := high) : Coe Bool (SqlExpr ts .bool false) := ⟨.boolC⟩
+instance : Coe String (SqlExpr ts ⟨.string, true⟩) := ⟨fun s => .widen (.stringC s)⟩
+instance : Coe Bool (SqlExpr ts ⟨.bool, true⟩) := ⟨fun b => .widen (.boolC b)⟩
+instance (priority := high) : Coe String (SqlExpr ts ⟨.string, false⟩) := ⟨.stringC⟩
+instance (priority := high) : Coe Bool (SqlExpr ts ⟨.bool, false⟩) := ⟨.boolC⟩
 
 /-- SQL equality: `a ==. b` compiles to `(a = b)`. -/
 scoped infix:50  " ==. " => SqlExpr.cmp CmpOp.eq

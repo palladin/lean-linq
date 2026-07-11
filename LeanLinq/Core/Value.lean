@@ -16,7 +16,7 @@ lower-cased; NULL is `Option.none` everywhere. -/
 namespace LeanLinq
 
 /-- The Lean type carried by each SQL type at evaluation time. -/
-@[reducible] def SqlType.interp : SqlType → Type
+@[reducible] def SqlPrim.interp : SqlPrim → Type
   | .int => Int
   | .long => Int
   | .double => Float
@@ -31,18 +31,18 @@ evaluated expression, or a parameter binding holds. `none` is SQL NULL and
 *only* NULL: resolution failures don't exist (`HasCol`/`HasTable`/`HasParam`
 eliminated them), and exceptional conditions are a separate, explicit
 channel (`EvalError`). -/
-abbrev Nullable (t : SqlType) : Type := Option t.interp
+abbrev Nullable (t : SqlPrim) : Type := Option t.interp
 
 /-- What a **cell** of this column holds: NULL-capable columns store
 `Option`, NOT NULL columns store the payload directly — the honest type
 (`s.get "Name" : String` when the schema says so). -/
-@[reducible] def SqlCol.interp : SqlCol → Type
+@[reducible] def SqlType.interp : SqlType → Type
   | ⟨t, true⟩ => Option t.interp
   | ⟨t, false⟩ => t.interp
 
 /-- Lift a cell to the uniform `Nullable` view (the evaluator's internal
 currency): a strict cell is `some`, a nullable cell is itself. -/
-@[reducible] def SqlCol.toNullable : {c : SqlCol} → c.interp → Nullable c.ty
+@[reducible] def SqlType.toNullable : {c : SqlType} → c.interp → Nullable c.ty
   | ⟨_, true⟩, cell => cell
   | ⟨_, false⟩, cell => some cell
 
@@ -53,15 +53,15 @@ through the public surface. -/
 inductive EvalError where
   | divByZero
   | noClock                              -- `now` evaluated without a clock in `EvalEnv`
-  | unsupported (fn : String) (t : SqlType)   -- e.g. ROUND on double: not implemented
+  | unsupported (fn : String) (t : SqlPrim)   -- e.g. ROUND on double: not implemented
   | internal (msg : String)
   deriving Repr, BEq
 
 /-- Store a `Nullable` computation result into a cell of this column:
 `none` into a NOT NULL column is the loud boundary error (a bug or a
 missing INSERT value), never a silent NULL. -/
-def SqlCol.ofNullable (name : String) :
-    (c : SqlCol) → Nullable c.ty → Except EvalError c.interp
+def SqlType.ofNullable (name : String) :
+    (c : SqlType) → Nullable c.ty → Except EvalError c.interp
   | ⟨_, true⟩, v => .ok v
   | ⟨_, false⟩, some x => .ok x
   | ⟨_, false⟩, none => .error (.internal s!"NULL in NOT NULL column {name}")
@@ -69,9 +69,9 @@ def SqlCol.ofNullable (name : String) :
 /-- A heterogeneous tuple of runtime cells indexed by a schema — the
 value-level mirror of `Row`. Each cell's type is honest to its column:
 `Option` only where the column is NULL-capable. -/
-inductive Values : List (String × SqlCol) → Type where
+inductive Values : List (String × SqlType) → Type where
   | nil : Values []
-  | cons : {name : String} → {c : SqlCol} → {s : List (String × SqlCol)} →
+  | cons : {name : String} → {c : SqlType} → {s : List (String × SqlType)} →
       c.interp → Values s → Values ((name, c) :: s)
 
 /-- The all-NULL row over the NULL-lifted schema (LEFT JOIN padding) —
@@ -85,7 +85,7 @@ def Values.nulls : (s : Schema) → Values s.asNull
 `cmpV` is the total order used for ORDER BY, MIN/MAX, and grouping keys;
 `cellCmp` extends it with SQL's NULL placement (NULL sorts smallest). -/
 
-def SqlType.cmpV : (t : SqlType) → t.interp → t.interp → Ordering
+def SqlPrim.cmpV : (t : SqlPrim) → t.interp → t.interp → Ordering
   | .int, a, b => compare a b
   | .long, a, b => compare a b
   | .double, a, b => if a < b then .lt else if b < a then .gt else .eq
@@ -99,23 +99,23 @@ def SqlType.cmpV : (t : SqlType) → t.interp → t.interp → Ordering
   | .dateTime, a, b => compare a b
   | .guid, a, b => compare a b
 
-def cellCmp (t : SqlType) : Nullable t → Nullable t → Ordering
+def cellCmp (t : SqlPrim) : Nullable t → Nullable t → Ordering
   | none, none => .eq
   | none, some _ => .lt
   | some _, none => .gt
   | some a, some b => t.cmpV a b
 
-def cellBeq (t : SqlType) (a b : Nullable t) : Bool := cellCmp t a b == .eq
+def cellBeq (t : SqlPrim) (a b : Nullable t) : Bool := cellCmp t a b == .eq
 
-def Values.beq : {s : List (String × SqlCol)} → Values s → Values s → Bool
+def Values.beq : {s : List (String × SqlType)} → Values s → Values s → Bool
   | _, .nil, .nil => true
-  | _, .cons (c := c) a r, .cons b r' => cellBeq c.ty (SqlCol.toNullable a) (SqlCol.toNullable b) && r.beq r'
+  | _, .cons (c := c) a r, .cons b r' => cellBeq c.ty (SqlType.toNullable a) (SqlType.toNullable b) && r.beq r'
 
 instance : BEq (Values s) := ⟨Values.beq⟩
 
 /-- A runtime cell packed with its type (order keys, grouping keys). -/
 structure AnyCell where
-  type : SqlType
+  type : SqlPrim
   val : Nullable type
 
 def AnyCell.cmp : AnyCell → AnyCell → Ordering
@@ -132,18 +132,18 @@ run time). The outer `Option` is *presence* (absent column / type mismatch —
 unreachable for schema-checked queries), the inner `Nullable` is SQL NULL;
 the two are never conflated. -/
 def Values.get? : {s : Schema} → Values s →
-    (name : String) → (t : SqlType) → Option (Nullable t)
+    (name : String) → (t : SqlPrim) → Option (Nullable t)
   | _, .nil, _, _ => none
   | _, .cons (name := n') (c := c') cell r, name, t =>
       if n' == name then
-        (if h : c'.ty = t then some (h ▸ SqlCol.toNullable cell) else none)
+        (if h : c'.ty = t then some (h ▸ SqlType.toNullable cell) else none)
       else r.get? name t
 
 /-- `HasCell s name c` resolves a column name against the schema for
 *value* rows, by the same literal-list instance search as `HasCol` — a
 misspelled column on fetched data fails at compile time, and the cell type
 is honest to the column's declared nullability. -/
-class HasCell (s : Schema) (name : String) (c : outParam SqlCol) where
+class HasCell (s : Schema) (name : String) (c : outParam SqlType) where
   get : Values s → c.interp
 
 instance (priority := high) : HasCell ((name, c) :: s) name c where
@@ -164,7 +164,7 @@ row (the value-level counterpart of the compiler's `Row.ofAlias` field
 markers). -/
 abbrev Scope := List (String × ((s : Schema) × Values s))
 
-def Scope.get? (sc : Scope) (alias name : String) (t : SqlType) : Option (Nullable t) := do
+def Scope.get? (sc : Scope) (alias name : String) (t : SqlPrim) : Option (Nullable t) := do
   let ⟨_, v⟩ ← sc.lookup alias
   v.get? name t
 
@@ -179,9 +179,9 @@ inductive TableEnv : List (String × Schema) → Type where
 
 /-- Typed parameter bindings: one (nullable) value per parameter entry of
 the context — the `TableEnv` of parameters. -/
-inductive ParamEnv : List (String × SqlCol) → Type where
+inductive ParamEnv : List (String × SqlType) → Type where
   | nil : ParamEnv []
-  | cons : {n : String} → {c : SqlCol} → {ps : List (String × SqlCol)} →
+  | cons : {n : String} → {c : SqlType} → {ps : List (String × SqlType)} →
       c.interp → ParamEnv ps → ParamEnv ((n, c) :: ps)
 
 /-- Membership of a named parameter in the context's parameter list, by
@@ -189,7 +189,7 @@ instance search — the `HasCol`/`HasTable` idiom once more. The evidence *is*
 the accessor: resolving a parameter at elaboration time means already
 knowing how to read its value from any `ParamEnv ps`, so an unbound
 parameter is untypeable rather than silently NULL. -/
-class HasParam (ps : List (String × SqlCol)) (n : String) (c : outParam SqlCol) where
+class HasParam (ps : List (String × SqlType)) (n : String) (c : outParam SqlType) where
   get : ParamEnv ps → c.interp
 
 instance (priority := high) : HasParam ((n, c) :: ps) n c where
@@ -200,11 +200,11 @@ instance [h : HasParam ps n c] : HasParam ((n', c') :: ps) n c where
 
 /-- Names zipped with typed cells — what a driver walks to bind the
 user-named parameters natively. -/
-def ParamEnv.toCells : {ps : List (String × SqlCol)} → ParamEnv ps →
-    List (String × ((t : SqlType) × Nullable t))
+def ParamEnv.toCells : {ps : List (String × SqlType)} → ParamEnv ps →
+    List (String × ((t : SqlPrim) × Nullable t))
   | _, .nil => []
   | _, .cons (n := n) (c := c) v rest =>
-      (n, ⟨c.ty, SqlCol.toNullable v⟩) :: rest.toCells
+      (n, ⟨c.ty, SqlType.toNullable v⟩) :: rest.toCells
 
 /-- Everything evaluation reads besides the query itself: the typed tables,
 the typed parameter bindings, and the (optional) current timestamp. -/
@@ -335,7 +335,7 @@ def sqlSubstring (s : String) (start len : Int) : String :=
 
 /-! ## Display -/
 
-private def cellRepr : (t : SqlType) → Nullable t → String
+private def cellRepr : (t : SqlPrim) → Nullable t → String
   | _, none => "NULL"
   | .int, some i => toString i
   | .long, some i => toString i
@@ -346,10 +346,10 @@ private def cellRepr : (t : SqlType) → Nullable t → String
   | .dateTime, some s => s.quote
   | .guid, some g => g.quote
 
-private def Values.reprCells : {s : List (String × SqlCol)} → Values s → List String
+private def Values.reprCells : {s : List (String × SqlType)} → Values s → List String
   | _, .nil => []
   | _, .cons (c := c) cell r =>
-      cellRepr c.ty (SqlCol.toNullable cell) :: r.reprCells
+      cellRepr c.ty (SqlType.toNullable cell) :: r.reprCells
 
 instance : Repr (Values s) :=
   ⟨fun v _ => .text ("(" ++ String.intercalate ", " v.reprCells ++ ")")⟩
