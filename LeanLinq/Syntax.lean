@@ -68,7 +68,11 @@ syntax (name := sqlDistinct) &"distinct" : sqlClause
 syntax (name := sqlLimit) &"limit " term:max (&"offset " term:max)? : sqlClause
 syntax (name := sqlOffset) &"offset " term:max : sqlClause
 
-scoped syntax (name := sqlQuery) "query! " "{" withoutPosition(sepByIndentSemicolon(sqlClause)) "}" : term
+/-- `query! { … }` builds a query whose context is inferred from the use
+site; `query! MyDb { … }` pins the context in place (expands to a
+`( … : Query MyDb _)` ascription) — the form for standalone definitions,
+where nothing downstream determines the context. -/
+scoped syntax (name := sqlQuery) "query! " (ident)? "{" withoutPosition(sepByIndentSemicolon(sqlClause)) "}" : term
 
 open Lean
 
@@ -156,7 +160,11 @@ private def expandClauses (clauses : List Syntax) : MacroM Term := do
     let coreQ ← `(LeanLinq.Query.spine $core)
     post.foldlM applyTrailing coreQ
 
-@[macro sqlQuery] def expandQuery : Lean.Macro := fun stx =>
-  expandClauses stx[2].getSepArgs.toList
+@[macro sqlQuery] def expandQuery : Lean.Macro := fun stx => do
+  let q ← expandClauses stx[3].getSepArgs.toList
+  if stx[1].getNumArgs > 0 then
+    `(($q : LeanLinq.Query $(⟨stx[1][0]⟩) _))
+  else
+    pure q
 
 end LeanLinq

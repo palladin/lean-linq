@@ -36,12 +36,12 @@ def adults := Query.from' (ts := MyDb) customers
 The same query in `query!` comprehension syntax — both surfaces normalize to *identical* SQL:
 
 ```lean
-def adults' := (query! {
+def adults' := query! MyDb {
   from c in customers
   where 18 <. c["Age"]
   orderBy c["Name"].asc
   select ![c["Id"].as "Id", c["Name"].as "Name"]
-} : Query MyDb _)
+}
 
 #eval adults.toSql .sqlite == adults'.toSql .sqlite   -- true
 ```
@@ -321,9 +321,10 @@ return `Bool`/`Prop`, so SQL needs its own).
 
 - **Schemas and contexts must be `abbrev`**, not `def` — column lookup (`HasCol`) and table
   lookup (`HasTable`) resolve by instance search over the literal lists.
-- **Pin the context at the query head** (`Query.from' (ts := MyDb) t`, or ascribe a `query!`
-  block with `: Query MyDb _`): an unannotated definition would leave the context as a
-  metavariable, and instance search cannot run against an undetermined context.
+- **Pin the context** — at the query head (`Query.from' (ts := MyDb) t`) or on the
+  comprehension (`query! MyDb { … }`): an unannotated standalone definition would leave
+  the context as a metavariable, and instance search cannot run against an undetermined
+  context. (Nested blocks — subqueries, sources — infer it from the enclosing query.)
 - **Literals go on the right** of `==.`/`!=.` (`c["Name"] ==. "Alice"`): coercions only fire
   against a known expected type. For literal-first, use `SqlExpr.str`/`.int`/`.bool`.
   (Monomorphic operators like `<.`/`>.`/`+` take literals on either side.)

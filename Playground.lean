@@ -49,12 +49,12 @@ def adults := Query.from' (ts := PlayCtx) customers
 
 /-! ## query! comprehension style — same core, identical SQL -/
 
-def adults' := (query! {
+def adults' := query! PlayCtx {
   from c in customers
   where 18 <. c["Age"] &&. c["IsActive"] ==. true
   orderBy c["Name"].asc
   select ![c["Id"].as "Id", c["Name"].as "Name"]
-} : Query PlayCtx _)
+}
 
 #eval adults.toSql .sqlite == adults'.toSql .sqlite   -- true
 
@@ -69,7 +69,7 @@ def spending := Query.from' (ts := PlayCtx) customers
 
 #eval (spending.toSql .sqlite).sql
 
-def spending' := (query! {
+def spending' := query! PlayCtx {
   from c in customers
   join o in orders on c["Id"] ==. o["CustomerId"]
   groupBy c["Id"].key, c["Name"].key into a
@@ -77,16 +77,16 @@ def spending' := (query! {
   orderBy (a.sum o["Amount"]).desc
   select ![c["Name"].as "Name", (a.sum o["Amount"]).as "Total"]
   limit 10
-} : Query PlayCtx _)
+}
 
 #eval (spending'.toSql .sqlite).sql
 
-def cheapProducts := (query! {
+def cheapProducts := query! PlayCtx {
   from p in products
   where p["Price"] <. 100.00 ||. p["Price"].isNull
   orderBy p["Price"].asc
   select ![p["ProductName"].as "Name", p["Price"].as "Price"]
-} : Query PlayCtx _)
+}
 
 #eval cheapProducts.toSql .postgres
 
@@ -153,12 +153,6 @@ def spendersReport : DbFetch PlayCtx 2 (Nat × Nat) := fetch! {
 }
 
 #eval spendersReport.exec 2 demoEnv   -- Except.ok (2, 2) — 1+1 rounds, any N
-
-/- The budget need not be a constant: the door demands a *proof*, not a
-literal. With an abstract budget the obligation `2 ≤ budget` has a free
-variable — `by decide` cannot fire — so the caller supplies the hypothesis. -/
-example (budget : Nat) (h : 2 ≤ budget) : Except EvalError (Nat × Nat) :=
-  spendersReport.exec budget demoEnv .nil none h
 
 /- And the same report written per-row — the natural N+1 — is *rejected*:
 `mapM` needs a `Monad` instance, and `DbFetch` cannot have one, because
