@@ -1,4 +1,5 @@
 import LeanLinq
+import LeanLinq.Driver.TextCell
 
 /-! # Native PostgreSQL driver (libpq)
 
@@ -104,16 +105,6 @@ private def valueWire : SqlValue → UInt32 × Option String
   | .guid g => (2950, some g)
   | .null => (25, none)   -- unreachable: `.null` marks user-named params
 
-private def cellText : (t : SqlType) → t.interp → String
-  | .int, i => toString i
-  | .long, i => toString i
-  | .double, f => toString f
-  | .decimal, m => renderDecimal m
-  | .string, s => s
-  | .bool, b => if b then "t" else "f"
-  | .dateTime, s => s
-  | .guid, g => g
-
 /-- One wire entry per compiled parameter, in array order (`$k+1` order):
 auto parameters carry their values; user-named ones resolve from the typed
 cells. -/
@@ -129,7 +120,7 @@ private def wireParams (compiled : CompiledSql)
         match cells.find? (·.1 == bare) with
         | some (_, ⟨t, cell⟩) =>
             oids := oids.push (oidOf t)
-            vals := vals.push (cell.map (cellText t))
+            vals := vals.push (cell.map (Driver.cellText t))
         | none => throw (IO.userError s!"libpq bind: no typed value for {name}")
     | v =>
         let (oid, txt) := valueWire v
@@ -139,41 +130,10 @@ private def wireParams (compiled : CompiledSql)
 
 /-! ## Text decode → `Values` -/
 
-/-- Minimal float parser (`-?digits[.digits]`); the corpus has no double
-columns, so scientific notation is out of scope. -/
-private def parseFloat (s : String) : Float :=
-  let cs := s.toList
-  let (neg, cs) := match cs with
-    | '-' :: rest => (true, rest)
-    | _ => (false, cs)
-  let num (l : List Char) : Nat := ((String.ofList l).toNat?).getD 0
-  let w := cs.takeWhile (· != '.')
-  let f := (cs.dropWhile (· != '.')).drop 1
-  let v := Float.ofNat (num w) + Float.ofNat (num f) / Float.ofNat (10 ^ f.length)
-  if neg then -v else v
-
-/-- Integer column text may arrive `numeric`-formatted (`AVG(int)` yields
-`325.0000000000000000`); take the integral part. Non-exact integer AVG is
-engine-variant and allowlisted, so truncation never disagrees with the
-evaluator on swept cases. -/
-private def parseIntText (txt : String) : Int :=
-  ((String.ofList (txt.toList.takeWhile (· != '.'))).toInt?).getD 0
-
-private def parseCell (t : SqlType) (txt : String) : Nullable t :=
-  match t with
-  | .int => some (parseIntText txt)
-  | .long => some (parseIntText txt)
-  | .double => some (parseFloat txt)
-  | .decimal => some (parseDecimal txt)
-  | .string => some txt
-  | .bool => some (txt == "t" || txt == "true")
-  | .dateTime => some (normDateTime txt)
-  | .guid => some txt.toLower
-
 private def readCell (res : PgResult) (row col : UInt32) (t : SqlType) :
     IO (Nullable t) := do
   if ← getisnull res row col then pure none
-  else pure (parseCell t (← getvalue res row col))
+  else pure (Driver.parseCell t (← getvalue res row col))
 
 private def readRow (res : PgResult) (row : UInt32) :
     (s : Schema) → (col : UInt32) → IO (Values s)

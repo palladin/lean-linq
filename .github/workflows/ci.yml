@@ -16,6 +16,7 @@ jobs:
           command -v sqlite3 || { sudo apt-get update && sudo apt-get install -y sqlite3; }
           dpkg -s libsqlite3-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y libsqlite3-dev; }
           dpkg -s libpq-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y libpq-dev; }
+          dpkg -s freetds-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y freetds-dev; }
 
       - name: Install elan
         run: |
@@ -43,6 +44,9 @@ jobs:
 
       - name: Native PostgreSQL driver tests (typed, over the wire protocol)
         run: lake exe pgdriver
+
+      - name: Native SQL Server driver tests (typed, over TDS RPC)
+        run: lake exe mssqldriver
 
       - name: Integration tests (execute against live SQLite/PostgreSQL/SQL Server)
         run: lake exe integration

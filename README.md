@@ -54,10 +54,10 @@ parameters — and each reference is resolved by instance search (`HasTable`/`Ha
 elaboration time, the way columns are resolved by `HasCol`.
 
 **Scope**: lean-linq compiles queries to `CompiledSql` (SQL text + parameter bindings) for
-any driver to execute, and ships a **native SQLite driver** (C FFI over the system
-sqlite3): typed queries in, typed rows out, parameters bound natively — see
-"Executing for real" below. PostgreSQL/SQL Server execution currently lives in the
-docker-based integration harness (testing); a libpq driver is the natural phase 2.
+any driver to execute, and ships **native drivers for all three engines** — SQLite
+(C FFI over the system sqlite3), PostgreSQL (libpq, with pipeline-batched fetch
+rounds), and SQL Server (FreeTDS, `sp_executesql` RPC): typed queries in, typed rows
+out, parameters bound natively — see "Executing for real" below.
 
 ## Building
 
@@ -211,7 +211,7 @@ customers.delete |>.where' (fun c => c["Age"] <. 18)
 -- DELETE FROM "Customers" WHERE ("Age" < :p0)
 ```
 
-## Executing for real: the native SQLite driver
+## Executing for real: the native drivers
 
 `import LeanLinq.Driver.Sqlite` (a separate lib target — the core library stays
 FFI-free) talks to the system sqlite3 library:
@@ -246,6 +246,24 @@ inference properly. And on PostgreSQL the `DbFetch` grading pays off for real:
 fetches share round trips, so the `max` grade is an actual latency bound, not just an
 upper estimate. `lake exe pgdriver` sweeps the full corpus against live PostgreSQL,
 typed `Values`-to-`Values` against the evaluator.
+
+**SQL Server** completes the trilogy (`import LeanLinq.Driver.Mssql`, `Ms.connect`
+with host/port/credentials; requires FreeTDS — `brew install freetds` /
+`freetds-dev`). It is the one engine that needs **no placeholder rewriting at all**:
+the sqlServer dialect already compiles `@p0`/`@minAge`, TDS's native named-parameter
+form, so execution is an `sp_executesql` RPC — the compiled SQL travels verbatim as
+`@stmt`, a declaration string types every parameter, and the values ride as text
+with server-side conversion (the same text-plus-typed-declaration strategy as the
+PostgreSQL driver's OIDs). One DB-Library wrinkle is handled transparently: its API
+cannot express an *empty string* parameter (zero length means NULL at the API
+layer), so executions carrying one fall back to an equivalent `EXEC sp_executesql`
+batch with the statement still verbatim. TDS allows one active request per
+connection — no pipelining — so `DbFetch.execMs` is sequential and the `max` grade
+stays an honest upper bound, as with in-process SQLite. `lake exe mssqldriver`
+sweeps the full corpus against live SQL Server (docker compose, port 14333), typed
+`Values`-to-`Values` against the evaluator — with the native drivers now covering
+all three engines, the string-based CLI integration harness is a retirement
+candidate once the parallel-run period ends.
 
 ## Running queries in memory
 

@@ -25,6 +25,10 @@ structure DriverOps where
   execUpd : {n : String} → {s : Schema} → UpdateStmt TestCtx n s → IO Unit
   execDel : {n : String} → {s : Schema} → DeleteStmt TestCtx n s → IO Unit
   execRaw : String → IO Unit
+  /-- Transaction bracket for statement cases; T-SQL spells these
+  `BEGIN TRAN`/`ROLLBACK TRAN`. -/
+  begin : String := "BEGIN"
+  rollback : String := "ROLLBACK"
 
 /-- Rendering is for *messages only*; comparison is typed. -/
 def showRows (rows : List (Values s)) : String :=
@@ -79,22 +83,22 @@ def runCase (ops : DriverOps) (name : String) (c : Case) : IO Bool := do
             IO.eprintln s!"  evaluator: {renderCell t expected}"
             pure false
   | .ins (inst := inst) i => do
-      ops.execRaw "BEGIN"
+      ops.execRaw ops.begin
       ops.execIns i
       let ok ← checkTable ops name inst (i.apply (inst := inst) seedEnv seedParams)
-      ops.execRaw "ROLLBACK"
+      ops.execRaw ops.rollback
       pure ok
   | .upd (inst := inst) u => do
-      ops.execRaw "BEGIN"
+      ops.execRaw ops.begin
       ops.execUpd u
       let ok ← checkTable ops name inst (u.apply (inst := inst) seedEnv seedParams)
-      ops.execRaw "ROLLBACK"
+      ops.execRaw ops.rollback
       pure ok
   | .del (inst := inst) d => do
-      ops.execRaw "BEGIN"
+      ops.execRaw ops.begin
       ops.execDel d
       let ok ← checkTable ops name inst (d.apply (inst := inst) seedEnv seedParams)
-      ops.execRaw "ROLLBACK"
+      ops.execRaw ops.rollback
       pure ok
 
 /-- Sweep every registered case; returns (passed, failed, skipped). -/

@@ -17,6 +17,10 @@ services:
 
   mssql:
     image: mcr.microsoft.com/mssql/server:2022-latest
+    ports:
+      # native FreeTDS driver (Tests/MssqlDriverT.lean); 14333 to avoid
+      # clashing with any local SQL Server
+      - "127.0.0.1:14333:1433"
     # amd64-only image; on Apple Silicon this runs via Docker Desktop's
     # Rosetta emulation. Use `lake exe integration --db sqlite,postgres`
     # to skip it locally if needed.
