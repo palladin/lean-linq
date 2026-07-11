@@ -16,16 +16,26 @@ elab "dbLinkArgs%" : term => do
       pure (#["-L" ++ sdk.stdout.trimAscii.toString ++ "/usr/lib",
               "-L" ++ pq.stdout.trimAscii.toString ++ "/lib"] ++ base)
     else do
-      -- the bundled ld.lld does not search the system library dirs either:
-      -- offer the common candidates (missing -L dirs are ignored) plus
-      -- pg_config's libdir when available
-      let mut dirs := #["-L/usr/lib/x86_64-linux-gnu", "-L/usr/lib/aarch64-linux-gnu",
-                        "-L/usr/lib64", "-L/usr/lib"]
+      -- The bundled ld.lld does not search system library dirs, and adding
+      -- broad -L paths hijacks libc resolution (the toolchain's Scrt1.o
+      -- wants the bundled glibc, not the system's — __libc_csu_* vanished
+      -- in glibc 2.34). So: link the two libraries by explicit file path,
+      -- leaving every other search untouched.
+      let mut dirs := #["/usr/lib/x86_64-linux-gnu", "/usr/lib/aarch64-linux-gnu",
+                        "/usr/lib64", "/usr/lib"]
       try
         let out ← IO.Process.output { cmd := "pg_config", args := #["--libdir"] }
-        dirs := dirs.push ("-L" ++ out.stdout.trimAscii.toString)
+        dirs := dirs.push out.stdout.trimAscii.toString
       catch _ => pure ()
-      pure (dirs ++ base)
+      let find (names : List String) (what : String) : TermElabM String := do
+        for d in dirs do
+          for n in names do
+            if ← System.FilePath.pathExists (d ++ "/" ++ n) then
+              return d ++ "/" ++ n
+        throwError "lakefile: {what} not found (install the -dev package); searched {dirs}"
+      let sqlite ← find ["libsqlite3.so", "libsqlite3.so.0"] "libsqlite3"
+      let pq ← find ["libpq.so", "libpq.so.5"] "libpq"
+      pure #[sqlite, pq]
   return Lean.toExpr args
 
 -- Include directory for libpq headers, resolved the same way (Linux:
