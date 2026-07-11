@@ -294,15 +294,17 @@ def DbFetch.fetchFor [SqlLit t] (keys : List t.interp)
 /-- Fetch at most `n` rows, **with the bound in the type**: applies
 `LIMIT n` to the query and returns a length-refined list — the evidence
 a dependent composition (`bindD`/`forRows`) needs, produced by the query
-itself. The client-side `take` realizes the proof; it is the identity in
-the reference semantics (`Query.run_limit_length_le`) and a defensive
-clamp against a disagreeing engine. -/
+itself. The `LIMIT` is the engine's; the client only *checks* the
+length to realize the proof — the rows pass through untouched
+(provably so in the reference semantics: `Query.run_limit_length_le`),
+and the `take` clamp fires only against a disagreeing engine. -/
 def DbFetch.fetchLimit (q : Query c s) (n : Bound) :
     DbFetch c 1 {xs : List (Values s) // .fin xs.length ≤ n} :=
   match n with
   | .fin k =>
       (fetch (q.limit k)).map fun xs =>
-        ⟨xs.take k, Bound.fin_le_fin (List.length_take_le k xs)⟩
+        if h : xs.length ≤ k then ⟨xs, Bound.fin_le_fin h⟩
+        else ⟨xs.take k, Bound.fin_le_fin (List.length_take_le k xs)⟩
   | .top => (fetch q).map fun xs => ⟨xs, rfl⟩
 
 /-! Pipeline-flowing spellings: a query ends in `|>.fetch` /
