@@ -35,7 +35,12 @@ elab "dbLinkArgs%" : term => do
         throwError "lakefile: {what} not found (install the -dev package); searched {dirs}"
       let sqlite ← find ["libsqlite3.so", "libsqlite3.so.0"] "libsqlite3"
       let pq ← find ["libpq.so", "libpq.so.5"] "libpq"
-      pure #[sqlite, pq]
+      -- The system .so files carry glibc symbol versions newer than the
+      -- toolchain's bundled glibc can satisfy at link time; at run time the
+      -- system loader resolves them against the system glibc (same distro,
+      -- always sufficient). Tell the linker to trust runtime for shlib
+      -- references instead of failing on what it cannot see.
+      pure #[sqlite, pq, "-Wl,--allow-shlib-undefined"]
   return Lean.toExpr args
 
 -- Include directory for libpq headers, resolved the same way (Linux:
