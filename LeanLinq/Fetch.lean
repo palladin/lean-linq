@@ -25,10 +25,21 @@ data-dependent fan-out — classic N+1 — admits no proof, so it never
 elaborates. (Haxl repairs N+1 dynamically by batching; the grade rejects it
 statically instead.)
 
-The interpreter here is the in-memory evaluator — the same denotational
-semantics the integration suite differential-tests — so `DbFetch` programs
-run today; a future IO driver interprets the same tree against live engines,
-batching `seq` for real. -/
+The loop has first-class sugar: `let ys ← for x in xs do body`
+(`DbFetch.forAll`) carries the *exact* dynamic grade `k * xs.length` in
+the type — writable wherever `xs` is already in scope, provable with
+`omega`-style facts at the door (`by decide` once the list is literal).
+No constant-bound variant exists: over just-fetched rows the loop's
+grade would mention the fetched value, which `bind` cannot type, so
+in-program N+1 stays unwritable and `fetchFor` is the post-fetch door.
+Explicit per-row fan-out is for data you already hold.
+
+The reference interpreter here is the in-memory evaluator — the same
+denotational semantics the test suite differential-tests — and the native
+drivers interpret the same tree against live engines (`execIO`/`execMs`
+sequentially; `execPg` through libpq pipeline mode, where `seq` sides and
+`forAll` bodies — both independent — share rounds, so the loop *batches*
+and the sequential grade is a generous bound). -/
 
 /-! `fetch!` do-sugar (declared before the namespace: syntax categories
 must live at top level for quotation patterns to work). -/
@@ -47,6 +58,13 @@ inductive DbFetch (c : Ctx) : Nat → Type → Type 1 where
   -- a data dependency genuinely costs rounds
   | bind : {m n : Nat} → {α β : Type} →
       DbFetch c m α → (α → DbFetch c n β) → DbFetch c (m + n) β
+  -- the per-row loop, first class: one body per element of a collection
+  -- already in hand, with the *exact* data-dependent grade in the index —
+  -- `k * xs.length` names the round count precisely (an `∃ n` would hide
+  -- the number the budget check needs). Over just-fetched rows it cannot
+  -- appear: `bind`'s continuation grade cannot mention the fetched value.
+  | forAll : {α β : Type} → {k : Nat} →
+      (xs : List α) → (α → DbFetch c k β) → DbFetch c (k * xs.length) (List β)
 
 namespace DbFetch
 
@@ -63,6 +81,7 @@ def runWith (ee : EvalEnv c) : {r : Nat} → {α : Type} → DbFetch c r α →
   | _, _, .fetchCell sq => sq.evalCell ee
   | _, _, .seq f x => do Except.ok ((← f.runWith ee) (← x.runWith ee))
   | _, _, .bind x k => do (k (← x.runWith ee)).runWith ee
+  | _, _, .forAll xs f => xs.mapM fun a => (f a).runWith ee
 
 /-- The execution door: declare a round budget, prove you fit in it. For
 closed grades (every batched program) the obligation discharges silently by
@@ -73,6 +92,17 @@ def exec (f : DbFetch c r α) (budget : Nat) (env : TableEnv c.tables)
     (ps : ParamEnv c.params := by exact .nil) (now : Option String := none)
     (_h : r ≤ budget := by decide) : Except EvalError α :=
   f.runWith ⟨env, ps, now⟩
+
+/-- Restate a grade as a provably equal one — `1 * ids.length` as
+`ids.length`, and so on. The index a program *infers* is built
+syntactically from the combinators; equalities like `Nat.one_mul` are
+theorems, not reductions, so the elaborator will not rewrite them away.
+This is the bridge, and `fetch!` applies it automatically: with no
+constraint from the context, `rfl` pins the stated grade to the inferred
+one; against an annotation, `omega` proves them equal. -/
+def withGrade (x : DbFetch c m α) {n : Nat}
+    (h : m = n := by first | rfl | omega) : DbFetch c n α :=
+  h ▸ x
 
 end DbFetch
 
@@ -114,12 +144,16 @@ def report : DbFetch c 2 _ := fetch! {
 }
 ```
 
-`let x ← e` is `DbFetch.bind`, `let x := e` a plain `let`, and the final
+`let x ← e` is `DbFetch.bind`, `let x := e` a plain `let`,
+`let ys ← for x in xs do body` is `DbFetch.forAll` (the per-row loop,
+exact dynamic grade `k * xs.length`), and the final
 `return e` is `DbFetch.pure` — grades compose as `m + n + … + 0`, which is
 definitionally the closed sum for batched programs, so `exec`'s `by decide`
 still discharges silently. -/
 
 syntax (name := fetchBind) "let " ident " ← " term : fetchClause
+syntax (name := fetchForAll) "let " ident " ← " "for " ident " in " term:max
+  " do " term : fetchClause
 syntax (name := fetchLet) "let " ident " := " term : fetchClause
 syntax (name := fetchRet) "return " term : fetchClause
 
@@ -127,21 +161,47 @@ scoped syntax (name := fetchProg)
   "fetch! " "{" withoutPosition(sepByIndentSemicolon(fetchClause)) "}" : term
 
 open Lean in
+/-- `let ys ← for x in xs do body` also parses as plain `let ys ← term`
+(term-position `for`), so the parser emits a `choice` node — resolve it
+in favor of the dedicated loop clause. -/
+def resolveClause (c : Syntax) : Syntax :=
+  if c.getKind == Lean.choiceKind then
+    (c.getArgs.find? (·.isOfKind ``fetchForAll)).getD c[0]
+  else c
+
+open Lean in
 @[macro fetchProg] def expandFetch : Lean.Macro := fun stx => do
-  let clauses := stx[2].getSepArgs.toList
+  let clauses := (stx[2].getSepArgs.map resolveClause).toList
   match clauses.reverse with
   | [] => Macro.throwError "fetch! must end with a `return` clause"
   | last :: revRest =>
     unless last.isOfKind ``fetchRet do
       Macro.throwErrorAt last "fetch! must end with a `return` clause"
-    let init ← `(LeanLinq.DbFetch.pure $(⟨last[1]⟩))
+    -- fuse the final `let ys ← e; return f ys` into `map` (grade `r`, not
+    -- `r + 0`) so inferred grades stay clean
+    let (init, revRest) ← do
+      match revRest with
+      | prev :: rest =>
+        if prev.isOfKind ``fetchBind then
+          pure (← `(LeanLinq.DbFetch.map (fun $(⟨prev[1]⟩) => $(⟨last[1]⟩)) $(⟨prev[3]⟩)), rest)
+        else if prev.isOfKind ``fetchForAll then
+          pure (← `(LeanLinq.DbFetch.map (fun $(⟨prev[1]⟩) => $(⟨last[1]⟩))
+            (LeanLinq.DbFetch.forAll $(⟨prev[6]⟩) (fun $(⟨prev[4]⟩) => $(⟨prev[8]⟩)))), rest)
+        else
+          pure (← `(LeanLinq.DbFetch.pure $(⟨last[1]⟩)), revRest)
+      | [] => pure (← `(LeanLinq.DbFetch.pure $(⟨last[1]⟩)), revRest)
     let folded ← revRest.foldlM (init := init) fun (acc : TSyntax `term) c => do
       if c.isOfKind ``fetchBind then
         `(LeanLinq.DbFetch.bind $(⟨c[3]⟩) (fun $(⟨c[1]⟩) => $acc))
+      else if c.isOfKind ``fetchForAll then
+        -- let y ← for x in xs do body — exact grade k * xs.length
+        `(LeanLinq.DbFetch.bind
+            (LeanLinq.DbFetch.forAll $(⟨c[6]⟩) (fun $(⟨c[4]⟩) => $(⟨c[8]⟩)))
+            (fun $(⟨c[1]⟩) => $acc))
       else if c.isOfKind ``fetchLet then
         `(let $(⟨c[1]⟩) := $(⟨c[3]⟩); $acc)
       else
-        Macro.throwErrorAt c "expected `let x ← e`, `let x := e`, or a final `return e`"
-    return folded
+        Macro.throwErrorAt c "expected `let x ← e`, `let x := e`, `let ys ← for x in xs do e`, or a final `return e`"
+    `(LeanLinq.DbFetch.withGrade $folded)
 
 end LeanLinq

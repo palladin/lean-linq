@@ -36,6 +36,8 @@ def main : IO UInt32 := do
         failures := failures + 1
       unless ← checkBothTables (← bothTables.execPg conn 1 seedParams) do
         failures := failures + 1
+      unless ← checkPerRowLoop (← perRowLoop.execPg conn 3 seedParams) do
+        failures := failures + 1
       conn.close
       if failures == 0 then
         IO.println s!"driver(postgres): {passed} cases match the evaluator (typed), {skipped} skipped — all green"

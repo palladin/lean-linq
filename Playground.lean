@@ -154,7 +154,28 @@ def spendersReport : DbFetch PlayCtx 2 (Nat × Nat) := fetch! {
 
 #eval spendersReport.exec 2 demoEnv   -- Except.ok (2, 2) — 1+1 rounds, any N
 
-/- And the same report written per-row — the natural N+1 — is *rejected*:
+/- The per-row loop *is* expressible — explicitly, over data you already
+hold (a parameter, a literal, a previous result). `for x in xs do …`
+carries the *exact* dynamic grade `1 * ids.length` in the type, and the
+door takes a proof — `by decide` once the list is a literal, `by omega`
+for a computed budget. -/
+def ordersFor (ids : List Int) :
+    DbFetch PlayCtx ids.length (List Nat) := fetch! {
+  let waves ← for k in ids do
+    .fetch (Query.from' (ts := PlayCtx) orders
+      |>.where' (fun o => o["CustomerId"] ==. SqlExpr.long k))
+  return waves.map (·.length)
+}
+-- the loop's raw index is `1 * ids.length` (the constructor's exact
+-- arithmetic); `fetch!` restates it against the annotation, `omega`
+-- closing the gap
+
+#eval (ordersFor [1, 2]).exec 2 demoEnv   -- Except.ok [1, 1] — grade 1 * 2
+
+/- Under-budgeting the loop is caught at elaboration —
+`(ordersFor [1, 2]).exec 1 demoEnv` fails `by decide` (grade 2 > 1). And
+a per-row loop over *just-fetched* rows — the natural N+1 — is rejected
+outright:
 `mapM` needs a `Monad` instance, and `DbFetch` cannot have one, because
 hiding the grade inside a fixed `m : Type → Type` would blind the budget
 check. The checker below verifies this fails to elaborate. -/

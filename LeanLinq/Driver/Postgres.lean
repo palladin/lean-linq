@@ -272,6 +272,13 @@ private def sendPhase (conn : Conn)
   | .bind x k, fuel => do
       let sx ← sendPhase conn cells x fuel
       bindStage (fun fuel' a => sendPhase conn cells (k a) fuel') fuel sx
+  | .forAll xs f, fuel => do
+      -- the loop's bodies are independent of one another, so they all
+      -- send into the *current* round — the per-row loop batches, and the
+      -- sequential grade `k * xs.length` stays a (generous) upper bound
+      let stages ← xs.mapM fun x => sendPhase conn cells (f x) fuel
+      pure (stages.foldr (fun sx acc => parStage (· :: ·) fuel sx acc)
+        (stageDone [] fuel))
 
 /-- Read this round's results in send order and fill the refs. -/
 private def fill (conn : Conn) (reqs : Array (Req c)) : IO Unit := do

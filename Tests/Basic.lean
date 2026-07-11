@@ -161,6 +161,23 @@ example (ids : List Int) : Except EvalError (List (List (Values OrdersS))) :=
   (perRow (ids.take 3)).exec 8 demoEnv .nil none
     (by rw [List.length_take]; omega)
 
+/-- `for x in xs do` is that idiom as sugar — the per-row loop with the
+exact grade `1 * ks.length` in the type: closed lists close it
+(`by decide` sees `1 * 2 = 2`), parameter lists leave a symbolic grade
+the caller proves at the door (see below). -/
+def perRowAll (ks : List Int) := fetch! {
+  let waves ← for k in ks do .fetch (ordersOf k)
+  return waves.map (·.length)
+}
+
+#guard ((perRowAll [1, 2]).exec 2 demoEnv |>.toOption) == some [0, 0]
+
+/-- Symbolic dynamic grade under a computed budget: the obligation
+`1 * ks.length + 0 ≤ ks.length` is a theorem, so `omega` closes it for
+every `ks` — the rounds are visible, priced, and proved, not hidden. -/
+example (ks : List Int) : Except EvalError (List Nat) :=
+  (perRowAll ks).exec ks.length demoEnv .nil none (by omega)
+
 /-! ## Negative tests: these must NOT elaborate. -/
 
 #check_failure fun (c : Row BasicCtx CustomersS) => c["Nmae"]             -- misspelled column
@@ -179,4 +196,18 @@ example (ids : List Int) : Except EvalError (List (List (Values OrdersS))) :=
 #check_failure fun (ids : List Int) => (fetch! {
   let rows ← perRow ids
   return rows.length
+}).exec 8 demoEnv
+-- a symbolic loop under a *fixed* budget leaves a free variable in the
+-- obligation (`1 * ids.length + 0 ≤ 8`) — no proof, no run
+#check_failure fun (ids : List Int) => (perRowAll ids).exec 8 demoEnv
+-- under-budgeting a closed loop is caught the same way: grade 2 > 1
+#check_failure ((perRowAll [1, 2]).exec 1 demoEnv)
+-- and `for … do` cannot follow a fetch inside one program:
+-- the loop's grade would mention the fetched rows, which `bind` cannot
+-- type — the N+1 rejection is structural, not a lint
+#check_failure (fetch! {
+  let cs ← .fetch (Query.from' (ts := BasicCtx) customers)
+  let ids := cs.filterMap fun v => (v.get? "Id" .int).bind id
+  let waves ← for k in ids do .fetch (ordersOf k)
+  return waves.length
 }).exec 8 demoEnv

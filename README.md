@@ -237,6 +237,18 @@ def demo : IO Unit := do
 - **`DbFetch` programs run over the wire**: `f.execIO conn budget` interprets the same
   round-budgeted tree `runWith` interprets in memory, with the same proof discipline.
 
+`DbFetch` prices round trips in the type (`fetch` = 1, independent `seq` = `max`,
+data-dependent `bind` = `+`), and execution demands a budget plus a proof. That gives
+N+1 two doors and one wall: `fetchFor` batches a whole key set into one `IN (…)`
+round (grade 1), and `let ys ← for x in xs do body` loops per row with the **exact
+dynamic grade** `k * xs.length` in the type — for collections already in hand,
+proved at the door (`by decide` for literals, `omega` for computed budgets). The
+wall: `bind`'s continuation grade cannot mention a fetched value, so a per-row loop
+over just-fetched rows never elaborates. You can write N+1 if you mean it — over
+data you hold — and you cannot write it by accident. (The loop is a first-class
+`DbFetch` constructor, and its bodies are independent, so the pipelining PostgreSQL
+driver batches them into shared rounds — the declared grade is an upper bound.)
+
 **PostgreSQL** works the same way (`import LeanLinq.Driver.Postgres`, `Pg.connect` with
 a conninfo string; requires libpq — `brew install libpq` / `libpq-dev`): the driver
 rewrites the compiled `:name` placeholders to the wire's `$N` form and sends every

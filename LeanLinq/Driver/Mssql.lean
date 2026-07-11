@@ -244,5 +244,6 @@ where
     | _, _, .fetchCell sc => conn.queryCell sc ps
     | _, _, .seq g x => do Pure.pure ((← go g) (← go x))
     | _, _, .bind x k => do go (k (← go x))
+    | _, _, .forAll xs f => xs.mapM fun a => go (f a)
 
 end LeanLinq

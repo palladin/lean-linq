@@ -130,6 +130,15 @@ def bothTables : DbFetch TestCtx 1 (List (Values CustomersS) × List (Values Ord
   .seq (.map Prod.mk (.fetch (Query.from' (ts := TestCtx) customers)))
        (.fetch (Query.from' (ts := TestCtx) orders))
 
+/-- The shared `for … do` smoke: the per-row loop over an in-hand key
+list — exact grade `1 * 3 + 0 = 3`, one sequential fetch per key. -/
+def perRowLoop : DbFetch TestCtx 3 (List Nat) := fetch! {
+  let waves ← for k in ([1, 2, 3] : List Int) do
+    .fetch (Query.from' (ts := TestCtx) orders
+      |>.where' (fun o => o["CustomerId"] ==. SqlExpr.long k))
+  return waves.map (·.length)
+}
+
 /-- Compare a `DbFetch` smoke result against its in-memory interpretation. -/
 def checkSpenders (live : Nat × List (Values OrdersS)) : IO Bool := do
   match spenders.runWith ⟨seedEnv, seedParams, none⟩ with
@@ -154,6 +163,17 @@ def checkBothTables (live : List (Values CustomersS) × List (Values OrdersS)) :
         pure true
       else do
         IO.eprintln "DRIVER MISMATCH bothTables (DbFetch seq)"
+        pure false
+
+def checkPerRowLoop (live : List Nat) : IO Bool := do
+  match perRowLoop.runWith ⟨seedEnv, seedParams, none⟩ with
+  | .error e =>
+      IO.eprintln s!"EVAL ERROR perRowLoop (DbFetch for/do): {repr e}"
+      pure false
+  | .ok mem =>
+      if live == mem then pure true
+      else do
+        IO.eprintln s!"DRIVER MISMATCH perRowLoop (DbFetch for/do): {live} vs {mem}"
         pure false
 
 end TQ

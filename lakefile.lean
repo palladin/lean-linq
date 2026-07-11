@@ -89,6 +89,9 @@ package «lean-linq» where
 @[default_target]
 lean_lib LeanLinq
 
+-- default target so `lake build` (and CI) type-checks the demos — an
+-- undeclared demo file can silently rot otherwise
+@[default_target]
 lean_lib Playground
 
 /-- The native SQLite driver — a separate target so the core library stays
