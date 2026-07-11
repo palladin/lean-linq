@@ -12,12 +12,13 @@ open LeanLinq
 namespace TQ
 
 abbrev CustomersS : Schema :=
-  [("Id", .long), ("Age", .int), ("Name", .string), ("IsActive", .bool)]
+  [("Id", .long), ("Age", .null .int), ("Name", .null .string),
+   ("IsActive", .null .bool)]
 def customers : Table "customers" CustomersS := ⟨⟩
 
 abbrev ProductsS : Schema :=
-  [("Id", .long), ("ProductName", .string), ("Price", .decimal),
-   ("CreatedDate", .dateTime), ("UniqueId", .guid)]
+  [("Id", .long), ("ProductName", .string), ("Price", .null .decimal),
+   ("CreatedDate", .null .dateTime), ("UniqueId", .null .guid)]
 def products : Table "products" ProductsS := ⟨⟩
 
 abbrev OrdersS : Schema :=
@@ -37,10 +38,10 @@ abbrev TestCtx : Ctx := {
 the typed bindings the evaluator reads (`SqlType.interp` conventions:
 milli-unit decimals, normalized date-times, lower-case guids). -/
 def seedParams : ParamEnv TestCtx.params :=
-  .cons (some 18) <| .cons (some 65) <| .cons (some "John Doe") <|
-  .cons (some true) <| .cons (some true) <| .cons (some 100000) <|
-  .cons (some "2023-01-01 00:00:00") <|
-  .cons (some "11111111-1111-1111-1111-111111111111") .nil
+  .cons 18 <| .cons 65 <| .cons "John Doe" <|
+  .cons true <| .cons true <| .cons 100000 <|
+  .cons "2023-01-01 00:00:00" <|
+  .cons "11111111-1111-1111-1111-111111111111" .nil
 
 /-- The same values as SQL literal sources, for the integration runner's
 execution-only parameter inlining. -/
@@ -68,7 +69,8 @@ def renderCell : (t : SqlType) → Nullable t → String
 
 def cellsOf : {s : Schema} → Values s → List String
   | _, .nil => []
-  | _, .cons (t := t) c r => renderCell t c :: cellsOf r
+  | _, .cons (c := c) cell r =>
+      renderCell c.ty (SqlCol.toNullable cell) :: cellsOf r
 
 /-- Rows to one comparable line: cells comma-joined, rows pipe-joined;
 unordered results are compared after a lexicographic sort, mirroring the
@@ -82,7 +84,8 @@ def renderRows (ordered : Bool) (rows : List (List String)) : String :=
 order. -/
 def firstCellLe : {s : Schema} → Values s → Values s → Bool
   | _, .nil, .nil => true
-  | _, .cons (t := t) a _, .cons b _ => cellCmp t a b != .gt
+  | _, .cons (c := c) a _, .cons b _ =>
+      cellCmp c.ty (SqlCol.toNullable a) (SqlCol.toNullable b) != .gt
 
 /-- A table's rows ordered by first column — mirrors the harness's
 statement-verification `SELECT * FROM t ORDER BY Id`. -/
@@ -97,8 +100,8 @@ def sniffOrdered (c : CompiledSql) : Bool := (c.sql.splitOn " ORDER BY ").length
 comparing unordered result sets `Values`-to-`Values`. -/
 def rowLe : {s : Schema} → Values s → Values s → Bool
   | _, .nil, .nil => true
-  | _, .cons (t := t) a r, .cons b r' =>
-      match cellCmp t a b with
+  | _, .cons (c := c) a r, .cons b r' =>
+      match cellCmp c.ty (SqlCol.toNullable a) (SqlCol.toNullable b) with
       | .lt => true
       | .gt => false
       | .eq => rowLe r r'
@@ -111,7 +114,7 @@ erase it). Statement constructors capture their `HasTable` instance, the
 same capability pattern as `fromT`. -/
 inductive Registered where
   | query {s : Schema} (q : Query TestCtx s)
-  | scalar {t : SqlType} (sc : ScalarQuery TestCtx t)
+  | scalar {t : SqlType} {n : Bool} (sc : ScalarQuery TestCtx t n)
   | ins {n : String} {s : Schema} [inst : HasTable TestCtx.tables n s]
       (i : InsertStmt TestCtx n s)
   | upd {n : String} {s : Schema} [inst : HasTable TestCtx.tables n s]
@@ -145,7 +148,7 @@ def q (query : Query TestCtx s) : Case :=
     payload := .query query }
 
 /-- Register a scalar aggregate query: one row, one cell. -/
-def sq (sc : ScalarQuery TestCtx t) : Case :=
+def sq (sc : ScalarQuery TestCtx t n) : Case :=
   { compile := fun db => sc.toSql db
     expected := fun env =>
       match sc.run env seedParams with

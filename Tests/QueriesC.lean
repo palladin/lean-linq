@@ -455,7 +455,7 @@ def CComplexJoinWhereGroupByHavingOrderBySelect := (query! {
   orderBy (a.sum o["Amount"]).desc, (a.count).asc
   select ![c["Id"].as "CustomerId", c["Name"].as "CustomerName",
            (a.count).as "TotalOrders", (a.sum o["Amount"]).as "TotalSpent",
-           (a.sum o["Amount"] / a.count).as "AvgOrderValue"]
+           (a.sum o["Amount"] / (a.count).anyNull).as "AvgOrderValue"]
 } : Query TestCtx _)
 def CComplexLeftJoinWhereGroupByOrderBySelect := (query! {
   from c in customers

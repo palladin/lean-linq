@@ -144,7 +144,7 @@ def FromWhereAgeInSubquery := Query.from' (ts := TestCtx) customers
 def FromWhereAgeInSubqueryWithClosure := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["Age"].inQuery
       (Query.from' (ts := TestCtx) customers
-        |>.where' (fun x => x["Name"] ==. c["Name"] ++ "_VIP")
+        |>.where' (fun x => x["Name"] ==. c["Name"] ++ (SqlExpr.str "_VIP").anyNull)
         |>.select (fun x => ![x["Age"].as "Age"])))
 def FromSubquery :=
   (Query.from' (ts := TestCtx) customers
@@ -283,7 +283,7 @@ def ComplexJoinWhereGroupByHavingOrderBySelect := Query.from' (ts := TestCtx) cu
   |>.orderBy (fun r a => [(a.sum r["Amount"]).desc, (a.count).asc])
   |>.select (fun r a => ![r["Id"].as "CustomerId", r["Name"].as "CustomerName",
                           (a.count).as "TotalOrders", (a.sum r["Amount"]).as "TotalSpent",
-                          (a.sum r["Amount"] / a.count).as "AvgOrderValue"])
+                          (a.sum r["Amount"] / (a.count).anyNull).as "AvgOrderValue"])
 def ComplexLeftJoinWhereGroupByOrderBySelect := Query.from' (ts := TestCtx) customers
   |>.leftJoin orders (fun c o => c["Id"] ==. o["CustomerId"])
       (fun c o => ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age",

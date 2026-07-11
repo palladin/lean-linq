@@ -54,4 +54,15 @@ def cellText : (t : SqlType) → t.interp → String
   | .dateTime, s => s
   | .guid, g => g
 
+/-- Store a decoded wire cell into its column: a NULL arriving in a NOT
+NULL column is a protocol error — the driver refuses what the schema
+forbids. -/
+def cellFromWire (name : String) (c : SqlCol) (v : Nullable c.ty) :
+    IO c.interp :=
+  match c, v with
+  | ⟨_, true⟩, v => pure v
+  | ⟨_, false⟩, some x => pure x
+  | ⟨_, false⟩, none =>
+      throw (IO.userError s!"driver: NULL in NOT NULL column {name}")
+
 end LeanLinq.Driver

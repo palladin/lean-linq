@@ -12,25 +12,27 @@ The column name lives only in the index, so it flows in from the expected type
 or from `.as`-tagged cells; see the row-literal syntax below. -/
 inductive Row : Ctx → Schema → Type where
   | nil  : Row ts []
-  | cons : {name : String} → {t : SqlType} → {s : Schema} →
-      SqlExpr ts t → Row ts s → Row ts ((name, t) :: s)
+  | cons : {name : String} → {t : SqlType} → {nl : Bool} → {s : Schema} →
+      SqlExpr ts t nl → Row ts s → Row ts ((name, ⟨t, nl⟩) :: s)
 
 /-- A single named output column of a projection; built with `SqlExpr.as`,
-consumed by the row-literal syntax `[e₁.as "A", e₂.as "B"]`. -/
-structure Cell (ts : Ctx) (name : String) (t : SqlType) where
-  expr : SqlExpr ts t
+consumed by the row-literal syntax `[e₁.as "A", e₂.as "B"]`. The
+expression's nullability flag becomes the projected column's. -/
+structure Cell (ts : Ctx) (name : String) (t : SqlType) (nl : Bool) where
+  expr : SqlExpr ts t nl
 
 protected def Row.default : (s : Schema) → Row ts s
   | [] => .nil
-  | (_, _) :: s => .cons default (Row.default s)
+  | (_, ⟨_, _⟩) :: s => .cons default (Row.default s)
 
 instance : Inhabited (Row ts s) := ⟨Row.default s⟩
 
 /-- Name an expression as an output column: `c["Age"].as "Age"`. -/
-def SqlExpr.as (e : SqlExpr ts t) (name : String) : Cell ts name t := ⟨e⟩
+def SqlExpr.as (e : SqlExpr ts t nl) (name : String) : Cell ts name t nl := ⟨e⟩
 
 /-- Prepend a named cell to a row. Target of the row-literal syntax. -/
-def Row.consCell (c : Cell ts name t) (r : Row ts s) : Row ts ((name, t) :: s) :=
+def Row.consCell (c : Cell ts name t nl) (r : Row ts s) :
+    Row ts ((name, ⟨t, nl⟩) :: s) :=
   .cons c.expr r
 
 /-- Row literal: `![c["Name"].as "Name", c["Id"].as "Id"] : Row ts [("Name", _), ("Id", _)]`.
@@ -55,7 +57,7 @@ compiler renders the fields, the evaluator looks them up in an alias
 scope — so they walk the same instantiated trees. -/
 def Row.ofAlias (alias : String) : (s : Schema) → Row ts s
   | [] => .nil
-  | (name, t) :: s => .cons (.field t alias name) (Row.ofAlias alias s)
+  | (name, ⟨t, nl⟩) :: s => .cons (.field t nl alias name) (Row.ofAlias alias s)
 
 /-- Splice two rows; the natural result selector for `product`:
 `fun a b => a ++ b`. -/
@@ -75,18 +77,20 @@ type is always a literal `SqlType` and downstream coercions/operators fire
 reliably. A misspelled column fails at compile time with
 `failed to synthesize HasCol …`. -/
 
-class HasCol (s : Schema) (name : String) (t : outParam SqlType) where
-  getImpl : {ts : Ctx} → Row ts s → SqlExpr ts t
+class HasCol (s : Schema) (name : String) (t : outParam SqlType)
+    (nl : outParam Bool) where
+  getImpl : {ts : Ctx} → Row ts s → SqlExpr ts t nl
 
-instance (priority := high) : HasCol ((name, t) :: s) name t where
+instance (priority := high) : HasCol ((name, ⟨t, nl⟩) :: s) name t nl where
   getImpl | .cons e _ => e
 
-instance [c : HasCol s name t] : HasCol ((n', t') :: s) name t where
+instance [c : HasCol s name t nl] : HasCol ((n', c') :: s) name t nl where
   getImpl | .cons _ r => c.getImpl r
 
 /-- Column access by name: `r.col "Name"`. Prefer the bracket sugar
-`r["Name"]`. -/
-def Row.col (r : Row ts s) (name : String) [c : HasCol s name t] : SqlExpr ts t :=
+`r["Name"]`. The expression carries the column's declared nullability. -/
+def Row.col (r : Row ts s) (name : String) [c : HasCol s name t nl] :
+    SqlExpr ts t nl :=
   c.getImpl r
 
 /-- A fetched cell, ready to embed as a typed literal wherever an
@@ -94,19 +98,21 @@ expression is expected: `some x` embeds via `SqlLit`, NULL embeds as SQL
 NULL (comparisons with it are three-valued, exactly as the data would
 behave in SQL). Like other literals, it needs an expected type to land —
 put it on the right of `==.`/`!=.`. -/
-structure CellLit (t : SqlType) where
-  cell : Nullable t
+structure CellLit (c : SqlCol) where
+  cell : c.interp
 
-instance [SqlLit t] : Coe (CellLit t) (SqlExpr ts t) :=
-  ⟨fun c => match c.cell with
-    | some x => SqlLit.lit x
-    | none => .nullC t⟩
+def CellLit.toExpr [SqlLit t] : {nl : Bool} → CellLit ⟨t, nl⟩ → SqlExpr ts t nl
+  | false, ⟨x⟩ => SqlLit.lit x
+  | true, ⟨some x⟩ => .widen (SqlLit.lit x)
+  | true, ⟨none⟩ => .nullC t
+
+instance [SqlLit t] : Coe (CellLit ⟨t, nl⟩) (SqlExpr ts t nl) := ⟨CellLit.toExpr⟩
 
 /-- Cell access by name on fetched rows: `v.cellLit "Id"`. Prefer the
 bracket sugar `v["Id"]`. -/
-def Values.cellLit (v : Values s) (name : String) [c : HasCell s name t] :
-    CellLit t :=
-  ⟨c.get v⟩
+def Values.cellLit (v : Values s) (name : String) [i : HasCell s name c] :
+    CellLit c :=
+  ⟨i.get v⟩
 
 /-- Bracket sugar for column access: `c["Name"]` on staged rows (`Row` —
 a column *reference*), `p["Name"]` on fetched rows (`Values` — the cell
@@ -123,13 +129,39 @@ open Lean Elab Term Meta in
   let rTy ← whnf (← instantiateMVars (← inferType r))
   if rTy.getAppFn.isMVar then
     tryPostpone
-  if rTy.isAppOfArity ``LeanLinq.Values 1 then
-    elabTerm (← `(LeanLinq.Values.cellLit $(⟨stx[0]⟩) $(⟨stx[2]⟩))) expectedType?
-  else
-    elabTerm (← `(LeanLinq.Row.col $(⟨stx[0]⟩) $(⟨stx[2]⟩))) expectedType?
+  -- elaborate the lookup with NO expected type — the expected type would
+  -- pre-assign the nullability outParam and break resolution for strict
+  -- columns in nullable positions — then coerce into the expectation
+  -- (inserting `widen`/`CellLit` embedding as needed)
+  let e ←
+    if rTy.isAppOfArity ``LeanLinq.Values 1 then
+      elabTerm (← `(LeanLinq.Values.cellLit $(⟨stx[0]⟩) $(⟨stx[2]⟩))) none
+    else
+      elabTerm (← `(LeanLinq.Row.col $(⟨stx[0]⟩) $(⟨stx[2]⟩))) none
+  match expectedType? with
+  | none => return e
+  | some exp => do
+      -- a strict column in a nullable position widens; decided eagerly by
+      -- flag inspection, because the generic coercion machinery only
+      -- reports the mismatch after delaying past this elaborator
+      let eTy ← instantiateMVars (← inferType e)
+      let expW ← instantiateMVars (← whnf exp)
+      -- the column's own flag still undecided (schema pending, e.g. inside
+      -- a query! expansion): retry once instance search has resolved it,
+      -- lest the expected flag leak into the HasCol lookup
+      if eTy.isAppOfArity ``LeanLinq.SqlExpr 3 && (eTy.getArg! 2).isMVar then
+        tryPostpone
+      if eTy.isAppOfArity ``LeanLinq.SqlExpr 3 &&
+         expW.isAppOfArity ``LeanLinq.SqlExpr 3 &&
+         (eTy.getArg! 2).isConstOf ``Bool.false &&
+         (expW.getArg! 2).isConstOf ``Bool.true then
+        ensureHasType exp (← mkAppM ``LeanLinq.SqlExpr.widen #[e])
+      else
+        ensureHasType exp e
 
 /-- Positional column access. -/
-def Row.nth : {s : Schema} → Row ts s → (i : Fin s.length) → SqlExpr ts (s.get i).2
+def Row.nth : {s : Schema} → Row ts s → (i : Fin s.length) →
+    SqlExpr ts (s.get i).2.ty (s.get i).2.nullable
   | _, .nil,      i        => i.elim0
   | _, .cons e _, ⟨0, _⟩   => e
   | _, .cons _ r, ⟨i+1, h⟩ => r.nth ⟨i, Nat.lt_of_succ_lt_succ h⟩

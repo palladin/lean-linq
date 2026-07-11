@@ -16,7 +16,8 @@ never appear in the SQL text.
 import LeanLinq
 open LeanLinq
 
-abbrev CustomersS : Schema := [("Id", .int), ("Name", .string), ("Age", .int)]
+abbrev CustomersS : Schema :=          -- bare = NOT NULL; nullable is explicit
+  [("Id", .int), ("Name", .string), ("Age", .null .int)]
 def customers : Table "Customers" CustomersS := ⟨⟩
 
 abbrev MyDb : Ctx := { tables := [("Customers", CustomersS)] }
@@ -52,6 +53,18 @@ Ill-typed queries don't compile: a misspelled column name, comparing an `int` co
 type records the database context it is written against — its tables *and* its named
 parameters — and each reference is resolved by instance search (`HasTable`/`HasParam`) at
 elaboration time, the way columns are resolved by `HasCol`.
+
+**Nullability lives in the universe.** A schema entry is a column type *plus* its
+nullability, and **bare means NOT NULL** — `("Age", .int)` never holds NULL;
+NULL-capable columns say so: `("SignupDate", .null .dateTime)` (a deliberate,
+Kotlin/C#-style divergence from SQL's default). The flag flows: expressions carry it
+(`SqlExpr ts t n`), a `leftJoin`'s joined row is NULL-lifted *in its type*, aggregates
+are nullable (empty groups), `isNull` never is, and writing NULL into a NOT NULL
+column — `setNull`, or a nullable value in `.value` — is an elaboration error. The
+payoff is at the read side: fetched cells have **honest types** — `row.get "Name"` is
+a `String` when the schema says NOT NULL, an `Option String` only when it says
+`.null` — and the drivers reject a wire NULL in a NOT NULL column as the protocol
+error it is.
 
 **Scope**: lean-linq compiles queries to `CompiledSql` (SQL text + parameter bindings) for
 any driver to execute, and ships **native drivers for all three engines** — SQLite
@@ -130,7 +143,7 @@ keywords, hence the primes):
 
 ```lean
 abbrev OrdersS : Schema := [("OrderId", .int), ("CustomerId", .int), ("Amount", .int)]
-def orders : Table OrdersS := ⟨"Orders"⟩
+def orders : Table "Orders" OrdersS := ⟨⟩
 
 def report := Query.from' customers
   |>.where' (fun c => 18 <. c["Age"])
@@ -350,8 +363,11 @@ return `Bool`/`Prop`, so SQL needs its own).
 ## Design
 
 - `SqlType` universe; `SqlExpr : Ctx → SqlType → Type` GADT — ill-typed SQL is unrepresentable.
-- `Schema := List (String × SqlType)`; `Ctx := { tables : List (String × Schema), params :
-  List (String × SqlType) }`; `Row : Ctx → Schema → Type` heterogeneous tuple of expressions.
+- `Schema := List (String × SqlCol)` where `SqlCol = {ty : SqlType, nullable : Bool}`
+  (bare = NOT NULL); `Ctx := { tables : List (String × Schema), params : List (String ×
+  SqlCol) }`; `SqlExpr : Ctx → SqlType → Bool → Type` carries nullability as an index;
+  `Row : Ctx → Schema → Type` heterogeneous tuple of expressions; `Values` cells have
+  per-column honest types (`Option` only where `.null`).
 - Table names live at the type level (`Table (n : String) (s : Schema)`); queries are indexed
   by their ambient context, and `fromT`/`joinT`/`param` *store* the `HasTable`/`HasParam`
   membership instance resolved at elaboration — a query carries its referenced tables and

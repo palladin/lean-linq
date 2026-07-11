@@ -138,8 +138,9 @@ private def readCell (res : PgResult) (row col : UInt32) (t : SqlType) :
 private def readRow (res : PgResult) (row : UInt32) :
     (s : Schema) → (col : UInt32) → IO (Values s)
   | [], _ => pure .nil
-  | (_, t) :: rest, col => do
-      pure (.cons (← readCell res row col t) (← readRow res row rest (col + 1)))
+  | (nm, c) :: rest, col => do
+      pure (.cons (← Driver.cellFromWire nm c (← readCell res row col c.ty))
+        (← readRow res row rest (col + 1)))
 
 private def readRows (res : PgResult) (s : Schema) : IO (List (Values s)) := do
   let n ← ntuples res
@@ -157,7 +158,7 @@ def Conn.query (conn : Conn) (q : Query c s)
   let res ← execParamsRaw conn (toWire compiled) oids vals
   readRows res s
 
-def Conn.queryCell (conn : Conn) (sc : ScalarQuery c t)
+def Conn.queryCell (conn : Conn) (sc : ScalarQuery c t n)
     (ps : ParamEnv c.params := by exact .nil) : IO (Nullable t) := do
   let compiled := sc.toSql .postgres
   let (oids, vals) ← wireParams compiled ps.toCells

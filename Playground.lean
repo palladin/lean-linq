@@ -29,8 +29,8 @@ abbrev OrdersS : Schema :=
 def orders : Table "orders" OrdersS := ⟨⟩
 
 abbrev ProductsS : Schema :=
-  [("Id", .long), ("ProductName", .string), ("Price", .decimal),
-   ("CreatedDate", .dateTime), ("UniqueId", .guid)]
+  [("Id", .long), ("ProductName", .string), ("Price", .null .decimal),
+   ("CreatedDate", .null .dateTime), ("UniqueId", .null .guid)]
 def products : Table "products" ProductsS := ⟨⟩
 
 abbrev PlayCtx : Ctx :=
@@ -117,12 +117,12 @@ three engines against it). Table resolution happened at elaboration, so a
 
 def demoEnv : TableEnv PlayCtx.tables :=
   .cons  -- customers
-    [.cons (some 1) (.cons (some 25) (.cons (some "John Doe") (.cons (some true) .nil))),
-     .cons (some 2) (.cons (some 30) (.cons (some "Jane Smith") (.cons (some true) .nil))),
-     .cons (some 3) (.cons (some 16) (.cons (some "Minor User") (.cons (some false) .nil)))] <|
+    [.cons 1 (.cons 25 (.cons "John Doe" (.cons true .nil))),
+     .cons 2 (.cons 30 (.cons "Jane Smith" (.cons true .nil))),
+     .cons 3 (.cons 16 (.cons "Minor User" (.cons false .nil)))] <|
   .cons  -- orders
-    [.cons (some 1) (.cons (some 1) (.cons (some 1) (.cons (some 500) .nil))),
-     .cons (some 2) (.cons (some 2) (.cons (some 1) (.cons (some 300) .nil)))] <|
+    [.cons 1 (.cons 1 (.cons 1 (.cons 500 .nil))),
+     .cons 2 (.cons 2 (.cons 1 (.cons 300 .nil)))] <|
   .cons [] .nil  -- products
 
 #eval adults.run demoEnv    -- Except.ok [(2, "Jane Smith"), (1, "John Doe")]
@@ -191,7 +191,7 @@ def topSpendersDetail (n : Nat) :
     Query.from' (ts := PlayCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. s["Id"])
       |>.fetch
-      |>.map (fun orders => ((s.get "Name").getD "?", orders.length))
+      |>.map (fun orders => (s.get "Name", orders.length))
   return report
 }
 

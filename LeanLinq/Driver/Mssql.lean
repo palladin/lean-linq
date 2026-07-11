@@ -166,11 +166,11 @@ private def execRpc (conn : Conn) (compiled : CompiledSql)
 
 private def readRow (conn : Conn) : (s : Schema) → (col : UInt32) → IO (Values s)
   | [], _ => pure .nil
-  | (_, t) :: rest, col => do
-      let cell : Nullable t ←
+  | (nm, c) :: rest, col => do
+      let cell : Nullable c.ty ←
         if ← colIsNull conn col then pure none
-        else pure (Driver.parseCell t (← colText conn col))
-      pure (.cons cell (← readRow conn rest (col + 1)))
+        else pure (Driver.parseCell c.ty (← colText conn col))
+      pure (.cons (← Driver.cellFromWire nm c cell) (← readRow conn rest (col + 1)))
 
 /-- Drain any remaining rows/result sets after the interesting one. -/
 private partial def drain (conn : Conn) : IO Unit := do
@@ -195,7 +195,7 @@ def Conn.query (conn : Conn) (q : Query c s)
   execRpc conn (q.toSql .sqlServer) ps.toCells
   collectRows conn s
 
-def Conn.queryCell (conn : Conn) (sc : ScalarQuery c t)
+def Conn.queryCell (conn : Conn) (sc : ScalarQuery c t n)
     (ps : ParamEnv c.params := by exact .nil) : IO (Nullable t) := do
   execRpc conn (sc.toSql .sqlServer) ps.toCells
   if (← resultsNext conn) == 0 then pure none

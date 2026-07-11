@@ -66,8 +66,10 @@ def SpineQ.hasOrder : SpineQ ts g s → Bool
   | .order _ _ => true
   | .fromT (g := .plain) (inst := _) _ f => (f default).hasOrder
   | .fromT (g := .grouped) (inst := _) _ f => (f default).hasOrder
-  | .joinT (g := .plain) (inst := _) _ _ _ f => (f default).hasOrder
-  | .joinT (g := .grouped) (inst := _) _ _ _ f => (f default).hasOrder
+  | .joinT (g := .plain) (inst := _) _ _ f => (f default).hasOrder
+  | .joinT (g := .grouped) (inst := _) _ _ f => (f default).hasOrder
+  | .joinLeftT (g := .plain) (inst := _) _ _ f => (f default).hasOrder
+  | .joinLeftT (g := .grouped) (inst := _) _ _ f => (f default).hasOrder
   | .fromQ (g := .plain) _ f => (f default).hasOrder
   | .fromQ (g := .grouped) _ f => (f default).hasOrder
 
@@ -186,11 +188,17 @@ def SpineQ.compileSpine : SpineQ ts g s → StmtAcc → SelectK ts g s → Compi
       let item := s!"{← quote nm} {← quote alias}"
       (f (Row.ofAlias alias s₀)).compileSpine
         { acc with froms := acc.froms.push (false, item) } k
-  | .joinT (n := nm) (s := s₀) (inst := _) kind _ on' f, acc, k => do
+  | .joinT (n := nm) (s := s₀) (inst := _) _ on' f, acc, k => do
       let alias ← freshAlias
       let row := Row.ofAlias alias s₀
       let onStr ← (on' row).compile
-      let item := s!"{kind.token} {← quote nm} {← quote alias} ON {onStr}"
+      let item := s!"{JoinKind.inner.token} {← quote nm} {← quote alias} ON {onStr}"
+      (f row).compileSpine { acc with froms := acc.froms.push (true, item) } k
+  | .joinLeftT (n := nm) (s := s₀) (inst := _) _ on' f, acc, k => do
+      let alias ← freshAlias
+      let row := Row.ofAlias alias s₀.asNull
+      let onStr ← (on' row).compile
+      let item := s!"{JoinKind.left.token} {← quote nm} {← quote alias} ON {onStr}"
       (f row).compileSpine { acc with froms := acc.froms.push (true, item) } k
   | .fromQ (s := s₀) q f, acc, k => do
       let sub ← q.compileStmt
@@ -202,7 +210,7 @@ def SpineQ.compileSpine : SpineQ ts g s → StmtAcc → SelectK ts g s → Compi
 end
 
 /-- Compile a scalar aggregate query. -/
-def ScalarQuery.compile : ScalarQuery ts t → CompileM String
+def ScalarQuery.compile : ScalarQuery ts t n → CompileM String
   | .countQ sp => sp.compileSpine {} fun _ => pure ("COUNT(*)", "")
   | .aggQ op sp => sp.compileSpine {} fun r =>
       match r with
@@ -221,18 +229,20 @@ def Query.toSqlServer (q : Query ts s) : CompiledSql := q.toSql .sqlServer
 def Query.toPostgres (q : Query ts s) : CompiledSql := q.toSql .postgres
 
 /-- Compile a scalar query for the given dialect. -/
-def ScalarQuery.toSql (sq : ScalarQuery ts t) (db : DatabaseType := .sqlite) : CompiledSql :=
+def ScalarQuery.toSql (sq : ScalarQuery ts t n) (db : DatabaseType := .sqlite) : CompiledSql :=
   runCompile sq.compile db
 
 /-- `e IN (subquery)` — the subquery must project exactly one column of the
 same type. Stored as its staged actions (see `SubQuery`): compilation for
 `toSql`, evaluation for `run`. -/
-def SqlExpr.inQuery (e : SqlExpr ts t) (q : Query ts [(n, t)]) : SqlExpr ts .bool :=
-  .inSub e ⟨q.compileStmt, fun ee => (q.evalRows ee).map fun rows => rows.map fun | .cons c .nil => c⟩
+def SqlExpr.inQuery (e : SqlExpr ts t nf) (q : Query ts [(cn, ⟨t, m⟩)]) :
+    SqlExpr ts .bool true :=
+  .inSub e ⟨q.compileStmt, fun ee => (q.evalRows ee).map fun rows =>
+    rows.map fun | .cons cell .nil => SqlCol.toNullable cell⟩
 
 /-- Embed a scalar aggregate query as an expression:
 `c["Age"] >. (customers' |>.select … |>.avg).embed`. -/
-def ScalarQuery.embed (sq : ScalarQuery ts t) : SqlExpr ts t :=
+def ScalarQuery.embed (sq : ScalarQuery ts t n) : SqlExpr ts t true :=
   .scalarSub ⟨sq.compile, fun ee => (sq.evalCell ee).map fun c => [c]⟩
 
 end LeanLinq

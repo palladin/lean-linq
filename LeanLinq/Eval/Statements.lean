@@ -14,27 +14,34 @@ empty-alias marker row, exactly as the statement compiler renders them. -/
 namespace LeanLinq
 
 /-- Write a cell by column name (first match; type mismatch keeps the old
-value — unreachable for `HasCol`-checked statements). -/
+value — unreachable for `HasCol`-checked statements). A write boundary:
+NULL into a NOT NULL column is a loud error (unreachable through the
+flag-checked builders). -/
 private def Values.setCol (name : String) (t' : SqlType) (cell : Nullable t') :
-    {s : Schema} → Values s → Values s
-  | _, .nil => .nil
-  | _, .cons (name := n) (t := tc) c r =>
-      if n == name then
-        (if h : t' = tc then .cons (h ▸ cell) r else .cons c r)
-      else .cons c (r.setCol name t' cell)
+    {s : Schema} → Values s → Except EvalError (Values s)
+  | _, .nil => pure .nil
+  | _, .cons (name := nc) (c := cc) old r =>
+      if nc == name then
+        (if h : t' = cc.ty then do
+          pure (.cons (← SqlCol.ofNullable name cc (h ▸ cell)) r)
+        else pure (.cons old r))
+      else do pure (.cons old (← r.setCol name t' cell))
 
-/-- Build the inserted row in schema order: unmentioned columns are NULL. -/
+/-- Build the inserted row in schema order: an unmentioned NULL-capable
+column is NULL; an unmentioned NOT NULL column is a loud error — never a
+silent NULL. -/
 private def buildInsertRow (ee : EvalEnv ts)
-    (vs : List (String × ((u : SqlType) × SqlExpr ts u))) :
+    (vs : List (String × ((p : SqlType × Bool) × SqlExpr ts p.1 p.2))) :
     (s : Schema) → Except EvalError (Values s)
   | [] => pure .nil
-  | (n, t) :: rest => do
-      let cell : Nullable t ←
-        match vs.find? (·.1 == n) with
-        | some (_, ⟨u, e⟩) =>
-            if h : u = t then do pure (h ▸ (← e.evalG ee [([] : Scope)]))
-            else pure none
-        | none => pure none
+  | (nm, c) :: rest => do
+      let cell ←
+        match vs.find? (·.1 == nm) with
+        | some (_, ⟨(u, _), e⟩) =>
+            if h : u = c.ty then
+              do SqlCol.ofNullable nm c (h ▸ (← e.evalG ee [([] : Scope)]))
+            else SqlCol.ofNullable nm c none
+        | none => SqlCol.ofNullable nm c none
       pure (.cons cell (← buildInsertRow ee vs rest))
 
 def InsertStmt.apply (i : InsertStmt ts n s) [inst : HasTable ts.tables n s]
@@ -57,7 +64,7 @@ def UpdateStmt.apply (u : UpdateStmt ts n s) [inst : HasTable ts.tables n s]
       -- every SET expression sees the pre-update row (SQL semantics)
       u.sets.foldlM (init := v) fun acc (nm, f) =>
         match f marker with
-        | ⟨t', e⟩ => do pure (acc.setCol nm t' (← e.evalG ee [sc]))
+        | ⟨(t', _), e⟩ => do acc.setCol nm t' (← e.evalG ee [sc])
     else pure v
   pure (inst.set env rows)
 

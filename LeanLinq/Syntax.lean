@@ -86,10 +86,10 @@ private def foldLeading (acc : Term) (c : Syntax) : MacroM Term := do
   if c.isOfKind ``sqlFrom then
     `(LeanLinq.QuerySource.bind $(⟨c[3]⟩) (fun $(⟨c[1]⟩) => $acc))
   else if c.isOfKind ``sqlJoin then
-    `(LeanLinq.SpineQ.joinT LeanLinq.JoinKind.inner $(⟨c[3]⟩)
+    `(LeanLinq.SpineQ.joinT $(⟨c[3]⟩)
         (fun $(⟨c[1]⟩) => $(⟨c[5]⟩)) (fun $(⟨c[1]⟩) => $acc))
   else if c.isOfKind ``sqlLeftJoin then
-    `(LeanLinq.SpineQ.joinT LeanLinq.JoinKind.left $(⟨c[3]⟩)
+    `(LeanLinq.SpineQ.joinLeftT $(⟨c[3]⟩)
         (fun $(⟨c[1]⟩) => $(⟨c[5]⟩)) (fun $(⟨c[1]⟩) => $acc))
   else if c.isOfKind ``sqlWhere then
     `(LeanLinq.SpineQ.guard $(⟨c[1]⟩) $acc)

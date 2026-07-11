@@ -33,6 +33,19 @@ eliminated them), and exceptional conditions are a separate, explicit
 channel (`EvalError`). -/
 abbrev Nullable (t : SqlType) : Type := Option t.interp
 
+/-- What a **cell** of this column holds: NULL-capable columns store
+`Option`, NOT NULL columns store the payload directly — the honest type
+(`s.get "Name" : String` when the schema says so). -/
+@[reducible] def SqlCol.interp : SqlCol → Type
+  | ⟨t, true⟩ => Option t.interp
+  | ⟨t, false⟩ => t.interp
+
+/-- Lift a cell to the uniform `Nullable` view (the evaluator's internal
+currency): a strict cell is `some`, a nullable cell is itself. -/
+@[reducible] def SqlCol.toNullable : {c : SqlCol} → c.interp → Nullable c.ty
+  | ⟨_, true⟩, cell => cell
+  | ⟨_, false⟩, cell => some cell
+
 /-- Exceptional conditions during evaluation — the statement-aborting
 channel, kept separate from SQL NULL (engines abort on these; they do not
 produce NULL cells). `internal` marks states unreachable for queries built
@@ -44,17 +57,28 @@ inductive EvalError where
   | internal (msg : String)
   deriving Repr, BEq
 
-/-- A heterogeneous tuple of nullable runtime values indexed by a schema —
-the value-level mirror of `Row` (`Option` = NULL). -/
-inductive Values : List (String × SqlType) → Type where
-  | nil : Values []
-  | cons : {name : String} → {t : SqlType} → {s : List (String × SqlType)} →
-      Nullable t → Values s → Values ((name, t) :: s)
+/-- Store a `Nullable` computation result into a cell of this column:
+`none` into a NOT NULL column is the loud boundary error (a bug or a
+missing INSERT value), never a silent NULL. -/
+def SqlCol.ofNullable (name : String) :
+    (c : SqlCol) → Nullable c.ty → Except EvalError c.interp
+  | ⟨_, true⟩, v => .ok v
+  | ⟨_, false⟩, some x => .ok x
+  | ⟨_, false⟩, none => .error (.internal s!"NULL in NOT NULL column {name}")
 
-/-- The all-NULL row (LEFT JOIN padding). -/
-def Values.nulls : (s : List (String × SqlType)) → Values s
+/-- A heterogeneous tuple of runtime cells indexed by a schema — the
+value-level mirror of `Row`. Each cell's type is honest to its column:
+`Option` only where the column is NULL-capable. -/
+inductive Values : List (String × SqlCol) → Type where
+  | nil : Values []
+  | cons : {name : String} → {c : SqlCol} → {s : List (String × SqlCol)} →
+      c.interp → Values s → Values ((name, c) :: s)
+
+/-- The all-NULL row over the NULL-lifted schema (LEFT JOIN padding) —
+constructible only because `asNull` makes every column NULL-capable. -/
+def Values.nulls : (s : Schema) → Values s.asNull
   | [] => .nil
-  | (_, _) :: s => .cons none (Values.nulls s)
+  | (_, _) :: s => .cons (c := ⟨_, true⟩) none (Values.nulls s)
 
 /-! ## Comparing cells
 
@@ -83,9 +107,9 @@ def cellCmp (t : SqlType) : Nullable t → Nullable t → Ordering
 
 def cellBeq (t : SqlType) (a b : Nullable t) : Bool := cellCmp t a b == .eq
 
-def Values.beq : {s : List (String × SqlType)} → Values s → Values s → Bool
+def Values.beq : {s : List (String × SqlCol)} → Values s → Values s → Bool
   | _, .nil, .nil => true
-  | _, .cons (t := t) a r, .cons b r' => cellBeq t a b && r.beq r'
+  | _, .cons (c := c) a r, .cons b r' => cellBeq c.ty (SqlCol.toNullable a) (SqlCol.toNullable b) && r.beq r'
 
 instance : BEq (Values s) := ⟨Values.beq⟩
 
@@ -110,28 +134,30 @@ the two are never conflated. -/
 def Values.get? : {s : Schema} → Values s →
     (name : String) → (t : SqlType) → Option (Nullable t)
   | _, .nil, _, _ => none
-  | _, .cons (name := n') (t := t') c r, name, t =>
-      if n' == name then (if h : t' = t then some (h ▸ c) else none)
+  | _, .cons (name := n') (c := c') cell r, name, t =>
+      if n' == name then
+        (if h : c'.ty = t then some (h ▸ SqlCol.toNullable cell) else none)
       else r.get? name t
 
-/-- `HasCell s name t` resolves a column name against the schema for
+/-- `HasCell s name c` resolves a column name against the schema for
 *value* rows, by the same literal-list instance search as `HasCol` — a
-misspelled column on fetched data fails at compile time. -/
-class HasCell (s : Schema) (name : String) (t : outParam SqlType) where
-  get : Values s → Nullable t
+misspelled column on fetched data fails at compile time, and the cell type
+is honest to the column's declared nullability. -/
+class HasCell (s : Schema) (name : String) (c : outParam SqlCol) where
+  get : Values s → c.interp
 
-instance (priority := high) : HasCell ((name, t) :: s) name t where
+instance (priority := high) : HasCell ((name, c) :: s) name c where
   get | .cons cell _ => cell
 
-instance [c : HasCell s name t] : HasCell ((n', t') :: s) name t where
-  get | .cons _ v => c.get v
+instance [i : HasCell s name c] : HasCell ((n', c') :: s) name c where
+  get | .cons _ v => i.get v
 
-/-- Typed cell access on a fetched row: `v.get "Name" : Nullable t`, the
-column resolved against the schema at compile time (contrast `get?`, the
-runtime string lookup). -/
-def Values.get (v : Values s) (name : String) [c : HasCell s name t] :
-    Nullable t :=
-  c.get v
+/-- Typed cell access on a fetched row: `v.get "Name"` — a `String` when
+the schema says NOT NULL, an `Option String` when it says `.null`
+(contrast `get?`, the runtime string lookup). -/
+def Values.get (v : Values s) (name : String) [i : HasCell s name c] :
+    c.interp :=
+  i.get v
 
 /-- The rows in scope during evaluation: source alias → its current value
 row (the value-level counterpart of the compiler's `Row.ofAlias` field
@@ -153,31 +179,32 @@ inductive TableEnv : List (String × Schema) → Type where
 
 /-- Typed parameter bindings: one (nullable) value per parameter entry of
 the context — the `TableEnv` of parameters. -/
-inductive ParamEnv : List (String × SqlType) → Type where
+inductive ParamEnv : List (String × SqlCol) → Type where
   | nil : ParamEnv []
-  | cons : {n : String} → {t : SqlType} → {ps : List (String × SqlType)} →
-      Nullable t → ParamEnv ps → ParamEnv ((n, t) :: ps)
+  | cons : {n : String} → {c : SqlCol} → {ps : List (String × SqlCol)} →
+      c.interp → ParamEnv ps → ParamEnv ((n, c) :: ps)
 
 /-- Membership of a named parameter in the context's parameter list, by
 instance search — the `HasCol`/`HasTable` idiom once more. The evidence *is*
 the accessor: resolving a parameter at elaboration time means already
 knowing how to read its value from any `ParamEnv ps`, so an unbound
 parameter is untypeable rather than silently NULL. -/
-class HasParam (ps : List (String × SqlType)) (n : String) (t : outParam SqlType) where
-  get : ParamEnv ps → Nullable t
+class HasParam (ps : List (String × SqlCol)) (n : String) (c : outParam SqlCol) where
+  get : ParamEnv ps → c.interp
 
-instance (priority := high) : HasParam ((n, t) :: ps) n t where
+instance (priority := high) : HasParam ((n, c) :: ps) n c where
   get | .cons v _ => v
 
-instance [h : HasParam ps n t] : HasParam ((n', t') :: ps) n t where
+instance [h : HasParam ps n c] : HasParam ((n', c') :: ps) n c where
   get | .cons _ env => h.get env
 
 /-- Names zipped with typed cells — what a driver walks to bind the
 user-named parameters natively. -/
-def ParamEnv.toCells : {ps : List (String × SqlType)} → ParamEnv ps →
+def ParamEnv.toCells : {ps : List (String × SqlCol)} → ParamEnv ps →
     List (String × ((t : SqlType) × Nullable t))
   | _, .nil => []
-  | _, .cons (n := n) (t := t) v rest => (n, ⟨t, v⟩) :: rest.toCells
+  | _, .cons (n := n) (c := c) v rest =>
+      (n, ⟨c.ty, SqlCol.toNullable v⟩) :: rest.toCells
 
 /-- Everything evaluation reads besides the query itself: the typed tables,
 the typed parameter bindings, and the (optional) current timestamp. -/
@@ -319,9 +346,10 @@ private def cellRepr : (t : SqlType) → Nullable t → String
   | .dateTime, some s => s.quote
   | .guid, some g => g.quote
 
-private def Values.reprCells : {s : List (String × SqlType)} → Values s → List String
+private def Values.reprCells : {s : List (String × SqlCol)} → Values s → List String
   | _, .nil => []
-  | _, .cons (t := t) c r => cellRepr t c :: r.reprCells
+  | _, .cons (c := c) cell r =>
+      cellRepr c.ty (SqlCol.toNullable cell) :: r.reprCells
 
 instance : Repr (Values s) :=
   ⟨fun v _ => .text ("(" ++ String.intercalate ", " v.reprCells ++ ")")⟩

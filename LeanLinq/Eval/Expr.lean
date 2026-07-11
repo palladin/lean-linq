@@ -132,7 +132,7 @@ mutual
 
 /-- Evaluate an expression over the scopes of the current group
 (singleton = ungrouped row context). -/
-def SqlExpr.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts t →
+def SqlExpr.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts t n →
     Except EvalError (Nullable t)
   | _, .intC i => pure (some i)
   | _, .longC i => pure (some i)
@@ -143,8 +143,9 @@ def SqlExpr.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts t →
   | _, .dateTimeC s => pure (some (normDateTime s))
   | _, .guidC g => pure (some g.toLower)
   | _, .nullC _ => pure none
-  | _, .param (inst := i) _ => pure (i.get ee.params)
-  | scs, .field t' alias name =>
+  | _, .paramE (inst := i) _ => pure (SqlCol.toNullable (i.get ee.params))
+  | scs, .widen e => e.evalG ee scs
+  | scs, .field t' _ alias name =>
       match scs.head? with
       | none => .error (.internal s!"no row in scope for {alias}.{name}")
       | some sc =>
@@ -239,18 +240,23 @@ def SqlExpr.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts t →
           | .year => dateDiffYears x y))
 
 def SqlExpr.evalGList (ee : EvalEnv ts) (scs : List Scope) :
-    List ((u : SqlType) × SqlExpr ts u) →
+    List ((p : SqlType × Bool) × SqlExpr ts p.1 p.2) →
     Except EvalError (List ((u : SqlType) × Nullable u))
   | [] => pure []
-  | ⟨u, e⟩ :: es => do
+  | ⟨(u, _), e⟩ :: es => do
       pure (⟨u, ← e.evalG ee scs⟩ :: (← SqlExpr.evalGList ee scs es))
 
 end
 
-/-- Evaluate every cell of a projected row. -/
+/-- Evaluate every cell of a projected row — the construction boundary
+where `Nullable` computation results become honest cells: a NOT NULL
+column receiving `none` is a loud internal error, never a silent NULL
+(unreachable through the public surface: the flag arithmetic guarantees a
+strict projection evaluates non-NULL). -/
 def Row.evalRow (ee : EvalEnv ts) (scs : List Scope) :
     {s : Schema} → Row ts s → Except EvalError (Values s)
   | _, .nil => pure .nil
-  | _, .cons e r => do pure (.cons (← e.evalG ee scs) (← r.evalRow ee scs))
+  | _, .cons (name := nm) e r => do
+      pure (.cons (← SqlCol.ofNullable nm _ (← e.evalG ee scs)) (← r.evalRow ee scs))
 
 end LeanLinq

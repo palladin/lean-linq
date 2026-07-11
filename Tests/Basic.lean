@@ -109,8 +109,8 @@ def exLinqSub := (query! {
 /-! ## Executable semantics: `Query.run` kernel-evaluates too. -/
 
 def demoEnv : TableEnv BasicCtx.tables :=
-  .cons [.cons (some 1) (.cons (some "Nick") (.cons (some 30) .nil)),
-         .cons (some 2) (.cons (some "Ada") (.cons (some 17) .nil))] <|
+  .cons [.cons 1 (.cons "Nick" (.cons 30 .nil)),
+         .cons 2 (.cons "Ada" (.cons 17 .nil))] <|
   .cons [] .nil
 
 #guard ((Query.from' (ts := BasicCtx) customers
@@ -197,6 +197,15 @@ def perRowBounded : DbFetch BasicCtx 4 (List Nat) := fetch! {
 
 #guard (perRowBounded.exec 4 demoEnv |>.toOption) == some [0, 0]
 
+/-! ## Nullability in the universe: honest cells, lifted joins. -/
+
+-- the schema's word is law: NOT NULL columns read bare, nullable read Option
+example (v : Values CustomersS) : String := v.get "Name"
+example (v : Values [("X", .null .int)]) : Option Int := v.get "X"
+-- LEFT JOIN lifts the joined row's columns to nullable, in the type
+example (o : Row BasicCtx OrdersS.asNull) : SqlExpr BasicCtx .int true :=
+  o["OrderId"]
+
 /-! ## Negative tests: these must NOT elaborate. -/
 
 #check_failure fun (c : Row BasicCtx CustomersS) => c["Nmae"]             -- misspelled column
@@ -219,6 +228,11 @@ def perRowBounded : DbFetch BasicCtx 4 (List Nat) := fetch! {
 -- a symbolic loop under a *fixed* budget leaves a free variable in the
 -- obligation (`1 * ids.length + 0 ≤ 8`) — no proof, no run
 #check_failure fun (ids : List Int) => (perRowAll ids).exec 8 demoEnv
+-- NULL into a NOT NULL column is untypeable — setNull demands a
+-- NULL-capable column, and a nullable value does not fit a strict one
+#check_failure (customers.update (ts := BasicCtx) |>.setNull "Id")
+#check_failure (customers.insert (ts := BasicCtx)
+  |>.value "Id" ((SqlExpr.int 1).anyNull))
 -- under-budgeting a closed loop is caught the same way: grade 2 > 1
 #check_failure ((perRowAll [1, 2]).exec 1 demoEnv)
 -- an *unbounded* fetch gives the loop no refinement to fuse with — no

@@ -1,4 +1,5 @@
 import LeanLinq
+import LeanLinq.Driver.TextCell
 
 /-! # Native SQLite driver
 
@@ -140,8 +141,9 @@ private def readCell (st : Stmt) (i : UInt32) : (t : SqlType) → IO (Nullable t
 
 private def readRow (st : Stmt) : (s : Schema) → (i : UInt32) → IO (Values s)
   | [], _ => pure .nil
-  | (_, t) :: rest, i => do
-      pure (.cons (← readCell st i t) (← readRow st rest (i + 1)))
+  | (nm, c) :: rest, i => do
+      pure (.cons (← Driver.cellFromWire nm c (← readCell st i c.ty))
+        (← readRow st rest (i + 1)))
 
 private def collectRows (st : Stmt) (s : Schema) : IO (List (Values s)) := do
   let mut rows := #[]
@@ -163,7 +165,7 @@ def Conn.query (conn : Conn) (q : Query c s)
   collectRows st s
 
 /-- Execute a scalar aggregate query: one row, one cell (no row = NULL). -/
-def Conn.queryCell (conn : Conn) (sc : ScalarQuery c t)
+def Conn.queryCell (conn : Conn) (sc : ScalarQuery c t n)
     (ps : ParamEnv c.params := by exact .nil) : IO (Nullable t) := do
   let compiled := sc.toSql .sqlite
   let st ← prepareRaw conn compiled.sql

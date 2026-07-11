@@ -31,81 +31,138 @@ inductive Dir where
   | asc | desc
   deriving DecidableEq, Repr
 
-/-- Intrinsically-typed SQL expressions: `SqlExpr ts t` can only be built
-from operations valid for `t`, so ill-typed SQL is unrepresentable. The
-first index is the ambient *table context* — fixed across a whole query — so
-the tables referenced by any embedded subquery are `HasTable`-checked
-against the same context as the query it appears in. Numeric operators are
-constrained at the notation layer (`Add`/`Sub`/… instances for the numeric
-types only); the raw constructors are internal.
+/-- Intrinsically-typed SQL expressions: `SqlExpr ts t n` can only be built
+from operations valid for `t`, so ill-typed SQL is unrepresentable — and the
+second index `n` tracks **nullability**, flowing by construction: literals
+are never NULL, column references carry their declared flag, operators OR
+their operands' flags (SQL's NULL propagation), aggregates may be NULL
+(empty group), `isNull` is never NULL. The context index `ts` is fixed
+across a whole query, so the tables referenced by any embedded subquery are
+`HasTable`-checked against the same context. Numeric operators are
+constrained at the notation layer; the raw constructors are internal.
 
 Subqueries (`inSub`/`scalarSub`) are stored as staged `SubQuery` actions,
 not ASTs — see `SubQuery` for the positivity story. Construct them with
 `SqlExpr.inQuery`/`ScalarQuery.embed` (defined with the compiler). -/
-inductive SqlExpr : Ctx → SqlType → Type where
-  -- literals (compiled to auto-named parameters, never inlined)
-  | intC (i : Int) : SqlExpr ts .int
-  | longC (i : Int) : SqlExpr ts .long
-  | doubleC (f : Float) : SqlExpr ts .double
-  | decimalC (digits : String) : SqlExpr ts .decimal
-  | stringC (s : String) : SqlExpr ts .string
-  | boolC (b : Bool) : SqlExpr ts .bool
-  | dateTimeC (iso : String) : SqlExpr ts .dateTime
-  | guidC (g : String) : SqlExpr ts .guid
-  | nullC (t : SqlType) : SqlExpr ts t
+inductive SqlExpr : Ctx → SqlType → Bool → Type where
+  -- literals (compiled to auto-named parameters, never inlined; never NULL)
+  | intC (i : Int) : SqlExpr ts .int false
+  | longC (i : Int) : SqlExpr ts .long false
+  | doubleC (f : Float) : SqlExpr ts .double false
+  | decimalC (digits : String) : SqlExpr ts .decimal false
+  | stringC (s : String) : SqlExpr ts .string false
+  | boolC (b : Bool) : SqlExpr ts .bool false
+  | dateTimeC (iso : String) : SqlExpr ts .dateTime false
+  | guidC (g : String) : SqlExpr ts .guid false
+  | nullC (t : SqlType) : SqlExpr ts t true
   -- user-named parameter: membership in the context's parameter list is
   -- established here (`HasParam`) and the resolved accessor is stored in
-  -- the node — an unbound parameter is untypeable, and its type comes from
-  -- the context rather than an annotation
-  | param (name : String) {t : SqlType} [inst : HasParam ts.params name t] : SqlExpr ts t
-  -- column reference (empty alias renders as a bare column name)
-  | field (t : SqlType) (alias name : String) : SqlExpr ts t
-  -- operators
-  | arith (op : ArithOp) : SqlExpr ts t → SqlExpr ts t → SqlExpr ts t
-  | concat : SqlExpr ts .string → SqlExpr ts .string → SqlExpr ts .string
-  | cmp (op : CmpOp) : SqlExpr ts t → SqlExpr ts t → SqlExpr ts .bool
-  | and : SqlExpr ts .bool → SqlExpr ts .bool → SqlExpr ts .bool
-  | or : SqlExpr ts .bool → SqlExpr ts .bool → SqlExpr ts .bool
-  | not : SqlExpr ts .bool → SqlExpr ts .bool
-  | isNull : SqlExpr ts t → SqlExpr ts .bool
-  | isNotNull : SqlExpr ts t → SqlExpr ts .bool
-  | like : SqlExpr ts .string → SqlExpr ts .string → SqlExpr ts .bool
+  -- the node — an unbound parameter is untypeable, and both its type and
+  -- its nullability come from the context declaration
+  | paramE (name : String) {pt : SqlType} {pn : Bool}
+      [inst : HasParam ts.params name ⟨pt, pn⟩] : SqlExpr ts pt pn
+  -- column reference with its declared nullability (empty alias renders as
+  -- a bare column name)
+  | field (t : SqlType) (nl : Bool) (alias name : String) : SqlExpr ts t nl
+  -- the strict→nullable subtyping node (`Coe` inserts it); compiler and
+  -- evaluator treat it as identity
+  | widen : SqlExpr ts t false → SqlExpr ts t true
+  -- operators: flags OR (SQL NULL propagation)
+  | arith (op : ArithOp) : SqlExpr ts t n → SqlExpr ts t n → SqlExpr ts t n
+  -- text/comparison/branch operators take operands at the nullable flag
+  -- (strict operands widen via coercion): `String`/`Bool` literals have no
+  -- default-instance channel, so a free flag metavariable on an operand
+  -- would strand elaboration — conservative-nullable keeps every position
+  -- concrete. Numeric `arith` keeps exact OR-flags (numerals default).
+  | concat : SqlExpr ts .string n → SqlExpr ts .string n → SqlExpr ts .string n
+  | cmp (op : CmpOp) : SqlExpr ts t true → SqlExpr ts t true → SqlExpr ts .bool true
+  | and : SqlExpr ts .bool n₁ → SqlExpr ts .bool n₂ → SqlExpr ts .bool (n₁ || n₂)
+  | or : SqlExpr ts .bool n₁ → SqlExpr ts .bool n₂ → SqlExpr ts .bool (n₁ || n₂)
+  | not : SqlExpr ts .bool n → SqlExpr ts .bool n
+  -- NULL tests accept any operand flag and are themselves never NULL
+  | isNull : SqlExpr ts t n → SqlExpr ts .bool false
+  | isNotNull : SqlExpr ts t n → SqlExpr ts .bool false
+  | like : SqlExpr ts .string true → SqlExpr ts .string true → SqlExpr ts .bool true
   -- IN over a value list. Stored as Σ-packed elements because the kernel
-  -- rejects nested `List (SqlExpr ts t)` with a local index; the homogeneous
-  -- surface is `SqlExpr.inValues`.
-  | inList : SqlExpr ts t → List ((u : SqlType) × SqlExpr ts u) → SqlExpr ts .bool
-  | inSub : SqlExpr ts t → SubQuery ts t → SqlExpr ts .bool
-  | scalarSub : SubQuery ts t → SqlExpr ts t
-  | caseWhen : SqlExpr ts .bool → SqlExpr ts t → SqlExpr ts t → SqlExpr ts t
-  -- aggregates (meaningful in grouped selects / HAVING / scalar queries)
-  | aggE (op : AggOp) : SqlExpr ts t → SqlExpr ts t
-  | countAll : SqlExpr ts .int
-  -- functions
-  | abs : SqlExpr ts t → SqlExpr ts t
-  | round : SqlExpr ts t → Int → SqlExpr ts t
-  | ceiling : SqlExpr ts t → SqlExpr ts t
-  | floor : SqlExpr ts t → SqlExpr ts t
-  | substring : SqlExpr ts .string → Int → Int → SqlExpr ts .string
-  | upper : SqlExpr ts .string → SqlExpr ts .string
-  | lower : SqlExpr ts .string → SqlExpr ts .string
-  | trim : SqlExpr ts .string → SqlExpr ts .string
-  | length : SqlExpr ts .string → SqlExpr ts .int
-  | now : SqlExpr ts .dateTime
-  | datePart (u : DateUnit) : SqlExpr ts .dateTime → SqlExpr ts .int
-  | dateAdd (u : DateUnit) : SqlExpr ts .dateTime → Int → SqlExpr ts .dateTime
-  | dateDiff (u : DateUnit) : SqlExpr ts .dateTime → SqlExpr ts .dateTime → SqlExpr ts .int
+  -- rejects nested `List (SqlExpr ts t n)` with a local index; the
+  -- homogeneous surface is `SqlExpr.inValues`. Conservatively nullable
+  -- (element flags are erased by the packing).
+  | inList : SqlExpr ts t n → List ((p : SqlType × Bool) × SqlExpr ts p.1 p.2) →
+      SqlExpr ts .bool true
+  | inSub : SqlExpr ts t n → SubQuery ts t → SqlExpr ts .bool true
+  -- a scalar subquery may be empty ⇒ NULL
+  | scalarSub : SubQuery ts t → SqlExpr ts t true
+  | caseWhen : SqlExpr ts .bool nc → SqlExpr ts t true → SqlExpr ts t true →
+      SqlExpr ts t true
+  -- aggregates (meaningful in grouped selects / HAVING / scalar queries):
+  -- SUM/AVG/MIN/MAX over an empty group are NULL; COUNT never is
+  | aggE (op : AggOp) : SqlExpr ts t n → SqlExpr ts t true
+  | countAll : SqlExpr ts .int false
+  -- functions: propagate their operands' flags
+  | abs : SqlExpr ts t n → SqlExpr ts t n
+  | round : SqlExpr ts t n → Int → SqlExpr ts t n
+  | ceiling : SqlExpr ts t n → SqlExpr ts t n
+  | floor : SqlExpr ts t n → SqlExpr ts t n
+  | substring : SqlExpr ts .string n → Int → Int → SqlExpr ts .string n
+  | upper : SqlExpr ts .string n → SqlExpr ts .string n
+  | lower : SqlExpr ts .string n → SqlExpr ts .string n
+  | trim : SqlExpr ts .string n → SqlExpr ts .string n
+  | length : SqlExpr ts .string n → SqlExpr ts .int n
+  | now : SqlExpr ts .dateTime false
+  | datePart (u : DateUnit) : SqlExpr ts .dateTime n → SqlExpr ts .int n
+  | dateAdd (u : DateUnit) : SqlExpr ts .dateTime n → Int → SqlExpr ts .dateTime n
+  | dateDiff (u : DateUnit) : SqlExpr ts .dateTime n₁ → SqlExpr ts .dateTime n₂ →
+      SqlExpr ts .int (n₁ || n₂)
 
-instance : Inhabited (SqlExpr ts t) := ⟨.field t "" ""⟩
+instance : Inhabited (SqlExpr ts t n) := ⟨.field t n "" ""⟩
+
+/-- Strict expressions embed into nullable positions (`widen` is identity
+at compile time and run time). -/
+instance : Coe (SqlExpr ts t false) (SqlExpr ts t true) := ⟨.widen⟩
+
+/-- Evidence that an expression of flag `ne` fits a position of flag
+`nl`, carrying the transport (identity or `widen`). Strict fits anywhere;
+nullable fits only nullable — so a NULL-capable value into a NOT NULL
+column has **no instance** and fails at elaboration. The strict instances
+are high priority: an undetermined literal flag resolves to strict. -/
+class FlagFits (ne nl : Bool) where
+  fit : {ts : Ctx} → {t : SqlType} → SqlExpr ts t ne → SqlExpr ts t nl
+
+instance : FlagFits true true := ⟨id⟩
+-- default instances (an expression flag nothing else determines resolves
+-- late): identity-at-strict outranks widening
+@[default_instance 1100] instance : FlagFits false false := ⟨id⟩
+@[default_instance] instance : FlagFits false true := ⟨.widen⟩
+
+/-- Reference a declared parameter, **fitted to the position**: the
+declared flag (from the context) transports to the expected one — a
+strict parameter widens into nullable positions, a nullable parameter
+into a strict position fails. Both flags are concrete at resolution
+(declaration + expectation), so this is order-safe. -/
+def SqlExpr.param (name : String) {pt : SqlType} {pn m : Bool}
+    [HasParam ts.params name ⟨pt, pn⟩] [fits : FlagFits pn m] :
+    SqlExpr ts pt m :=
+  fits.fit (.paramE name)
+
+/-- Forget precision: view any expression at the nullable flag (identity
+when already nullable, `widen` otherwise) — for storage positions that fix
+the flag, e.g. HAVING slots. -/
+def SqlExpr.anyNull : {n : Bool} → SqlExpr ts t n → SqlExpr ts t true
+  | true, e => e
+  | false, e => .widen e
 
 /-- Explicit literal constructors, for positions where the expected type is
-not yet known and coercions cannot fire (e.g. a literal on the left of `==.`). -/
-def SqlExpr.int (i : Int) : SqlExpr ts .int := .intC i
+not yet known and coercions cannot fire (e.g. a literal on the left of
+`==.`). Flag-fitted: strict by nature, widening into nullable positions,
+defaulting strict when unconstrained. -/
+def SqlExpr.int (i : Int) {m : Bool} [fits : FlagFits false m] :
+    SqlExpr ts .int m := fits.fit (.intC i)
 
 /-- Inject a runtime value as a literal expression — the bridge from
 fetched data back into queries (`fetchFor`'s `IN (…)` lists, `Values`
-cell embedding via `v["col"]`). -/
+cell embedding via `v["col"]`). Literals are never NULL. -/
 class SqlLit (t : SqlType) where
-  lit : {ts : Ctx} → t.interp → SqlExpr ts t
+  lit : {ts : Ctx} → t.interp → SqlExpr ts t false
 
 instance : SqlLit .int := ⟨.intC⟩
 instance : SqlLit .long := ⟨.longC⟩
@@ -115,54 +172,64 @@ instance : SqlLit .string := ⟨.stringC⟩
 instance : SqlLit .bool := ⟨.boolC⟩
 instance : SqlLit .dateTime := ⟨.dateTimeC⟩
 instance : SqlLit .guid := ⟨.guidC⟩
-def SqlExpr.long (i : Int) : SqlExpr ts .long := .longC i
-def SqlExpr.dbl (f : Float) : SqlExpr ts .double := .doubleC f
-def SqlExpr.dec (digits : String) : SqlExpr ts .decimal := .decimalC digits
-def SqlExpr.str (s : String) : SqlExpr ts .string := .stringC s
-def SqlExpr.bool (b : Bool) : SqlExpr ts .bool := .boolC b
-def SqlExpr.dt (iso : String) : SqlExpr ts .dateTime := .dateTimeC iso
-def SqlExpr.gd (g : String) : SqlExpr ts .guid := .guidC g
+def SqlExpr.long (i : Int) {m : Bool} [fits : FlagFits false m] :
+    SqlExpr ts .long m := fits.fit (.longC i)
+def SqlExpr.dbl (f : Float) {m : Bool} [fits : FlagFits false m] :
+    SqlExpr ts .double m := fits.fit (.doubleC f)
+def SqlExpr.dec (digits : String) {m : Bool} [fits : FlagFits false m] :
+    SqlExpr ts .decimal m := fits.fit (.decimalC digits)
+def SqlExpr.str (s : String) {m : Bool} [fits : FlagFits false m] :
+    SqlExpr ts .string m := fits.fit (.stringC s)
+def SqlExpr.bool (b : Bool) {m : Bool} [fits : FlagFits false m] :
+    SqlExpr ts .bool m := fits.fit (.boolC b)
+def SqlExpr.dt (iso : String) {m : Bool} [fits : FlagFits false m] :
+    SqlExpr ts .dateTime m := fits.fit (.dateTimeC iso)
+def SqlExpr.gd (g : String) {m : Bool} [fits : FlagFits false m] :
+    SqlExpr ts .guid m := fits.fit (.guidC g)
 
 /-- `e IN (v₁, v₂, …)` over a homogeneous value list. -/
-def SqlExpr.inValues (e : SqlExpr ts t) (vs : List (SqlExpr ts t)) : SqlExpr ts .bool :=
-  .inList e (vs.map (⟨t, ·⟩))
+def SqlExpr.inValues (e : SqlExpr ts t n) (vs : List (SqlExpr ts t true)) :
+    SqlExpr ts .bool true :=
+  .inList e (vs.map (⟨(t, true), ·⟩))
 
 /-- Date-part / date-arithmetic surface helpers. -/
-def SqlExpr.year (e : SqlExpr ts .dateTime) : SqlExpr ts .int := .datePart .year e
-def SqlExpr.month (e : SqlExpr ts .dateTime) : SqlExpr ts .int := .datePart .month e
-def SqlExpr.day (e : SqlExpr ts .dateTime) : SqlExpr ts .int := .datePart .day e
-def SqlExpr.addDays (e : SqlExpr ts .dateTime) (n : Int) : SqlExpr ts .dateTime := .dateAdd .day e n
-def SqlExpr.addMonths (e : SqlExpr ts .dateTime) (n : Int) : SqlExpr ts .dateTime := .dateAdd .month e n
-def SqlExpr.addYears (e : SqlExpr ts .dateTime) (n : Int) : SqlExpr ts .dateTime := .dateAdd .year e n
-def SqlExpr.diffDays (e x : SqlExpr ts .dateTime) : SqlExpr ts .int := .dateDiff .day e x
-def SqlExpr.diffMonths (e x : SqlExpr ts .dateTime) : SqlExpr ts .int := .dateDiff .month e x
-def SqlExpr.diffYears (e x : SqlExpr ts .dateTime) : SqlExpr ts .int := .dateDiff .year e x
+def SqlExpr.year (e : SqlExpr ts .dateTime n) : SqlExpr ts .int n := .datePart .year e
+def SqlExpr.month (e : SqlExpr ts .dateTime n) : SqlExpr ts .int n := .datePart .month e
+def SqlExpr.day (e : SqlExpr ts .dateTime n) : SqlExpr ts .int n := .datePart .day e
+def SqlExpr.addDays (e : SqlExpr ts .dateTime n) (k : Int) : SqlExpr ts .dateTime n := .dateAdd .day e k
+def SqlExpr.addMonths (e : SqlExpr ts .dateTime n) (k : Int) : SqlExpr ts .dateTime n := .dateAdd .month e k
+def SqlExpr.addYears (e : SqlExpr ts .dateTime n) (k : Int) : SqlExpr ts .dateTime n := .dateAdd .year e k
+def SqlExpr.diffDays (e : SqlExpr ts .dateTime n₁) (x : SqlExpr ts .dateTime n₂) : SqlExpr ts .int (n₁ || n₂) := .dateDiff .day e x
+def SqlExpr.diffMonths (e : SqlExpr ts .dateTime n₁) (x : SqlExpr ts .dateTime n₂) : SqlExpr ts .int (n₁ || n₂) := .dateDiff .month e x
+def SqlExpr.diffYears (e : SqlExpr ts .dateTime n₁) (x : SqlExpr ts .dateTime n₂) : SqlExpr ts .int (n₁ || n₂) := .dateDiff .year e x
 
 /-- A heterogeneously-typed ORDER BY key with its direction; build with
 `e.asc` / `e.desc`. -/
 structure OrderKey (ts : Ctx) where
   type : SqlType
-  expr : SqlExpr ts type
+  null : Bool
+  expr : SqlExpr ts type null
   dir : Dir
 
-def SqlExpr.asc (e : SqlExpr ts t) : OrderKey ts := ⟨t, e, .asc⟩
-def SqlExpr.desc (e : SqlExpr ts t) : OrderKey ts := ⟨t, e, .desc⟩
+def SqlExpr.asc (e : SqlExpr ts t n) : OrderKey ts := ⟨t, n, e, .asc⟩
+def SqlExpr.desc (e : SqlExpr ts t n) : OrderKey ts := ⟨t, n, e, .desc⟩
 
 /-- A heterogeneously-typed GROUP BY key; build with `e.key`. -/
 structure KeyExpr (ts : Ctx) where
   type : SqlType
-  expr : SqlExpr ts type
+  null : Bool
+  expr : SqlExpr ts type null
 
-def SqlExpr.key (e : SqlExpr ts t) : KeyExpr ts := ⟨t, e⟩
+def SqlExpr.key (e : SqlExpr ts t n) : KeyExpr ts := ⟨t, n, e⟩
 
 /-- The aggregate builder token passed to grouped `select`/`having` lambdas
 (mirrors passing an aggregate-function object in LINQ-style APIs). -/
 structure Agg where
 
-def Agg.count (_ : Agg) : SqlExpr ts .int := .countAll
-def Agg.sum (_ : Agg) (e : SqlExpr ts t) : SqlExpr ts t := .aggE .sum e
-def Agg.avg (_ : Agg) (e : SqlExpr ts t) : SqlExpr ts t := .aggE .avg e
-def Agg.min (_ : Agg) (e : SqlExpr ts t) : SqlExpr ts t := .aggE .min e
-def Agg.max (_ : Agg) (e : SqlExpr ts t) : SqlExpr ts t := .aggE .max e
+def Agg.count (_ : Agg) : SqlExpr ts .int true := .widen .countAll
+def Agg.sum (_ : Agg) (e : SqlExpr ts t n) : SqlExpr ts t true := .aggE .sum e
+def Agg.avg (_ : Agg) (e : SqlExpr ts t n) : SqlExpr ts t true := .aggE .avg e
+def Agg.min (_ : Agg) (e : SqlExpr ts t n) : SqlExpr ts t true := .aggE .min e
+def Agg.max (_ : Agg) (e : SqlExpr ts t n) : SqlExpr ts t true := .aggE .max e
 
 end LeanLinq

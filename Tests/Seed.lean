@@ -13,14 +13,14 @@ open LeanLinq
 namespace TQ
 
 private def cust (id age : Int) (name : String) (act : Bool) : Values CustomersS :=
-  .cons (some id) (.cons (some age) (.cons (some name) (.cons (some act) .nil)))
+  .cons id (.cons (some age) (.cons (some name) (.cons (some act) .nil)))
 
 private def prod (id : Int) (name : String) (priceM : Option Int)
     (created uid : Option String) : Values ProductsS :=
-  .cons (some id) (.cons (some name) (.cons priceM (.cons created (.cons uid .nil))))
+  .cons id (.cons name (.cons priceM (.cons created (.cons uid .nil))))
 
 private def ord (id cid pid amt : Int) : Values OrdersS :=
-  .cons (some id) (.cons (some cid) (.cons (some pid) (.cons (some amt) .nil)))
+  .cons id (.cons cid (.cons pid (.cons amt .nil)))
 
 def seedEnv : TableEnv TestCtx.tables :=
   .cons

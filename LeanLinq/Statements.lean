@@ -11,55 +11,65 @@ query — is fully static about what it touches. -/
 namespace LeanLinq
 
 structure InsertStmt (ts : Ctx) (n : String) (s : Schema) where
-  values : List (String × ((u : SqlType) × SqlExpr ts u)) := []
+  values : List (String × ((p : SqlType × Bool) × SqlExpr ts p.1 p.2)) := []
 
 /-- `INSERT INTO t …` — add columns with `.value`/`.valueNull`. -/
 def Table.insert (_ : Table n s) : InsertStmt ts n s := ⟨[]⟩
 
+/-- Set a column's value. The expression's nullability must fit the
+column's declared flag: a NULL-capable expression into a NOT NULL column
+is a type error (strict values widen into nullable columns silently). -/
 def InsertStmt.value (i : InsertStmt ts n s) (name : String) {t : SqlType}
-    [HasCol s name t] (e : SqlExpr ts t) : InsertStmt ts n s :=
-  { i with values := i.values ++ [(name, ⟨t, e⟩)] }
+    {ne nl : Bool} [HasCol s name t nl] [fits : FlagFits ne nl]
+    (e : SqlExpr ts t ne) : InsertStmt ts n s :=
+  { i with values := i.values ++ [(name, ⟨(t, nl), fits.fit e⟩)] }
 
+/-- Insert NULL — only into a column the schema declares NULL-capable. -/
 def InsertStmt.valueNull (i : InsertStmt ts n s) (name : String) {t : SqlType}
-    [HasCol s name t] : InsertStmt ts n s :=
-  { i with values := i.values ++ [(name, ⟨t, .nullC t⟩)] }
+    {nl : Bool} [HasCol s name t nl] (h : nl = true := by rfl) :
+    InsertStmt ts n s :=
+  { i with values := i.values ++ [(name, ⟨(t, true), .nullC t⟩)] }
 
 structure UpdateStmt (ts : Ctx) (n : String) (s : Schema) where
-  sets : List (String × (Row ts s → (u : SqlType) × SqlExpr ts u)) := []
-  where? : Option (Row ts s → SqlExpr ts .bool) := none
+  sets : List (String × (Row ts s → (p : SqlType × Bool) × SqlExpr ts p.1 p.2)) := []
+  where? : Option (Row ts s → SqlExpr ts .bool true) := none
 
 /-- `UPDATE t SET …` — add assignments with `.set`/`.setWith`/`.setNull`,
 restrict with `.where'`. -/
 def Table.update (_ : Table n s) : UpdateStmt ts n s := ⟨[], none⟩
 
 def UpdateStmt.set (u : UpdateStmt ts n s) (name : String) {t : SqlType}
-    [HasCol s name t] (e : SqlExpr ts t) : UpdateStmt ts n s :=
-  { u with sets := u.sets ++ [(name, fun _ => ⟨t, e⟩)] }
+    {ne nl : Bool} [HasCol s name t nl] [fits : FlagFits ne nl]
+    (e : SqlExpr ts t ne) : UpdateStmt ts n s :=
+  { u with sets := u.sets ++ [(name, fun _ => ⟨(t, nl), fits.fit e⟩)] }
 
 /-- Row-dependent assignment: `.setWith "Age" (fun r => r["Age"] + 1)`. -/
 def UpdateStmt.setWith (u : UpdateStmt ts n s) (name : String) {t : SqlType}
-    [HasCol s name t] (f : Row ts s → SqlExpr ts t) : UpdateStmt ts n s :=
-  { u with sets := u.sets ++ [(name, fun r => ⟨t, f r⟩)] }
+    {ne nl : Bool} [HasCol s name t nl] [fits : FlagFits ne nl]
+    (f : Row ts s → SqlExpr ts t ne) : UpdateStmt ts n s :=
+  { u with sets := u.sets ++ [(name, fun r => ⟨(t, nl), fits.fit (f r)⟩)] }
 
+/-- Set NULL — only on a column the schema declares NULL-capable. -/
 def UpdateStmt.setNull (u : UpdateStmt ts n s) (name : String) {t : SqlType}
-    [HasCol s name t] : UpdateStmt ts n s :=
-  { u with sets := u.sets ++ [(name, fun _ => ⟨t, .nullC t⟩)] }
-
-def UpdateStmt.where' (u : UpdateStmt ts n s) (p : Row ts s → SqlExpr ts .bool) :
+    {nl : Bool} [HasCol s name t nl] (h : nl = true := by rfl) :
     UpdateStmt ts n s :=
-  { u with where? := some p }
+  { u with sets := u.sets ++ [(name, fun _ => ⟨(t, true), .nullC t⟩)] }
+
+def UpdateStmt.where' (u : UpdateStmt ts n s)
+    (p : Row ts s → SqlExpr ts .bool nb) : UpdateStmt ts n s :=
+  { u with where? := some (fun r => (p r).anyNull) }
 
 structure DeleteStmt (ts : Ctx) (n : String) (s : Schema) where
-  where? : Option (Row ts s → SqlExpr ts .bool) := none
+  where? : Option (Row ts s → SqlExpr ts .bool true) := none
 
 /-- `DELETE FROM t` — restrict with `.where'`. -/
 def Table.delete (_ : Table n s) : DeleteStmt ts n s := ⟨none⟩
 
-def DeleteStmt.where' (d : DeleteStmt ts n s) (p : Row ts s → SqlExpr ts .bool) :
-    DeleteStmt ts n s :=
-  { d with where? := some p }
+def DeleteStmt.where' (d : DeleteStmt ts n s)
+    (p : Row ts s → SqlExpr ts .bool nb) : DeleteStmt ts n s :=
+  { d with where? := some (fun r => (p r).anyNull) }
 
-private def whereClause {s : Schema} (p? : Option (Row ts s → SqlExpr ts .bool)) :
+private def whereClause {s : Schema} (p? : Option (Row ts s → SqlExpr ts .bool true)) :
     CompileM String :=
   match p? with
   | none => pure ""

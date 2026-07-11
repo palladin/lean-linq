@@ -30,7 +30,7 @@ yield a projected row; grouped spines yield keys, HAVING, and the grouped
 projection. -/
 @[reducible] def BranchData : Ctx → Terminal → Schema → Type
   | ts, .plain, s => Row ts s
-  | ts, .grouped, s => List (KeyExpr ts) × Option (SqlExpr ts .bool) × Row ts s
+  | ts, .grouped, s => List (KeyExpr ts) × Option (SqlExpr ts .bool true) × Row ts s
 
 /-- One surviving source-row combination of a spine walk. All branches of a
 spine share the same instantiated syntax trees (`orderKeys`, `data`) — only
@@ -72,7 +72,7 @@ comprehension's `groupYield` terminal and the pipeline's `groupedC` boundary
 structure GBranch (ts : Ctx) (s : Schema) where
   scope : Scope
   keys : List (KeyExpr ts)
-  having? : Option (SqlExpr ts .bool)
+  having? : Option (SqlExpr ts .bool true)
   orderKeys : List (OrderKey ts)
   row : Row ts s
 
@@ -164,17 +164,30 @@ def SpineQ.evalSpine : SpineQ ts g s → EvalEnv ts → Nat → Scope →
       let branches ← (i.rows ee.tables).mapM fun v =>
         (f row).evalSpine ee (n + 1) ((alias, ⟨s₀, v⟩) :: sc)
       pure branches.flatten
-  | .joinT (s := s₀) (inst := i) kind _ on' f, ee, n, sc => do
+  | .joinT (s := s₀) (inst := i) _ on' f, ee, n, sc => do
       let alias := s!"a{n}"
       let row := Row.ofAlias alias s₀
       let hits ← (i.rows ee.tables).filterM fun v => do
         pure ((← (on' row).evalG ee [(alias, ⟨s₀, v⟩) :: sc]) == some true)
-      let sources := match kind, hits with
-        | .left, [] => [Values.nulls s₀]   -- LEFT JOIN: unmatched ⇒ NULL row
-        | _, ms => ms
-      let branches ← sources.mapM fun v =>
+      let branches ← hits.mapM fun v =>
         (f row).evalSpine ee (n + 1) ((alias, ⟨s₀, v⟩) :: sc)
       pure branches.flatten
+  -- LEFT JOIN: the bound row is marked over the NULL-lifted schema; field
+  -- lookups go by name+type, so matched (strict) rows and the all-NULL pad
+  -- coexist behind the same markers
+  | .joinLeftT (s := s₀) (inst := i) _ on' f, ee, n, sc => do
+      let alias := s!"a{n}"
+      let row := Row.ofAlias alias s₀.asNull
+      let hits ← (i.rows ee.tables).filterM fun v => do
+        pure ((← (on' row).evalG ee [(alias, ⟨s₀, v⟩) :: sc]) == some true)
+      if hits.isEmpty then
+        let branches ← (f row).evalSpine ee (n + 1)
+          ((alias, ⟨s₀.asNull, Values.nulls s₀⟩) :: sc)
+        pure branches
+      else
+        let branches ← hits.mapM fun v =>
+          (f row).evalSpine ee (n + 1) ((alias, ⟨s₀, v⟩) :: sc)
+        pure branches.flatten
   | .fromQ (s := s₀) q f, ee, n, sc => do
       let alias := s!"a{n}"
       let row := Row.ofAlias alias s₀
@@ -197,7 +210,7 @@ def Query.run (q : Query ts s) (env : TableEnv ts.tables)
   q.evalRows ⟨env, ps, now⟩
 
 /-- Evaluate a scalar aggregate query: the spine's branches are the group. -/
-def ScalarQuery.evalCell : ScalarQuery ts t → EvalEnv ts → Except EvalError (Nullable t)
+def ScalarQuery.evalCell : ScalarQuery ts t n → EvalEnv ts → Except EvalError (Nullable t)
   | .countQ sp, ee => do pure (some (((← sp.evalSpine ee 0 [])).length : Int))
   | .aggQ op sp, ee => do
       match (← sp.evalSpine ee 0 []) with
@@ -208,7 +221,7 @@ def ScalarQuery.evalCell : ScalarQuery ts t → EvalEnv ts → Except EvalError 
 
 /-- Scalar counterpart of `Query.run`; the result cell is `none` for SQL
 NULL (e.g. SUM over no rows). -/
-def ScalarQuery.run (sc : ScalarQuery ts t) (env : TableEnv ts.tables)
+def ScalarQuery.run (sc : ScalarQuery ts t n) (env : TableEnv ts.tables)
     (ps : ParamEnv ts.params := by exact .nil) (now : Option String := none) :
     Except EvalError (Nullable t) :=
   sc.evalCell ⟨env, ps, now⟩

@@ -2,40 +2,52 @@ import LeanLinq.Core.Expr
 
 /-! # Operator notation for `SqlExpr`
 
-Arithmetic reuses the standard `+`/`-`/`*`/`/` typeclasses (instances only
-for the numeric SQL types, so `string + string` stays a type error);
-concatenation is `++`. Comparisons and logic cannot reuse `==`/`<`/`&&`
-(those return `Bool`/`Prop`), so we mint dotted variants with matching
-precedences.
+Arithmetic reuses the standard `+`/`-`/`*`/`/` typeclasses via heterogeneous
+instances that **OR the nullability flags** (instances only for the numeric
+SQL types, so `string + string` stays a type error); concatenation is `++`.
+Comparisons and logic cannot reuse `==`/`<`/`&&` (those return
+`Bool`/`Prop`), so we mint dotted variants with matching precedences — the
+constructors carry the flag arithmetic themselves.
 
-Coercions fire only against a known expected type, so put literals on the
-*right* of a polymorphic operator (`c["Name"] ==. "Alice"`); for the other
-order use the explicit constructors (`SqlExpr.str`, `.int`, `.dec`, …). -/
+Literal instances are **flag-polymorphic**: a numeric or string literal
+lands at whatever nullability the position expects (strict by nature,
+`widen`ed on demand), so `c["MiddleName"] ==. "x"` works when the column is
+nullable. Coercions fire only against a known expected type, so put
+literals on the *right* of a polymorphic operator
+(`c["Name"] ==. "Alice"`); for the other order use the explicit
+constructors (`SqlExpr.str`, `.int`, `.dec`, …). -/
 
 namespace LeanLinq
 
-instance : Add (SqlExpr ts .int) := ⟨.arith .add⟩
-instance : Add (SqlExpr ts .long) := ⟨.arith .add⟩
-instance : Add (SqlExpr ts .double) := ⟨.arith .add⟩
-instance : Add (SqlExpr ts .decimal) := ⟨.arith .add⟩
-instance : Sub (SqlExpr ts .int) := ⟨.arith .sub⟩
-instance : Sub (SqlExpr ts .long) := ⟨.arith .sub⟩
-instance : Sub (SqlExpr ts .double) := ⟨.arith .sub⟩
-instance : Sub (SqlExpr ts .decimal) := ⟨.arith .sub⟩
-instance : Mul (SqlExpr ts .int) := ⟨.arith .mul⟩
-instance : Mul (SqlExpr ts .long) := ⟨.arith .mul⟩
-instance : Mul (SqlExpr ts .double) := ⟨.arith .mul⟩
-instance : Mul (SqlExpr ts .decimal) := ⟨.arith .mul⟩
-instance : Div (SqlExpr ts .int) := ⟨.arith .div⟩
-instance : Div (SqlExpr ts .long) := ⟨.arith .div⟩
-instance : Div (SqlExpr ts .double) := ⟨.arith .div⟩
-instance : Div (SqlExpr ts .decimal) := ⟨.arith .div⟩
+/-- A never-NULL expression at whatever flag the position expects. -/
+@[reducible] def SqlExpr.atFlag (n : Bool) (e : SqlExpr ts t false) :
+    SqlExpr ts t n :=
+  match n with
+  | false => e
+  | true => .widen e
 
-instance : Append (SqlExpr ts .string) := ⟨.concat⟩
+instance : Add (SqlExpr ts .int n) := ⟨.arith .add⟩
+instance : Add (SqlExpr ts .long n) := ⟨.arith .add⟩
+instance : Add (SqlExpr ts .double n) := ⟨.arith .add⟩
+instance : Add (SqlExpr ts .decimal n) := ⟨.arith .add⟩
+instance : Sub (SqlExpr ts .int n) := ⟨.arith .sub⟩
+instance : Sub (SqlExpr ts .long n) := ⟨.arith .sub⟩
+instance : Sub (SqlExpr ts .double n) := ⟨.arith .sub⟩
+instance : Sub (SqlExpr ts .decimal n) := ⟨.arith .sub⟩
+instance : Mul (SqlExpr ts .int n) := ⟨.arith .mul⟩
+instance : Mul (SqlExpr ts .long n) := ⟨.arith .mul⟩
+instance : Mul (SqlExpr ts .double n) := ⟨.arith .mul⟩
+instance : Mul (SqlExpr ts .decimal n) := ⟨.arith .mul⟩
+instance : Div (SqlExpr ts .int n) := ⟨.arith .div⟩
+instance : Div (SqlExpr ts .long n) := ⟨.arith .div⟩
+instance : Div (SqlExpr ts .double n) := ⟨.arith .div⟩
+instance : Div (SqlExpr ts .decimal n) := ⟨.arith .div⟩
 
-instance : OfNat (SqlExpr ts .int) n := ⟨.intC (Int.ofNat n)⟩
-instance : OfNat (SqlExpr ts .long) n := ⟨.longC (Int.ofNat n)⟩
-instance : Neg (SqlExpr ts .int) := ⟨fun e => .arith .sub (.intC 0) e⟩
+instance : Append (SqlExpr ts .string n) := ⟨.concat⟩
+
+instance : OfNat (SqlExpr ts .int n) k := ⟨.atFlag n (.intC (Int.ofNat k))⟩
+instance : OfNat (SqlExpr ts .long n) k := ⟨.atFlag n (.longC (Int.ofNat k))⟩
+instance : Neg (SqlExpr ts .int n) := ⟨fun e => .arith .sub (.atFlag n (.intC 0)) e⟩
 
 /-- Render a scientific literal (`99.99`) as exact decimal digits. -/
 private def scientificDigits (m : Nat) (sign : Bool) (e : Nat) : String :=
@@ -47,13 +59,19 @@ private def scientificDigits (m : Nat) (sign : Bool) (e : Nat) : String :=
     let fracPart := s.takeEnd e |>.toString
     s!"{intPart}.{fracPart}"
 
-instance : OfScientific (SqlExpr ts .decimal) :=
-  ⟨fun m sign e => .decimalC (scientificDigits m sign e)⟩
-instance : OfScientific (SqlExpr ts .double) :=
-  ⟨fun m sign e => .doubleC (OfScientific.ofScientific m sign e)⟩
+instance : OfScientific (SqlExpr ts .decimal n) :=
+  ⟨fun m sign e => .atFlag n (.decimalC (scientificDigits m sign e))⟩
+instance : OfScientific (SqlExpr ts .double n) :=
+  ⟨fun m sign e => .atFlag n (.doubleC (OfScientific.ofScientific m sign e))⟩
 
-instance : Coe String (SqlExpr ts .string) := ⟨.stringC⟩
-instance : Coe Bool (SqlExpr ts .bool) := ⟨.boolC⟩
+/- Two mono instances per literal coercion: the strict one wins when the
+position leaves the flag free (the analogue of the numeric
+`default_instance`), the widened one serves positions that pin the flag
+nullable. -/
+instance : Coe String (SqlExpr ts .string true) := ⟨fun s => .widen (.stringC s)⟩
+instance : Coe Bool (SqlExpr ts .bool true) := ⟨fun b => .widen (.boolC b)⟩
+instance (priority := high) : Coe String (SqlExpr ts .string false) := ⟨.stringC⟩
+instance (priority := high) : Coe Bool (SqlExpr ts .bool false) := ⟨.boolC⟩
 
 /-- SQL equality: `a ==. b` compiles to `(a = b)`. -/
 scoped infix:50  " ==. " => SqlExpr.cmp CmpOp.eq
