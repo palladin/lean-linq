@@ -276,12 +276,6 @@ private def sendPhase (conn : Conn)
   | .bindD x f _ _, fuel => do
       let sx ← sendPhase conn cells x fuel
       bindStage (fun fuel' a => sendPhase conn cells (f a) fuel') fuel sx
-  | .forRowsAll x f, fuel => do
-      let sx ← sendPhase conn cells x fuel
-      bindStage (fun fuel' as => do
-        let stages ← as.mapM fun a => sendPhase conn cells (f a) fuel'
-        pure (stages.foldr (fun s acc => parStage (· :: ·) fuel' s acc)
-          (stageDone [] fuel'))) fuel sx
   | .forAll xs f, fuel => do
       -- the loop's bodies are independent of one another, so they all
       -- send into the *current* round — the per-row loop batches, and the

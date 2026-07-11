@@ -31,15 +31,15 @@ shape has its proof story, up a ladder of evidence —
   into `DbFetch.forRows`, whose budget proof *is* the refinement. Bound
   `m + k * n`, closed, silent. N+1, written deliberately, priced by the
   bounded query;
-- loops over an unbounded fetch: no finite bound is true, so
-  `for p in parents do body` types at ⊤ — bounds live in the lattice
-  ℕ∞ (`Bound`), where ⊤ absorbs through `+`/`max`/`*`: one unbounded
-  part makes the whole program visibly unbounded. Every finite door
-  refuses it statically (`exec` demands `r ≤ fin budget`); the explicit
+- loops with no bound at all: the same door at the top of the lattice
+  ℕ∞ (`Bound`). `fetchLimit q ⊤` emits no `LIMIT` and its refinement
+  is vacuously true, so the same `forRows` fuses — and the grade
+  absorbs to ⊤ (`b + ⊤ = ⊤`, likewise `max`/`*`): one unbounded part
+  makes the whole program visibly unbounded. Every finite door refuses
+  it statically (`exec` demands `r ≤ fin budget`); the explicit
   `execAll` runs it. (Haxl repairs N+1 dynamically by batching; the
   grading surfaces it statically. `fetchFor` remains the bound-1
-  batched door for any collection size, and `fetchLimit q ⊤` fetches
-  everything — no `LIMIT` emitted.)
+  batched door for any collection size.)
 
 Under the sugar sits the dependent bind, `DbFetch.bindD`: a continuation
 whose grade may mention the value, priced by a bound `B` plus evidence
@@ -113,6 +113,28 @@ bespoke lemmas at use sites. -/
   | .top => rfl
   | .fin m => congrArg Bound.fin (Nat.mul_one m)
 
+/-- Everything is bounded by ⊤ — and definitionally so. -/
+theorem le_top (b : Bound) : b ≤ .top := rfl
+
+@[simp] theorem add_top : (a : Bound) → a + .top = .top
+  | .fin _ => rfl
+  | .top => rfl
+@[simp] theorem top_add : (a : Bound) → .top + a = .top
+  | .fin _ => rfl
+  | .top => rfl
+@[simp] theorem mul_top : (a : Bound) → a * .top = .top
+  | .fin _ => rfl
+  | .top => rfl
+@[simp] theorem top_mul : (a : Bound) → .top * a = .top
+  | .fin _ => rfl
+  | .top => rfl
+@[simp] theorem max_top : (a : Bound) → max a .top = .top
+  | .fin _ => rfl
+  | .top => rfl
+@[simp] theorem top_max : (a : Bound) → max .top a = .top
+  | .fin _ => rfl
+  | .top => rfl
+
 theorem add_comm : (a b : Bound) → a + b = b + a
   | .fin x, .fin y => congrArg Bound.fin (Nat.add_comm x y)
   | .fin _, .top => rfl
@@ -180,10 +202,6 @@ inductive DbFetch (c : Ctx) : Bound → Type → Type 1 where
   | bindD : {m : Bound} → {α β : Type} → {g : α → Bound} →
       DbFetch c m α → ((a : α) → DbFetch c (g a) β) →
       (B : Bound) → (∀ a, g a ≤ B) → DbFetch c (m + B) β
-  -- the ⊤ door's reason to exist: a per-row loop over *just-fetched*
-  -- rows, no bound stated — the whole program is unbounded, visibly
-  | forRowsAll : {m g : Bound} → {α β : Type} →
-      DbFetch c m (List α) → (α → DbFetch c g β) → DbFetch c .top (List β)
 
 namespace DbFetch
 
@@ -202,7 +220,6 @@ def runWith (ee : EvalEnv c) : {r : Bound} → {α : Type} → DbFetch c r α �
   | _, _, .bind x k => do (k (← x.runWith ee)).runWith ee
   | _, _, .forAll xs f => xs.mapM fun a => (f a).runWith ee
   | _, _, .bindD x f _ _ => do (f (← x.runWith ee)).runWith ee
-  | _, _, .forRowsAll x f => do (← x.runWith ee).mapM fun a => (f a).runWith ee
 
 /-- The execution door: declare a round budget, prove you fit in it. For
 closed grades (every batched program) the obligation discharges silently by
@@ -370,13 +387,6 @@ private partial def fuseBoundedLoops : List Syntax → MacroM (List Syntax)
       if x.isIdent && src.isIdent && src.getId == x.getId.str "val" then
         let fused ← `(fetchClause| let $(⟨c2[1]⟩):ident ←
           LeanLinq.DbFetch.forRows $(⟨c1[3]⟩) (fun $(⟨c2[4]⟩):ident => $(⟨c2[8]⟩)))
-        return ← fuseBoundedLoops (fused :: rest)
-      -- looping over the fetched binder itself (no `.val`, no bound):
-      -- the unbounded per-row loop — the whole program grades ⊤ and only
-      -- the `execAll` door will run it
-      if x.isIdent && src.isIdent && src.getId == x.getId then
-        let fused ← `(fetchClause| let $(⟨c2[1]⟩):ident ←
-          LeanLinq.DbFetch.forRowsAll $(⟨c1[3]⟩) (fun $(⟨c2[4]⟩):ident => $(⟨c2[8]⟩)))
         return ← fuseBoundedLoops (fused :: rest)
     return c1 :: (← fuseBoundedLoops (c2 :: rest))
 

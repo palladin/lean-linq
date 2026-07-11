@@ -212,6 +212,5 @@ where
     | _, _, .bind x k => do go (k (← go x))
     | _, _, .forAll xs f => xs.mapM fun a => go (f a)
     | _, _, .bindD x f _ _ => do go (f (← go x))
-    | _, _, .forRowsAll x f => do (← go x).mapM fun a => go (f a)
 
 end LeanLinq

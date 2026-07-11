@@ -263,11 +263,11 @@ is legal exactly when the fetch is bounded — `fetchLimit q n` returns a
 length-refined list (`{xs // xs.length ≤ n}`, backed by the first theorem about the
 executable semantics: `Query.run_limit_length_le`, `LIMIT` really limits), and
 looping over its `.val` fuses into `DbFetch.forRows`, whose budget proof *is* the
-refinement — grade `m + k * n`, closed, silent. And over an *unbounded* fetch no
-finite evidence exists, so the loop types at `⊤` — absorbing, one unbounded part
-makes the whole program visibly unbounded; every finite door (`exec budget`) refuses
-it statically and only the explicit `execAll` runs it (`fetchLimit q ⊤` fetches
-everything, no `LIMIT` emitted — one definition serves both worlds). You can write
+refinement — grade `m + k * n`, closed, silent. And "all rows, per row" is the same
+door at the top of the lattice: `fetchLimit q ⊤` emits no `LIMIT` and its refinement
+is vacuously true, so the same loop fuses and the grade absorbs to `⊤` — visibly
+unbounded, refused statically by every finite door (`exec budget`), run only by the
+explicit `execAll`. One definition serves both worlds. You can write
 N+1 when you mean it — priced by a bounded query, or declared unbounded at the call
 site — and you cannot write it by accident. (Loops are
 first-class constructors with independent bodies, so the pipelining PostgreSQL

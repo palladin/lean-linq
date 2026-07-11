@@ -227,25 +227,6 @@ def topSpendersDetail2 (n : Nat) :
 -- Except.ok [("Jane Smith", 1), ("John Doe", 1)]
 #check_failure (topSpendersDetail ⊤).exec 1000 demoEnv
 
-/- Or state no bound at all: looping over the fetched rows themselves
-grades the program ⊤ — every finite door refuses it statically, and the
-explicit `execAll` door runs it knowingly. All records, per-row, no
-count — the opt-out visible in the type and at the call site. -/
-def topSpendersDetailAll : DbFetch PlayCtx ⊤ (List (String × Nat)) := fetch! {
-  let spenders ← adults.fetch
-  let report ← for s in spenders do
-    Query.from' (ts := PlayCtx) orders
-      |>.where' (fun o => o["CustomerId"] ==. s["Id"])
-      |>.fetch
-      |>.map (fun orders => (s["Name"], orders.length))
-  return report
-}
-
-#eval topSpendersDetailAll.execAll demoEnv
--- Except.ok [("Jane Smith", 1), ("John Doe", 1)]
--- and no finite budget admits it:
-#check_failure topSpendersDetailAll.exec 1000 demoEnv
-
 /- "All the records" is two phases: you cannot know the fan-out before
 asking, so ask first — the count becomes the loop's bound and the
 budget, and `omega` proves the door for every n. Between the two `exec`s
