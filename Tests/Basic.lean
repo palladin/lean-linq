@@ -302,3 +302,25 @@ example : DbFetch BasicCtx (1 + ⊤) (List (List (Values OrdersS))) :=
     (fun rows => .forAll rows
       (fun _ => .fetch (Query.from' (ts := BasicCtx) orders)))
     ⊤
+
+/-! `Query.card` — the row-count bound is a fact of the query value,
+reducing definitionally on literal queries so `decide`/`rfl` consume it
+in types, exactly like round-trip grades. Table sources are ⊤; the
+bound concentrates at `limit`; joins multiply; unions add. -/
+example : (Query.from' (ts := BasicCtx) customers).card = ⊤ := rfl
+example : (Query.from' (ts := BasicCtx) customers
+  |>.where' (fun c => c["Age"] >=. 18)).card = ⊤ := rfl
+example : (Query.from' (ts := BasicCtx) customers |>.limit 5).card = .fin 5 := rfl
+example : (Query.from' (ts := BasicCtx) customers |>.limit 5 |>.limit 10).card
+    = .fin 5 := rfl
+example : (Query.from' (ts := BasicCtx) customers
+  |>.innerJoin orders (fun c o => c["Id"] ==. o["CustomerId"])
+      (fun c o => ![c["Id"].as "Id", o["OrderId"].as "OId"])
+  |>.limit 7).card = .fin 7 := rfl
+example : ((Query.from' (ts := BasicCtx) customers |>.limit 5).union
+           (Query.from' (ts := BasicCtx) customers |>.limit 3)).card
+    = .fin 8 := rfl
+example : ((Query.from' (ts := BasicCtx) customers |>.limit 5).intersect
+           (Query.from' (ts := BasicCtx) customers |>.limit 3)).card
+    = .fin 3 := rfl
+example : (Query.from' (ts := BasicCtx) customers |>.limit 5).card ≤ .fin 9 := by decide

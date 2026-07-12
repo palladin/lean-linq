@@ -1,4 +1,5 @@
 import LeanLinq.Core.Table
+import LeanLinq.Core.Bound
 
 namespace LeanLinq
 
@@ -149,6 +150,47 @@ O(1) match on the `Terminal` index — no spine traversal. -/
 def Query.asPlainSpine : Query ts s → SpineQ ts .plain s
   | .spine (g := .plain) sp => sp
   | q => .fromQ q (fun r => .yield r)
+
+/-! ## Cardinality: how many rows can a query return?
+
+`card` computes an upper bound on the result size from the query value
+itself, over the same `Bound` lattice that grades `DbFetch` round trips —
+one lattice, two currencies. Table sources are statically unbounded (⊤);
+the bound concentrates at `limit` (`min`), joins multiply, unions add,
+filters and reshaping never grow. For literal queries `card` reduces
+definitionally, so `by decide` can consume it inside types — the same
+discipline as the round-trip grades. -/
+
+mutual
+
+@[reducible] def SpineQ.card : SpineQ ts g s → Bound
+  | .yield _ => .fin 1
+  | .groupYield .. => .fin 1
+  | .guard _ rest => rest.card
+  | .order _ rest => rest.card
+  | .fromT (g := .plain) (inst := _) _ f => .top * (f default).card
+  | .fromT (g := .grouped) (inst := _) _ f => .top * (f default).card
+  | .joinT (g := .plain) (inst := _) _ _ f => .top * (f default).card
+  | .joinT (g := .grouped) (inst := _) _ _ f => .top * (f default).card
+  | .joinLeftT (g := .plain) (inst := _) _ _ f => .top * (f default).card
+  | .joinLeftT (g := .grouped) (inst := _) _ _ f => .top * (f default).card
+  | .fromQ (g := .plain) q f => q.card * (f default).card
+  | .fromQ (g := .grouped) q f => q.card * (f default).card
+
+@[reducible] def Query.card : Query ts s → Bound
+  | .spine sp => sp.card
+  | .distinctC q => q.card
+  | .limitC q lim? _ =>
+      match lim? with
+      | some l => min q.card (.fin l)
+      | none => q.card
+  | .groupedC sp _ _ _ _ => sp.card
+  | .setOpC .union a b => a.card + b.card
+  | .setOpC .intersect a b => min a.card b.card
+  | .setOpC .except a _ => a.card
+
+end
+
 
 namespace Query
 
