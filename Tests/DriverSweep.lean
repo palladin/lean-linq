@@ -154,6 +154,20 @@ def boundedFanOut : DbFetch TestCtx 4 (List Nat) := fetch! {
   return waves.map (·.length)
 }
 
+/-- The unbounded post-fetch loop smoke: `fetchLimit ⊤` (no LIMIT emitted)
++ the same `for … .val` fusion — grade `1 + 1 * ⊤ = ⊤`, statically refused
+by every finite door and runnable only through the per-driver All doors. -/
+def unboundedFanOut : DbFetch TestCtx ⊤ (List Nat) := fetch! {
+  let parents ← Query.from' (ts := TestCtx) customers
+    |>.orderBy (fun c => [c["Id"].asc])
+    |>.fetchLimit ⊤
+  let waves ← for p in parents.val do
+    Query.from' (ts := TestCtx) orders
+      |>.where' (fun o => o["CustomerId"] ==. p["Id"])
+      |>.fetch
+  return waves.map (·.length)
+}
+
 /-- Compare a `DbFetch` smoke result against its in-memory interpretation. -/
 def checkSpenders (live : Nat × List (Values OrdersS)) : IO Bool := do
   match spenders.runWith ⟨seedEnv, seedParams, none⟩ with
@@ -200,6 +214,17 @@ def checkBoundedFanOut (live : List Nat) : IO Bool := do
       if live == mem then pure true
       else do
         IO.eprintln s!"DRIVER MISMATCH boundedFanOut (DbFetch forRows): {live} vs {mem}"
+        pure false
+
+def checkUnboundedFanOut (live : List Nat) : IO Bool := do
+  match unboundedFanOut.execAll seedEnv seedParams with
+  | .error e =>
+      IO.eprintln s!"EVAL ERROR unboundedFanOut (DbFetch ⊤): {repr e}"
+      pure false
+  | .ok mem =>
+      if live == mem then pure true
+      else do
+        IO.eprintln s!"DRIVER MISMATCH unboundedFanOut (DbFetch ⊤): {live} vs {mem}"
         pure false
 
 end TQ

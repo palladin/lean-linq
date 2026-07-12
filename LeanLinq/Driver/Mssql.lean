@@ -233,18 +233,25 @@ end Ms
 active request per connection (no pipelining), so interpretation is
 sequential and the `max` grade is an upper bound — same budget discipline
 as everywhere. -/
+private def Ms.interp (conn : Ms.Conn) (ps : ParamEnv c.params) :
+    {r' : Bound} → {β : Type} → DbFetch c r' β → IO β
+  | _, _, .pure a => Pure.pure a
+  | _, _, .fetch q => conn.query q ps
+  | _, _, .fetchCell sc => conn.queryCell sc ps
+  | _, _, .seq g x => do Pure.pure ((← interp conn ps g) (← interp conn ps x))
+  | _, _, .bind x k => do interp conn ps (k (← interp conn ps x))
+  | _, _, .forAll xs f => xs.mapM fun a => interp conn ps (f a)
+  | _, _, .bindD x f _ _ => do interp conn ps (f (← interp conn ps x))
+
 def DbFetch.execMs (f : DbFetch c r α) (conn : Ms.Conn) (budget : Nat)
     (ps : ParamEnv c.params := by exact .nil)
     (_h : r ≤ .fin budget := by decide) : IO α :=
-  go f
-where
-  go : {r' : Bound} → {β : Type} → DbFetch c r' β → IO β
-    | _, _, .pure a => Pure.pure a
-    | _, _, .fetch q => conn.query q ps
-    | _, _, .fetchCell sc => conn.queryCell sc ps
-    | _, _, .seq g x => do Pure.pure ((← go g) (← go x))
-    | _, _, .bind x k => do go (k (← go x))
-    | _, _, .forAll xs f => xs.mapM fun a => go (f a)
-    | _, _, .bindD x f _ _ => do go (f (← go x))
+  Ms.interp conn ps f
+
+/-- The unbounded door over the wire: no budget, obligation-free — the
+explicit opt-out for ⊤ programs, same as the in-memory `execAll`. -/
+def DbFetch.execMsAll (f : DbFetch c r α) (conn : Ms.Conn)
+    (ps : ParamEnv c.params := by exact .nil) : IO α :=
+  Ms.interp conn ps f
 
 end LeanLinq

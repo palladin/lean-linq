@@ -299,9 +299,11 @@ def topSpendersDetail (n : Bound) :
 
 On a fetched row, `s["Id"]` in an expression position embeds the cell as a typed
 literal (the inner query's WHERE), and anywhere else reads the honest value —
-the same brackets both ways. Over the wire the finite doors are per-driver:
+the same brackets both ways. Over the wire the doors are per-driver:
 `f.execIO conn budget` (SQLite), `f.execPg conn budget` (PostgreSQL, pipelined),
-`f.execMs conn budget` (SQL Server).
+`f.execMs conn budget` (SQL Server) — each with an `…All` variant for ⊤
+programs (`execPgAll` interprets sequentially: the pipeline stage machine
+pre-allocates rounds from a static bound, and ⊤ declines to name one).
 
 **PostgreSQL** works the same way (`import LeanLinq.Driver.Postgres`, `Pg.connect` with
 a conninfo string; requires libpq — `brew install libpq` / `libpq-dev`): the driver
@@ -437,7 +439,6 @@ corpus sweeps, and live 3-engine integration tests.
 Known limitations: the `double` type is implemented but not exercised by the
 test models (the reference suite has the same hole); trailing `orderBy` after
 `distinct`/`limit` is pipeline-only (the comprehension fuses ordering before
-them); ⊤-graded programs run through the in-memory door (`execAll`) — the
-driver doors are finite. Possible next steps: EXISTS/NOT IN, window functions,
-CTEs, and cardinality-indexed queries — row bounds, predicate satisfaction,
-and sortedness as propositions the fetch returns with the rows.
+them). Possible next steps: EXISTS/NOT IN, window functions, CTEs, and
+cardinality-indexed queries — row bounds, predicate satisfaction, and
+sortedness as propositions the fetch returns with the rows.

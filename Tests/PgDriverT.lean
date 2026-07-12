@@ -40,6 +40,8 @@ def main : IO UInt32 := do
         failures := failures + 1
       unless ← checkBoundedFanOut (← boundedFanOut.execPg conn 4 seedParams) do
         failures := failures + 1
+      unless ← checkUnboundedFanOut (← unboundedFanOut.execPgAll conn seedParams) do
+        failures := failures + 1
       conn.close
       if failures == 0 then
         IO.println s!"driver(postgres): {passed} cases match the evaluator (typed), {skipped} skipped — all green"

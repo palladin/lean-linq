@@ -199,18 +199,25 @@ decide` for closed grades, caller-supplied proofs otherwise). `seq`
 executes sequentially here: SQLite is in-process, so a "round" costs a
 statement, not a network wait — the `max` grade is the contract for future
 networked drivers, which batch `seq`'s sides into shared rounds. -/
+private def Sqlite.interp (conn : Sqlite.Conn) (ps : ParamEnv c.params) :
+    {r' : Bound} → {β : Type} → DbFetch c r' β → IO β
+  | _, _, .pure a => Pure.pure a
+  | _, _, .fetch q => conn.query q ps
+  | _, _, .fetchCell sc => conn.queryCell sc ps
+  | _, _, .seq g x => do Pure.pure ((← interp conn ps g) (← interp conn ps x))
+  | _, _, .bind x k => do interp conn ps (k (← interp conn ps x))
+  | _, _, .forAll xs f => xs.mapM fun a => interp conn ps (f a)
+  | _, _, .bindD x f _ _ => do interp conn ps (f (← interp conn ps x))
+
 def DbFetch.execIO (f : DbFetch c r α) (conn : Sqlite.Conn) (budget : Nat)
     (ps : ParamEnv c.params := by exact .nil)
     (_h : r ≤ .fin budget := by decide) : IO α :=
-  go f
-where
-  go : {r' : Bound} → {β : Type} → DbFetch c r' β → IO β
-    | _, _, .pure a => Pure.pure a
-    | _, _, .fetch q => conn.query q ps
-    | _, _, .fetchCell sc => conn.queryCell sc ps
-    | _, _, .seq g x => do Pure.pure ((← go g) (← go x))
-    | _, _, .bind x k => do go (k (← go x))
-    | _, _, .forAll xs f => xs.mapM fun a => go (f a)
-    | _, _, .bindD x f _ _ => do go (f (← go x))
+  Sqlite.interp conn ps f
+
+/-- The unbounded door over the wire: no budget, obligation-free — the
+explicit opt-out for ⊤ programs, same as the in-memory `execAll`. -/
+def DbFetch.execIOAll (f : DbFetch c r α) (conn : Sqlite.Conn)
+    (ps : ParamEnv c.params := by exact .nil) : IO α :=
+  Sqlite.interp conn ps f
 
 end LeanLinq

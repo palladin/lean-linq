@@ -8,6 +8,10 @@ driver, plus the `DbFetch` smokes through `execIO`. -/
 
 open LeanLinq LeanLinq.Sqlite TQ
 
+-- ⊤ never fits a finite door — over the wire either: only execIOAll runs it
+#check_failure fun (conn : LeanLinq.Sqlite.Conn) =>
+  TQ.unboundedFanOut.execIO conn 1000 seedParams
+
 def main : IO UInt32 := do
   let path := "/tmp/leanlinq-driver.db"
   if ← System.FilePath.pathExists path then IO.FS.removeFile path
@@ -30,6 +34,8 @@ def main : IO UInt32 := do
   unless ← checkPerRowLoop (← perRowLoop.execIO conn 3 seedParams) do
     failures := failures + 1
   unless ← checkBoundedFanOut (← boundedFanOut.execIO conn 4 seedParams) do
+    failures := failures + 1
+  unless ← checkUnboundedFanOut (← unboundedFanOut.execIOAll conn seedParams) do
     failures := failures + 1
   conn.close
   if failures == 0 then

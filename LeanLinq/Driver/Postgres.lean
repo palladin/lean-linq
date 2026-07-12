@@ -324,4 +324,22 @@ def DbFetch.execPg (f : DbFetch c r α) (conn : Pg.Conn) (budget : Nat)
   Pg.runStages conn budget
     (← Pg.runRound conn (Pg.sendPhase conn ps.toCells f budget))
 
+private def Pg.interp (conn : Pg.Conn) (ps : ParamEnv c.params) :
+    {r' : Bound} → {β : Type} → DbFetch c r' β → IO β
+  | _, _, .pure a => Pure.pure a
+  | _, _, .fetch q => conn.query q ps
+  | _, _, .fetchCell sc => conn.queryCell sc ps
+  | _, _, .seq g x => do Pure.pure ((← interp conn ps g) (← interp conn ps x))
+  | _, _, .bind x k => do interp conn ps (k (← interp conn ps x))
+  | _, _, .forAll xs f => xs.mapM fun a => interp conn ps (f a)
+  | _, _, .bindD x f _ _ => do interp conn ps (f (← interp conn ps x))
+
+/-- The unbounded door over the wire: no budget, obligation-free. This
+door interprets **sequentially** (one statement per round): the pipeline
+stage machine pre-allocates its rounds from a static bound, and a ⊤
+program declines to name one. Pipelining is what the finite door buys. -/
+def DbFetch.execPgAll (f : DbFetch c r α) (conn : Pg.Conn)
+    (ps : ParamEnv c.params := by exact .nil) : IO α :=
+  Pg.interp conn ps f
+
 end LeanLinq
