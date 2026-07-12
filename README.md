@@ -277,7 +277,14 @@ is legal exactly when the fetch is bounded — `fetchLimit q n` returns a
 length-refined list (`{xs // xs.length ≤ n}`, backed by the first theorem about the
 executable semantics: `Query.run_limit_length_le`, `LIMIT` really limits), and
 looping over its `.val` fuses into `DbFetch.forRows`, whose budget proof *is* the
-refinement — grade `m + k * n`, closed, silent. And "all rows, per row" is the same
+refinement — grade `m + k * n`, closed, silent. The bound is in fact a property of
+the query itself: `q.card : Bound` computes an upper bound on the result size from
+the query value (table sources are ⊤, `limit` caps, joins multiply, unions add) and
+reduces definitionally on literal queries — `fetchBounded` returns rows refined by
+it, `fetchInv` returns rows refined by the structure's row invariant (DISTINCT ⇒ no
+duplicates), and the soundness theorems (`run_card_le`, `run_rowInv`) prove the
+evaluator never fails either check, so the doors' runtime audits only ever catch a
+misbehaving engine. And "all rows, per row" is the same
 door at the top of the lattice: `fetchLimit q ⊤` emits no `LIMIT` and its refinement
 is vacuously true, so the same loop fuses and the grade absorbs to `⊤` — visibly
 unbounded, refused statically by every finite door (`exec budget`), run only by the

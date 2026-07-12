@@ -135,6 +135,19 @@ theorem le_min {a b c : Bound} (hb : a ≤ b) (hc : a ≤ c) : a ≤ min b c :=
   | .fin _, .fin _, .fin _ =>
       decide_eq_true (Nat.le_min.mpr ⟨of_decide_eq_true hb, of_decide_eq_true hc⟩)
 
+theorem zero_le : (b : Bound) → Bound.fin 0 ≤ b
+  | .fin n => decide_eq_true (Nat.zero_le n)
+  | .top => rfl
+
+theorem add_le_add : {a A b B : Bound} → a ≤ A → b ≤ B → a + b ≤ A + B
+  | _, .top, _, _, _, _ => by cases ‹Bound› <;> cases ‹Bound› <;> rfl
+  | _, .fin _, _, .top, _, _ => by
+      rename_i a _ _ _; cases a <;> rename_i b _ <;> cases b <;> rfl
+  | .top, .fin _, _, _, h, _ => nomatch h
+  | _, .fin _, .top, .fin _, _, h => nomatch h
+  | .fin _, .fin _, .fin _, .fin _, h, h' =>
+      decide_eq_true (Nat.add_le_add (of_decide_eq_true h) (of_decide_eq_true h'))
+
 /-- The finite embedding is monotone — the door-proof helper for
 symbolic budgets: `(Bound.fin_le_fin (by omega))`. -/
 theorem fin_le_fin {a b : Nat} (h : a ≤ b) : Bound.fin a ≤ Bound.fin b :=

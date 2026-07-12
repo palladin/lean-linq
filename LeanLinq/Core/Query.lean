@@ -174,8 +174,12 @@ mutual
   | .joinT (g := .grouped) (inst := _) _ _ f => .top * (f default).card
   | .joinLeftT (g := .plain) (inst := _) _ _ f => .top * (f default).card
   | .joinLeftT (g := .grouped) (inst := _) _ _ f => .top * (f default).card
-  | .fromQ (g := .plain) q f => q.card * (f default).card
-  | .fromQ (g := .grouped) q f => q.card * (f default).card
+  -- a derived-table source is ⊤ like any other source: the continuation's
+  -- card under a *marker* row is not provably equal to its card under
+  -- `default` (the HOAS parametricity gap), so the sound bound is ⊤ —
+  -- and the flagship boundary `limit` caps it from outside regardless
+  | .fromQ (g := .plain) _ f => .top * (f default).card
+  | .fromQ (g := .grouped) _ f => .top * (f default).card
 
 @[reducible] def Query.card : Query ts s → Bound
   | .spine sp => sp.card
@@ -186,7 +190,9 @@ mutual
       | none => q.card
   | .groupedC sp _ _ _ _ => sp.card
   | .setOpC .union a b => a.card + b.card
-  | .setOpC .intersect a b => min a.card b.card
+  -- intersect/except: subsets of the left operand (the `min` with the
+  -- right side needs a nodup-subset counting lemma — precision deferred)
+  | .setOpC .intersect a _ => a.card
   | .setOpC .except a _ => a.card
 
 end
@@ -221,6 +227,19 @@ def Query.RowInv (q : Query ts s) (xs : List (Values s)) : Prop :=
 
 instance (q : Query ts s) (xs : List (Values s)) : Decidable (q.RowInv xs) :=
   inferInstanceAs (Decidable (_ = true))
+
+/-- The invariant is **sublist-closed**: boundary nodes pass selections
+of the inner rows through, so every conjunct must survive that. -/
+theorem Query.rowInvB_of_sublist {xs' xs : List (Values s)} :
+    (q : Query ts s) → List.Sublist xs' xs →
+    q.rowInvB xs = true → q.rowInvB xs' = true
+  | .spine _, _, _ => rfl
+  | .groupedC .., _, _ => rfl
+  | .setOpC .., _, _ => rfl
+  | .distinctC q, h, hi => by
+      rw [Query.rowInvB, Bool.and_eq_true] at hi ⊢
+      exact ⟨Values.nodupB_of_sublist h hi.1, Query.rowInvB_of_sublist q h hi.2⟩
+  | .limitC q _ _, h, hi => Query.rowInvB_of_sublist q h hi
 
 /-- Every invariant holds of the empty list — the total fallback the
 fetch door needs when a live engine violates what the query's own

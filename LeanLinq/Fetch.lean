@@ -31,6 +31,11 @@ shape has its proof story, up a ladder of evidence —
   into `DbFetch.forRows`, whose budget proof *is* the refinement. Bound
   `m + k * n`, closed, silent. N+1, written deliberately, priced by the
   bounded query;
+- loops priced by the query's own shape: `q.card` computes the row
+  bound from the query value (`fetchBounded` surfaces it as the
+  refinement, `fetchInv` the structure's row invariant), so the budget
+  proof is the structure itself — soundness is a theorem
+  (`Query.run_card_le` / `run_rowInv`);
 - loops with no bound at all: the same door at the top of the lattice
   ℕ∞ (`Bound`). `fetchLimit q ⊤` emits no `LIMIT` and its refinement
   is vacuously true, so the same `forRows` fuses — and the grade

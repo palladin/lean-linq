@@ -127,7 +127,8 @@ alias counter, so outer references resolve identically in both walks. -/
 def Query.evalRowsIn : Query ts s → EvalEnv ts → Scope → Except EvalError (List (Values s))
   | .spine (g := .plain) sp, ee, sc => do finishPlain ee (← sp.evalSpine ee sc.length sc)
   | .spine (g := .grouped) sp, ee, sc => do finishGrouped ee (← sp.evalSpine ee sc.length sc)
-  | .distinctC q, ee, sc => do pure (← q.evalRowsIn ee sc).eraseDups
+  | .distinctC q, ee, sc => do
+      pure (List.dedupBy Values.beq (← q.evalRowsIn ee sc))
   | .limitC q lim? off?, ee, sc => do
       let rows := (← q.evalRowsIn ee sc).drop (off?.getD 0)
       pure (match lim? with
@@ -144,9 +145,11 @@ def Query.evalRowsIn : Query ts s → EvalEnv ts → Scope → Except EvalError 
       let ra ← a.evalRowsIn ee sc
       let rb ← b.evalRowsIn ee sc
       pure (match op with
-        | .union => (ra ++ rb).eraseDups
-        | .intersect => (ra.filter (rb.contains ·)).eraseDups
-        | .except => (ra.filter (fun r => !rb.contains r)).eraseDups)
+        | .union => List.dedupBy Values.beq (ra ++ rb)
+        | .intersect =>
+            List.dedupBy Values.beq (ra.filter (fun r => rb.any (Values.beq r)))
+        | .except =>
+            List.dedupBy Values.beq (ra.filter (fun r => !rb.any (Values.beq r))))
 
 /-- Enumerate a spine's branches: sources multiply the scope (one branch per
 row, rows read through the node's stored `HasTable` instance, alias
@@ -240,5 +243,92 @@ def ScalarQuery.run (sc : ScalarQuery ts ⟨t, n⟩) (env : TableEnv ts.tables)
     (ps : ParamEnv ts.params := by exact .nil) (now : Option String := none) :
     Except EvalError (Nullable t) :=
   sc.evalCell ⟨env, ps, now⟩
+
+/-! ## Length and invariant lemmas — the soundness theorems' toolkit -/
+
+/-- Invert a successful `Except` bind. -/
+theorem Except.bind_ok {ε α β : Type _} {x : Except ε α} {f : α → Except ε β}
+    {b : β} (h : (x >>= f) = .ok b) : ∃ a, x = .ok a ∧ f a = .ok b := by
+  cases x with
+  | error e => simp [Bind.bind, Except.bind] at h
+  | ok a => exact ⟨a, rfl, by simpa [Bind.bind, Except.bind] using h⟩
+
+theorem List.length_mapM_except {ε α β : Type _} {f : α → Except ε β} :
+    (l : List α) → {ys : List β} → l.mapM f = .ok ys → ys.length = l.length
+  | [], ys, h => by
+      simp only [List.mapM_nil, pure, Except.pure, Except.ok.injEq] at h
+      subst h; rfl
+  | a :: l, ys, h => by
+      rw [List.mapM_cons] at h
+      obtain ⟨b, hfa, h⟩ := Except.bind_ok h
+      obtain ⟨bs, hml, h⟩ := Except.bind_ok h
+      simp only [pure, Except.pure, Except.ok.injEq] at h
+      subst h
+      simp [List.length_mapM_except l hml]
+
+theorem sortTagged_length {s : Schema}
+    (t : List (List (Dir × AnyCell) × Values s)) :
+    (sortTagged t).length = t.length := by
+  simp [sortTagged, List.length_mergeSort]
+
+theorem finishPlain_length {ts : Ctx} {s : Schema} {ee : EvalEnv ts}
+    {brs : List (Branch ts .plain s)} {rows : List (Values s)}
+    (h : finishPlain ee brs = .ok rows) : rows.length = brs.length := by
+  unfold finishPlain at h
+  obtain ⟨tagged, ht, h⟩ := Except.bind_ok h
+  simp only [pure, Except.pure, Except.ok.injEq] at h
+  subst h
+  rw [sortTagged_length, List.length_mapM_except _ ht]
+
+theorem insertGrouped_length_le {ts : Ctx} {s : Schema}
+    (acc : List (List AnyCell × List (GBranch ts s))) (k : List AnyCell)
+    (br : GBranch ts s) :
+    (insertGrouped acc k br).length ≤ acc.length + 1 := by
+  induction acc with
+  | nil => simp [insertGrouped]
+  | cons hd rest ih =>
+      rw [insertGrouped]
+      split
+      · simp
+      · simpa using Nat.succ_le_succ ih
+
+theorem foldl_insertGrouped_length_le {ts : Ctx} {s : Schema}
+    (l : List (List AnyCell × GBranch ts s))
+    (acc : List (List AnyCell × List (GBranch ts s))) :
+    (l.foldl (init := acc) fun a kb => insertGrouped a kb.1 kb.2).length
+      ≤ acc.length + l.length := by
+  induction l generalizing acc with
+  | nil => simp
+  | cons hd t ih =>
+      rw [List.foldl_cons]
+      calc ((t.foldl (fun a kb => insertGrouped a kb.1 kb.2)
+              (insertGrouped acc hd.1 hd.2))).length
+          ≤ (insertGrouped acc hd.1 hd.2).length + t.length := ih _
+        _ ≤ (acc.length + 1) + t.length :=
+            Nat.add_le_add_right (insertGrouped_length_le ..) _
+        _ = acc.length + (hd :: t).length := by
+            simp [Nat.add_assoc, Nat.add_comm 1]
+
+theorem groupedCore_length_le {ts : Ctx} {s : Schema} {ee : EvalEnv ts}
+    {brs : List (GBranch ts s)} {rows : List (Values s)}
+    (h : groupedCore ee brs = .ok rows) : rows.length ≤ brs.length := by
+  unfold groupedCore at h
+  obtain ⟨keyed, hk, h⟩ := Except.bind_ok h
+  obtain ⟨rows?, hr, h⟩ := Except.bind_ok h
+  simp only [pure, Except.pure, Except.ok.injEq] at h
+  subst h
+  calc (sortTagged (rows?.filterMap id)).length
+      = (rows?.filterMap id).length := sortTagged_length _
+    _ ≤ rows?.length := List.length_filterMap_le _ _
+    _ = _ := List.length_mapM_except _ hr
+    _ ≤ 0 + keyed.length := foldl_insertGrouped_length_le _ _
+    _ = keyed.length := Nat.zero_add _
+    _ = brs.length := List.length_mapM_except _ hk
+
+theorem finishGrouped_length_le {ts : Ctx} {s : Schema} {ee : EvalEnv ts}
+    {brs : List (Branch ts .grouped s)} {rows : List (Values s)}
+    (h : finishGrouped ee brs = .ok rows) : rows.length ≤ brs.length := by
+  unfold finishGrouped at h
+  simpa using groupedCore_length_le h
 
 end LeanLinq

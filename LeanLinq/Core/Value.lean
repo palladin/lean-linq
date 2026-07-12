@@ -124,6 +124,70 @@ def Values.nodupB : List (Values s) → Bool
   | [] => true
   | v :: vs => vs.all (fun w => !(Values.beq v w)) && Values.nodupB vs
 
+/-- First-occurrence deduplication by an explicit equality — the shape
+`List.eraseDups` computes, in a structural recursion the soundness
+theorems can induct over (each step keeps the head and filters its
+duplicates out of the tail). -/
+def List.dedupBy (eq : α → α → Bool) : List α → List α
+  | [] => []
+  | v :: vs => v :: List.dedupBy eq (vs.filter (fun w => !eq v w))
+termination_by l => l.length
+decreasing_by
+  simp only [List.length_unattach]
+  exact Nat.lt_succ_of_le (Nat.le_trans (List.length_filter_le _ _) (by simp))
+
+/-- Deduplication keeps a subsequence of the input (first occurrences,
+in order). -/
+theorem List.dedupBy_sublist (eq : α → α → Bool) :
+    (l : List α) → (List.dedupBy eq l).Sublist l
+  | [] => by rw [List.dedupBy]; exact .slnil
+  | v :: vs => by
+      rw [List.dedupBy]
+      exact ((List.dedupBy_sublist eq _).trans List.filter_sublist).cons_cons v
+termination_by l => l.length
+decreasing_by
+  exact Nat.lt_succ_of_le (List.length_filter_le _ _)
+
+theorem List.length_dedupBy_le (eq : α → α → Bool) (l : List α) :
+    (List.dedupBy eq l).length ≤ l.length :=
+  (List.dedupBy_sublist eq l).length_le
+
+/-- `Bool.all` transfers along sublists. -/
+theorem List.all_of_sublist {l' l : List α} {p : α → Bool}
+    (h : List.Sublist l' l)
+    (ha : l.all p = true) : l'.all p = true := by
+  simp only [List.all_eq_true] at ha ⊢
+  exact fun x hx => ha x (h.subset hx)
+
+/-- `nodupB` is sublist-closed — the property every `RowInv` conjunct
+must have. -/
+theorem Values.nodupB_of_sublist {s : Schema} {xs' xs : List (Values s)}
+    (h : List.Sublist xs' xs) (hn : Values.nodupB xs = true) :
+    Values.nodupB xs' = true := by
+  induction h with
+  | slnil => rfl
+  | cons y h ih =>
+      rw [Values.nodupB, Bool.and_eq_true] at hn
+      exact ih hn.2
+  | cons_cons y h ih =>
+      rw [Values.nodupB, Bool.and_eq_true] at hn ⊢
+      exact ⟨List.all_of_sublist h hn.1, ih hn.2⟩
+
+/-- Deduplication delivers `nodupB` — the fact `DISTINCT` promises. -/
+theorem Values.nodupB_dedupBy {s : Schema} :
+    (l : List (Values s)) → Values.nodupB (List.dedupBy Values.beq l) = true
+  | [] => by rw [List.dedupBy]; rfl
+  | v :: vs => by
+      rw [List.dedupBy, Values.nodupB, Bool.and_eq_true]
+      refine ⟨?_, Values.nodupB_dedupBy _⟩
+      simp only [List.all_eq_true]
+      intro w hw
+      have hmem := (List.dedupBy_sublist Values.beq _).subset hw
+      simpa using (List.mem_filter.mp hmem).2
+termination_by l => l.length
+decreasing_by
+  exact Nat.lt_succ_of_le (List.length_filter_le _ _)
+
 instance : BEq (Values s) := ⟨Values.beq⟩
 
 /-- A runtime cell packed with its type (order keys, grouping keys). -/

@@ -311,8 +311,10 @@ example : (Query.from' (ts := BasicCtx) customers).card = ⊤ := rfl
 example : (Query.from' (ts := BasicCtx) customers
   |>.where' (fun c => c["Age"] >=. 18)).card = ⊤ := rfl
 example : (Query.from' (ts := BasicCtx) customers |>.limit 5).card = .fin 5 := rfl
+-- re-limiting wraps as a derived table (fromQ), whose source card is ⊤
+-- (the HOAS-parametricity trade-off): the OUTER limit is what survives
 example : (Query.from' (ts := BasicCtx) customers |>.limit 5 |>.limit 10).card
-    = .fin 5 := rfl
+    = .fin 10 := rfl
 example : (Query.from' (ts := BasicCtx) customers
   |>.innerJoin orders (fun c o => c["Id"] ==. o["CustomerId"])
       (fun c o => ![c["Id"].as "Id", o["OrderId"].as "OId"])
@@ -322,7 +324,7 @@ example : ((Query.from' (ts := BasicCtx) customers |>.limit 5).union
     = .fin 8 := rfl
 example : ((Query.from' (ts := BasicCtx) customers |>.limit 5).intersect
            (Query.from' (ts := BasicCtx) customers |>.limit 3)).card
-    = .fin 3 := rfl
+    = .fin 5 := rfl
 example : (Query.from' (ts := BasicCtx) customers |>.limit 5).card ≤ .fin 9 := by decide
 
 /-! `fetchBounded` — rows arrive refined by the query's *own* `card`;
