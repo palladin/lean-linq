@@ -144,8 +144,8 @@ inductive SqlExprP (ρ : Schema → Type) (ts : Ctx) : SqlType → Type where
 
 /-- A heterogeneous tuple of SQL expressions indexed by a schema: the staged
 value flowing through query combinators (each column is an expression, not a
-runtime value — MetaOCaml-style staging). The `ts` index is the ambient
-table context of the enclosing query, threaded through every cell.
+runtime value). The `ts` index is the ambient table context of the
+enclosing query, threaded through every cell.
 
 The column name lives only in the index, so it flows in from the expected
 type or from `.as`-tagged cells; see the row-literal syntax. -/

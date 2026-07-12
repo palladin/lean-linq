@@ -296,8 +296,8 @@ def QueryP.compileStmt : QueryA ts s → CompileM String
 
 /-- Walk a comprehension spine accumulating FROM sources, JOIN clauses, and
 WHERE conjuncts until the terminal, then assemble one flat SELECT. The third
-argument's type follows the terminal (`SelectK`): a projection callback for
-plain spines, nothing for grouped ones. -/
+argument (`SelSpec`) tells a *plain* terminal what to render as its SELECT
+list; grouped terminals own their projection and ignore it. -/
 def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec → CompileM String
   | .yield r, acc, k => do
       let (sel, tail) ← match k with

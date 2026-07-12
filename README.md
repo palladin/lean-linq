@@ -5,11 +5,11 @@
 [![dialects](https://img.shields.io/badge/SQL-SQLite%20%7C%20PostgreSQL%20%7C%20SQL%20Server-informational)](#integration-tests)
 
 A type-safe, deeply-embedded SQL query DSL for Lean 4 — language-integrated queries built
-from intrinsically-typed GADTs and HOAS binders: schemas index the types of queries and rows,
+from intrinsically-typed GADTs and PHOAS binders: schemas index the types of queries and rows,
 so only well-formed SQL elaborates.
 
 Queries are staged: bound row variables carry *SQL expressions* (not runtime values) and
-compose an expression tree, MetaOCaml-style. The compiler emits parameterized SQL — literals
+compose an expression tree. The compiler emits parameterized SQL — literals
 never appear in the SQL text.
 
 ```lean

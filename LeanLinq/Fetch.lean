@@ -1,4 +1,5 @@
 import LeanLinq.Eval.Query
+import LeanLinq.Theorems
 
 /-! # `DbFetch` — database programs with a round-trip budget in the type
 
@@ -361,5 +362,21 @@ end QueryB
 namespace ScalarB
 export ScalarQuery (fetch)
 end ScalarB
+
+/-! ## Program-level specs
+
+`DbFetch` programs are trees and `runWith` is their model handler, so a
+spec proved against it — quantified over **every** environment — is a
+fact about the *program*, established once; the same tree then meets a
+live engine at an IO door. -/
+
+/-- The spec of the *program*, fully abstract: any query, any limit,
+over **every** database — the fetched page fits. -/
+theorem fetchPage_fits {ts : Ctx} {s : Schema} (q : Query ts s) (n : Nat)
+    (ee : EvalEnv ts) {xs}
+    (h : DbFetch.runWith ee (q.limit n).fetch = .ok xs) :
+    xs.length ≤ n := by
+  simp only [DbFetch.runWith, Query.fetch] at h
+  exact Query.run_limit_length_le q n ee.tables ee.params ee.now h
 
 end LeanLinq

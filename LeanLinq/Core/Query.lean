@@ -78,9 +78,8 @@ multiply** — `from x in (q.limit 3)` contributes at most 3 × the
 continuation's bound. The continuation is priced at the evaluator's own
 marker rows with the evaluator's own alias numbering (`n`, maintained
 equal to the scope length): the soundness proof then compares the same
-function application on both sides, which is what makes the precision
-provable — no uniformity assumption about the HOAS continuation is
-needed. For literal queries `card` reduces definitionally, so `by
+binder application on both sides, which is what makes the precision
+provable — no uniformity assumption about the continuation is needed. For literal queries `card` reduces definitionally, so `by
 decide` can consume it inside types. -/
 
 mutual

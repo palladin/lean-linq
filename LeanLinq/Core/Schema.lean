@@ -43,11 +43,10 @@ scoped syntax (name := rowLit) "![" term,+ "]" : term
     acc ← `(LeanLinq.RowP.consCell $(⟨c⟩) $acc)
   return acc
 
-/-- Materialize the staged row of a source: every column becomes a `field`
-reference through the given alias (empty alias ⇒ bare column names). Both
-staged interpreters instantiate HOAS binders with these marker rows — the
-compiler renders the fields, the evaluator looks them up in an alias
-scope — so they walk the same instantiated trees. -/
+/-- Materialize the marker row of an alias: every column becomes a `field`
+reference through it (empty alias ⇒ bare column names). The statement
+layer binds its row lambdas with these markers; query binders instead
+take the opaque atom, with `RowP.ofAtom` producing the same shape. -/
 def Row.ofAlias (alias : String) : (s : Schema) → Row ts s
   | [] => .nil
   | (name, c) :: s =>

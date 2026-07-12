@@ -4,7 +4,7 @@ import LeanLinq.Core.Types
 
 The value side of the staged language: what a column *holds* when a query is
 evaluated in memory (`Query.run`), as opposed to the expression it is staged
-as (`SqlExpr`). Sits below `Core/Monad` so `SubQuery` can carry an evaluation
+as (`SqlExpr`). Sits below `Core/Monad` so the compile monad can carry an evaluation
 action alongside its compilation action.
 
 Semantics choices (documented, engine-checked by the integration suite):

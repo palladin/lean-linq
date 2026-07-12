@@ -256,6 +256,14 @@ check. The checker below verifies this fails to elaborate. -/
   return (parents.length, children.length)
 }
 
+/-- Program-level reasoning: `fetchPage_fits` is proved once against the
+model handler (`runWith`, over every environment) — the ten-slot page is
+an instance, zero proof work. -/
+example (ee : EvalEnv PlayCtx) {xs}
+    (h : DbFetch.runWith ee (adults.limit 10).fetch = .ok xs) :
+    xs.length ≤ 10 :=
+  fetchPage_fits adults 10 ee h
+
 /-! ## Statements -/
 
 #eval (customers.insert (ts := PlayCtx)
