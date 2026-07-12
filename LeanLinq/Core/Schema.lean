@@ -3,21 +3,6 @@ import LeanLinq.Core.Expr
 
 namespace LeanLinq
 
-/-- A heterogeneous tuple of SQL expressions indexed by a schema: the staged
-value flowing through query combinators (each column is an expression, not a
-runtime value — MetaOCaml-style staging). The `ts` index is the ambient
-table context of the enclosing query, threaded through every cell.
-
-The column name lives only in the index, so it flows in from the expected type
-or from `.as`-tagged cells; see the row-literal syntax below. -/
-inductive RowP (ρ : Schema → Type) : Ctx → Schema → Type where
-  | nil  : RowP ρ ts []
-  | cons : {name : String} → {c : SqlType} → {s : Schema} →
-      SqlExprP ρ ts c → RowP ρ ts s → RowP ρ ts ((name, c) :: s)
-
-/-- The alias-instantiated view — the spelling the library writes. -/
-abbrev Row : Ctx → Schema → Type := RowP AliasOf
-
 /-- A single named output column of a projection; built with `SqlExpr.as`,
 consumed by the row-literal syntax `[e₁.as "A", e₂.as "B"]`. The
 expression's nullability flag becomes the projected column's. -/
@@ -70,11 +55,12 @@ def Row.ofAlias (alias : String) : (s : Schema) → Row ts s
 
 /-- Splice two rows; the natural result selector for `product`:
 `fun a b => a ++ b`. -/
-def RowP.append : Row ts s₁ → Row ts s₂ → Row ts (s₁ ++ s₂)
+def RowP.append : RowP ρ ts s₁ → RowP ρ ts s₂ → RowP ρ ts (s₁ ++ s₂)
   | .nil,       r₂ => r₂
   | .cons e r₁, r₂ => .cons e (r₁.append r₂)
 
-instance : HAppend (Row ts s₁) (Row ts s₂) (Row ts (s₁ ++ s₂)) := ⟨RowP.append⟩
+instance : HAppend (RowP ρ ts s₁) (RowP ρ ts s₂) (RowP ρ ts (s₁ ++ s₂)) :=
+  ⟨RowP.append⟩
 
 /-! ## Column access by name
 
@@ -109,12 +95,12 @@ put it on the right of `==.`/`!=.`. -/
 structure CellLit (c : SqlType) where
   cell : c.interp
 
-def CellLit.toExpr [SqlLit t] : {nl : Bool} → CellLit ⟨t, nl⟩ → SqlExpr ts ⟨t, nl⟩
+def CellLit.toExpr [SqlLit t] : {nl : Bool} → CellLit ⟨t, nl⟩ → SqlExprP ρ ts ⟨t, nl⟩
   | false, ⟨x⟩ => SqlLit.lit x
   | true, ⟨some x⟩ => .widen (SqlLit.lit x)
   | true, ⟨none⟩ => .nullC t
 
-instance [SqlLit t] : Coe (CellLit ⟨t, nl⟩) (SqlExpr ts ⟨t, nl⟩) := ⟨CellLit.toExpr⟩
+instance [SqlLit t] : Coe (CellLit ⟨t, nl⟩) (SqlExprP ρ ts ⟨t, nl⟩) := ⟨CellLit.toExpr⟩
 
 /-- Cell access by name on fetched rows: `v.cellLit "Id"`. Prefer the
 bracket sugar `v["Id"]`. -/
@@ -192,8 +178,8 @@ open Lean Elab Term Meta in
       | none => ensureHasType exp e
 
 /-- Positional column access. -/
-def RowP.nth : {s : Schema} → Row ts s → (i : Fin s.length) →
-    SqlExpr ts (s.get i).2
+def RowP.nth : {s : Schema} → RowP ρ ts s → (i : Fin s.length) →
+    SqlExprP ρ ts (s.get i).2
   | _, .nil,      i        => i.elim0
   | _, .cons e _, ⟨0, _⟩   => e
   | _, .cons _ r, ⟨i+1, h⟩ => r.nth ⟨i, Nat.lt_of_succ_lt_succ h⟩

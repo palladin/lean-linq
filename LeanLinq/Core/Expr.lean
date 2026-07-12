@@ -1,4 +1,4 @@
-import LeanLinq.Core.Monad
+import LeanLinq.Core.Table
 
 namespace LeanLinq
 
@@ -31,7 +31,18 @@ inductive Dir where
   | asc | desc
   deriving DecidableEq, Repr
 
-/-- Intrinsically-typed SQL expressions: `SqlExpr ts c` can only be built
+/-- The terminal shape of a comprehension spine: does it end in a plain
+projection (`yield`) or a grouped one (`groupYield`, carrying
+GROUP BY/HAVING)? Indexing `SpineQ` by this makes the grouping discipline
+*static*: `SpineQ.bind` accepts only `.plain` spines, so splicing through a
+grouped terminal — which would discard its GROUP BY — is untypeable rather
+than guarded at run time. -/
+inductive Terminal where
+  | plain
+  | grouped
+  deriving DecidableEq, Repr
+
+/-! Intrinsically-typed SQL expressions: `SqlExpr ts c` can only be built
 from operations valid for the column type `c`, so ill-typed SQL is
 unrepresentable — and `c.nullable` tracks **nullability**, flowing by
 construction: literals
@@ -42,10 +53,19 @@ across a whole query, so the tables referenced by any embedded subquery are
 `HasTable`-checked against the same context. Numeric operators are
 constrained at the notation layer; the raw constructors are internal.
 
-Subqueries (`inSub`/`scalarSub`) are stored as staged `SubQuery` actions,
-not ASTs — see `SubQuery` for the positivity story. Construct them with
-`SqlExpr.inQuery`/`ScalarQuery.embed` (defined with the compiler). -/
-inductive SqlExprP (ρ : Schema → Type) : Ctx → SqlType → Type where
+Subqueries (`inSub`/`existsSub`/`scalarSub`) are stored **structurally** —
+the whole AST is one mutual family, so a correlated subquery is simply a
+`QueryP` at the *same* ρ, capturing outer binders like any other subterm.
+This is what binders at the opaque atom (`ρ s → …`) buy: the mutual
+occurrences all sit in positive positions. Construct them with
+`SqlExpr.inQuery`/`.exists'`/`ScalarQuery.embed`. -/
+mutual
+
+/-- Intrinsically-typed SQL expressions (see the section comment above).
+`ts` is a *parameter* of the whole mutual family — the ambient context is
+fixed across a query, its subqueries included, and the kernel's nested
+`List (OrderKeyP ρ ts)` support requires it. -/
+inductive SqlExprP (ρ : Schema → Type) (ts : Ctx) : SqlType → Type where
   -- literals (compiled to auto-named parameters, never inlined; never NULL)
   | intC (i : Int) : SqlExprP ρ ts .int
   | longC (i : Int) : SqlExprP ρ ts .long
@@ -86,9 +106,9 @@ inductive SqlExprP (ρ : Schema → Type) : Ctx → SqlType → Type where
   | isNull : SqlExprP ρ ts c → SqlExprP ρ ts .bool
   | isNotNull : SqlExprP ρ ts c → SqlExprP ρ ts .bool
   -- EXISTS (subquery): true or false, never NULL — a strict bool like
-  -- the null tests. Stored staged (see `ExistsSub`); correlation works
-  -- through the scope its eval action receives.
-  | existsSub : ExistsSub ts → SqlExprP ρ ts .bool
+  -- the null tests. Stored structurally at the same ρ; correlation is
+  -- ordinary variable capture.
+  | existsSub : QueryP ρ ts s → SqlExprP ρ ts .bool
   | like : SqlExprP ρ ts ⟨.string, true⟩ → SqlExprP ρ ts ⟨.string, true⟩ → SqlExprP ρ ts ⟨.bool, true⟩
   -- IN over a value list. Stored as Σ-packed elements because the kernel
   -- rejects nested `List (SqlExprP ρ ts t n)` with a local index; the
@@ -96,9 +116,10 @@ inductive SqlExprP (ρ : Schema → Type) : Ctx → SqlType → Type where
   -- (element flags are erased by the packing).
   | inList : SqlExprP ρ ts c → List ((p : SqlType) × SqlExprP ρ ts p) →
       SqlExprP ρ ts ⟨.bool, true⟩
-  | inSub : SqlExprP ρ ts ⟨t, n⟩ → SubQuery ts t → SqlExprP ρ ts ⟨.bool, true⟩
+  | inSub : SqlExprP ρ ts ⟨t, nf⟩ → QueryP ρ ts [(cn, ⟨t, m⟩)] →
+      SqlExprP ρ ts ⟨.bool, true⟩
   -- a scalar subquery may be empty ⇒ NULL
-  | scalarSub : SubQuery ts t → SqlExprP ρ ts ⟨t, true⟩
+  | scalarSub : ScalarQueryP ρ ts ⟨t, n⟩ → SqlExprP ρ ts ⟨t, true⟩
   | caseWhen : SqlExprP ρ ts ⟨.bool, nc⟩ → SqlExprP ρ ts ⟨t, true⟩ → SqlExprP ρ ts ⟨t, true⟩ →
       SqlExprP ρ ts ⟨t, true⟩
   -- aggregates (meaningful in grouped selects / HAVING / scalar queries):
@@ -121,6 +142,107 @@ inductive SqlExprP (ρ : Schema → Type) : Ctx → SqlType → Type where
   | dateDiff (u : DateUnit) : SqlExprP ρ ts ⟨.dateTime, n₁⟩ → SqlExprP ρ ts ⟨.dateTime, n₂⟩ →
       SqlExprP ρ ts ⟨.int, n₁ || n₂⟩
 
+/-- A heterogeneous tuple of SQL expressions indexed by a schema: the staged
+value flowing through query combinators (each column is an expression, not a
+runtime value — MetaOCaml-style staging). The `ts` index is the ambient
+table context of the enclosing query, threaded through every cell.
+
+The column name lives only in the index, so it flows in from the expected
+type or from `.as`-tagged cells; see the row-literal syntax. -/
+inductive RowP (ρ : Schema → Type) (ts : Ctx) : Schema → Type where
+  | nil  : RowP ρ ts []
+  | cons : {name : String} → {c : SqlType} → {s : Schema} →
+      SqlExprP ρ ts c → RowP ρ ts s → RowP ρ ts ((name, c) :: s)
+
+/-- A heterogeneously-typed ORDER BY key with its direction; build with
+`e.asc` / `e.desc`. -/
+structure OrderKeyP (ρ : Schema → Type) (ts : Ctx) where
+  col : SqlType
+  expr : SqlExprP ρ ts col
+  dir : Dir
+
+/-- A heterogeneously-typed GROUP BY key; build with `e.key`. -/
+structure KeyExprP (ρ : Schema → Type) (ts : Ctx) where
+  col : SqlType
+  expr : SqlExprP ρ ts col
+
+/-- The comprehension *spine*: the monadic core that always compiles to one
+flat SELECT. `fromT`/`joinT` bind row variables over sources, `guard` adds a
+WHERE conjunct, `order` contributes ORDER BY keys, and the spine ends in one
+of two terminals — `yield` (a plain projection, `Terminal.plain`) or
+`groupYield` (keys/HAVING/own ORDER BY/grouped projection,
+`Terminal.grouped`). `fromQ` brings a full `Query` (with boundary clauses)
+back in as a derived table.
+
+**Binders take the opaque atom** (`ρ s → …`), not a row: the atom is the
+one slot the ∀ρ-polymorphic term cannot inspect, and keeping the mutual
+family out of binder domains is what strict positivity demands. The smart
+constructors re-wrap with `RowP.ofAtom`, so surface lambdas still receive
+rows.
+
+The `ts` index is the ambient table context: `fromT`/`joinT` *demand* a
+`HasTable ts n s` instance and store it in the node — the query keeps track
+of its referenced tables as capabilities, resolved at elaboration time, so
+evaluation needs no name lookup and running against a database lacking a
+table is a type error. -/
+inductive SpineQP (ρ : Schema → Type) (ts : Ctx) : Terminal → Schema → Type where
+  | yield : {s : Schema} → RowP ρ ts s → SpineQP ρ ts .plain s
+  -- the grouped terminal: GROUP BY keys, optional HAVING, its own ORDER BY
+  -- keys (the pipeline's aggregate-aware `orderBy`, rendered inside the
+  -- grouped statement), and the grouped projection
+  | groupYield : {s : Schema} → List (KeyExprP ρ ts) →
+      Option (SqlExprP ρ ts ⟨.bool, true⟩) → List (OrderKeyP ρ ts) →
+      RowP ρ ts s → SpineQP ρ ts .grouped s
+  | guard : {g : Terminal} → {s : Schema} → {nb : Bool} →
+      SqlExprP ρ ts ⟨.bool, nb⟩ → SpineQP ρ ts g s → SpineQP ρ ts g s
+  -- ORDER BY belongs to the statement being assembled, so it lives on the
+  -- spine (keys already applied to the bound rows) and `bind` splices
+  -- through it — projections/filters after `orderBy` fuse into the same
+  -- flat statement (SQL Server in particular forbids ORDER BY inside a
+  -- derived table). In a grouped spine the keys may reference aggregates.
+  | order : {g : Terminal} → {s : Schema} →
+      List (OrderKeyP ρ ts) → SpineQP ρ ts g s → SpineQP ρ ts g s
+  | fromT : {g : Terminal} → {n : String} → {s s' : Schema} →
+      [inst : HasTable ts.tables n s] → Table n s →
+      (ρ s → SpineQP ρ ts g s') → SpineQP ρ ts g s'
+  | joinT : {g : Terminal} → {n : String} → {s s' : Schema} →
+      {nb : Bool} → [inst : HasTable ts.tables n s] → Table n s →
+      (ρ s → SqlExprP ρ ts ⟨.bool, nb⟩) →
+      (ρ s → SpineQP ρ ts g s') → SpineQP ρ ts g s'
+  -- LEFT JOIN: the joined row is NULL-lifted — its columns read as
+  -- nullable in the ON predicate and everything downstream: the
+  -- type-level truth of the padding row.
+  | joinLeftT : {g : Terminal} → {n : String} → {s s' : Schema} →
+      {nb : Bool} → [inst : HasTable ts.tables n s] → Table n s →
+      (ρ s.asNull → SqlExprP ρ ts ⟨.bool, nb⟩) →
+      (ρ s.asNull → SpineQP ρ ts g s') → SpineQP ρ ts g s'
+  | fromQ : {g : Terminal} → {s s' : Schema} → QueryP ρ ts s →
+      (ρ s → SpineQP ρ ts g s') → SpineQP ρ ts g s'
+
+/-- A full query: a spine (of either terminal shape), or a spine decorated by
+*boundary* clauses that `bind` must not splice through (DISTINCT,
+LIMIT/OFFSET, set operations) — binding over them wraps the query as a
+derived table, which is exactly SQL's semantics. The pipeline's GROUP BY
+fuses into a `groupYield` terminal at `select`-time.
+
+Use the `query! { … }` syntax or the pipeline smart constructors rather than
+the raw constructors. -/
+inductive QueryP (ρ : Schema → Type) (ts : Ctx) : Schema → Type where
+  | spine : {g : Terminal} → {s : Schema} → SpineQP ρ ts g s → QueryP ρ ts s
+  | distinctC : {s : Schema} → QueryP ρ ts s → QueryP ρ ts s
+  | limitC : {s : Schema} → QueryP ρ ts s → Option Nat → Option Nat → QueryP ρ ts s
+  | setOpC : {s : Schema} → SetOp → QueryP ρ ts s → QueryP ρ ts s → QueryP ρ ts s
+
+/-- A query returning a single scalar value. The `Bool` index is its
+nullability: SUM/AVG/MIN/MAX over an empty group are NULL; `COUNT(*)`
+never is. -/
+inductive ScalarQueryP (ρ : Schema → Type) (ts : Ctx) : SqlType → Type where
+  | aggQ (op : AggOp) {n : String} {t : SqlPrim} {nl : Bool}
+      (sp : SpineQP ρ ts .plain [(n, ⟨t, nl⟩)]) : ScalarQueryP ρ ts ⟨t, true⟩
+  | countQ {s : Schema} (sp : SpineQP ρ ts .plain s) : ScalarQueryP ρ ts .int
+
+end
+
 /-- The compiled-view row representation: a bound row is its source
 alias, with the row's schema as a phantom index — the phantom is what
 lets binder receivers drive `HasCol` lookups once binders take ρ-values
@@ -139,13 +261,32 @@ abbrev SqlExpr : Ctx → SqlType → Type := SqlExprP StrRow
 user code spells by full name (dot-notation on receivers resolves
 through the reducible abbrev to `SqlExprP` on its own — aliasing more
 would shadow that path). -/
-def SqlExpr.caseWhen (c : SqlExpr ts ⟨.bool, nc⟩) (a b : SqlExpr ts ⟨t, true⟩) :
-    SqlExpr ts ⟨t, true⟩ := SqlExprP.caseWhen c a b
-def SqlExpr.concat (a b : SqlExpr ts ⟨.string, n⟩) : SqlExpr ts ⟨.string, n⟩ :=
+def SqlExpr.caseWhen (c : SqlExprP ρ ts ⟨.bool, nc⟩) (a b : SqlExprP ρ ts ⟨t, true⟩) :
+    SqlExprP ρ ts ⟨t, true⟩ := SqlExprP.caseWhen c a b
+def SqlExpr.concat (a b : SqlExprP ρ ts ⟨.string, n⟩) : SqlExprP ρ ts ⟨.string, n⟩ :=
   SqlExprP.concat a b
-def SqlExpr.now : SqlExpr ts .dateTime := SqlExprP.now
+def SqlExpr.now : SqlExprP ρ ts .dateTime := SqlExprP.now
 
 instance : Inhabited (SqlExpr ts c) := ⟨.field (s' := []) c ⟨""⟩ ""⟩
+
+instance : Inhabited (AliasOf s) := ⟨⟨""⟩⟩
+
+/-- Alias-instantiated views of the query family — the spellings the
+library's internal walks (compiler, evaluator, `card`) write. -/
+abbrev Row : Ctx → Schema → Type := RowP AliasOf
+abbrev SpineQ : Ctx → Terminal → Schema → Type := SpineQP AliasOf
+abbrev QueryA : Ctx → Schema → Type := QueryP AliasOf
+abbrev ScalarA : Ctx → SqlType → Type := ScalarQueryP AliasOf
+
+private def RowP.ofAtomAux (a : ρ s') : (s : Schema) → RowP ρ ts s
+  | [] => .nil
+  | (nm, c) :: s => .cons (.field c a nm) (RowP.ofAtomAux a s)
+
+/-- The row a binder's atom stands for: every column a `field` reference
+through the atom. The smart constructors wrap raw binders with this, so
+surface lambdas receive rows while the AST stores only the opaque atom. -/
+def RowP.ofAtom {s : Schema} (a : ρ s) : RowP ρ ts s :=
+  RowP.ofAtomAux a s
 
 /-- Strict expressions embed into nullable positions (`widen` is identity
 at compile time and run time). -/
@@ -253,22 +394,10 @@ def SqlExprP.diffDays (e : SqlExprP ρ ts ⟨.dateTime, n₁⟩) (x : SqlExprP �
 def SqlExprP.diffMonths (e : SqlExprP ρ ts ⟨.dateTime, n₁⟩) (x : SqlExprP ρ ts ⟨.dateTime, n₂⟩) : SqlExprP ρ ts ⟨.int, n₁ || n₂⟩ := .dateDiff .month e x
 def SqlExprP.diffYears (e : SqlExprP ρ ts ⟨.dateTime, n₁⟩) (x : SqlExprP ρ ts ⟨.dateTime, n₂⟩) : SqlExprP ρ ts ⟨.int, n₁ || n₂⟩ := .dateDiff .year e x
 
-/-- A heterogeneously-typed ORDER BY key with its direction; build with
-`e.asc` / `e.desc`. -/
-structure OrderKeyP (ρ : Schema → Type) (ts : Ctx) where
-  col : SqlType
-  expr : SqlExprP ρ ts col
-  dir : Dir
-
 abbrev OrderKey : Ctx → Type := OrderKeyP AliasOf
 
 def SqlExprP.asc (e : SqlExprP ρ ts c) : OrderKeyP ρ ts := ⟨c, e, .asc⟩
 def SqlExprP.desc (e : SqlExprP ρ ts c) : OrderKeyP ρ ts := ⟨c, e, .desc⟩
-
-/-- A heterogeneously-typed GROUP BY key; build with `e.key`. -/
-structure KeyExprP (ρ : Schema → Type) (ts : Ctx) where
-  col : SqlType
-  expr : SqlExprP ρ ts col
 
 abbrev KeyExpr : Ctx → Type := KeyExprP AliasOf
 

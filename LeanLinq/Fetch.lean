@@ -180,8 +180,9 @@ end DbFetch
 the keys become an `IN (…)` list inside a single statement, so a thousand
 parents still cost grade 1. This is how N+1 collapses to 1+1. -/
 def DbFetch.fetchFor [SqlLit t] (keys : List t.interp)
-    (mk : List (SqlExpr c ⟨t, true⟩) → Query c s) : DbFetch c 1 (List (Values s)) :=
-  .fetch (mk (keys.map fun k => .widen (SqlLit.lit k)))
+    (mk : (∀ {ρ}, List (SqlExprP ρ c ⟨t, true⟩)) → Query c s) :
+    DbFetch c 1 (List (Values s)) :=
+  .fetch (mk fun {ρ} => keys.map fun k => .widen (SqlLit.lit k))
 
 /-- Fetch at most `n` rows, **with the bound in the type**: applies
 `LIMIT n` to the query and returns a length-refined list — the evidence
@@ -255,7 +256,7 @@ def DbFetch.fetchInv (q : Query c s) :
     DbFetch c 1 {xs : List (Values s) // q.RowInv xs} :=
   (fetch q).map fun xs =>
     if h : q.RowInv xs then ⟨xs, h⟩
-    else ⟨[], q.rowInvB_nil⟩
+    else ⟨[], Query.rowInvB_nil (q AliasOf)⟩
 
 /-- `q.fetchInv` — flowing spelling. -/
 def Query.fetchInv (q : Query c s) :
@@ -396,12 +397,12 @@ open Lean in
         Macro.throwErrorAt c "expected `let x ← e`, `let x := e`, `let ys ← for x in xs do e`, or a final `return e`"
     `(LeanLinq.DbFetch.withBound $folded)
 
-namespace QueryP
+namespace QueryB
 export Query (fetch fetchLimit fetchBounded fetchInv fetchLimitWhere)
-end QueryP
+end QueryB
 
-namespace ScalarQueryP
+namespace ScalarB
 export ScalarQuery (fetch)
-end ScalarQueryP
+end ScalarB
 
 end LeanLinq

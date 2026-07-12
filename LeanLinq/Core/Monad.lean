@@ -11,39 +11,6 @@ structure CompileState where
 /-- Compilation reads the target dialect and threads `CompileState`. -/
 abbrev CompileM := ReaderT DatabaseType (StateM CompileState)
 
-/-- A staged subquery producing a single column of type `t`: expressions
-embed subqueries as their *staged actions* — compilation and evaluation —
-rather than their AST. This breaks the `SqlExpr`/`Query` cycle that would
-otherwise violate strict positivity through the HOAS binders (`Row → Query`
-puts `Query` occurrences inside `Row`'s expression fields, to the left of an
-arrow); the actions' types (`CompileM String`, `EvalEnv ts → …`) mention
-neither inductive, so positivity is untouched.
-
-The indices carry the erased query's table context and column type: `ts`
-ties the subquery to the ambient context of the expression it embeds into
-(so its table references were `HasTable`-checked against the same context),
-and `t` types the evaluated cells. Both are therefore visible in the AST,
-not just enforced at the smart constructors (`SqlExpr.inQuery` /
-`ScalarQuery.embed` — the only intended producers). -/
-structure SubQuery (ts : Ctx) (t : SqlPrim) where
-  compile : CompileM String
-  -- the eval action takes the *outer scope* at the evaluation site, so a
-  -- correlated subquery resolves outer column references exactly like the
-  -- compiled SQL does (the compile action runs in the shared CompileM
-  -- state, so inner aliases continue the outer numbering; eval mirrors
-  -- this by starting the inner spine at the scope's length — the alias
-  -- counter always equals the scope length along any evaluation path)
-  eval : EvalEnv ts → Scope → Except EvalError (List (Nullable t))
-
-/-- A staged `EXISTS` subquery: like `SubQuery`, the erased query lives
-on as its two actions — but no column type is involved (`EXISTS` asks
-only whether rows exist), so any schema embeds. The eval action takes
-the evaluation site's scope: correlated `EXISTS` is the construct's
-whole point. -/
-structure ExistsSub (ts : Ctx) where
-  compile : CompileM String
-  eval : EvalEnv ts → Scope → Except EvalError Bool
-
 /-- Allocate a fresh source alias: `a0`, `a1`, … -/
 def freshAlias : CompileM String := fun _ =>
   modifyGet fun st =>

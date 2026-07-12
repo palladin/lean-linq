@@ -1,4 +1,4 @@
-import LeanLinq.Core.Schema
+import LeanLinq.Core.Monad
 
 namespace LeanLinq
 

@@ -143,7 +143,7 @@ def FromWhereAgeInSubquery := Query.from' (ts := TestCtx) customers
         |>.select (fun x => ![x["Age"].as "Age"])))
 def FromWhereAgeInSubqueryWithClosure := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["Age"].inQuery
-      (Query.from' (ts := TestCtx) customers
+      (QueryP.from' (ts := TestCtx) customers
         |>.where' (fun x => x["Name"] ==. c["Name"] ++ (SqlExpr.str "_VIP").anyNull)
         |>.select (fun x => ![x["Age"].as "Age"])))
 /-- Correlated IN subquery: the inner WHERE references the *outer* row.
@@ -152,14 +152,14 @@ must resolve against the outer row (engines: customers with an order),
 not rebind to same-numbered inner aliases. -/
 def FromWhereCorrelatedInSubquery := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["Id"].inQuery
-      (Query.from' (ts := TestCtx) orders
+      (QueryP.from' (ts := TestCtx) orders
         |>.where' (fun o => o["CustomerId"] ==. c["Id"])
         |>.select (fun o => ![o["CustomerId"].as "CustomerId"])))
 
 /-- Correlated scalar embed: a per-outer-row aggregate in WHERE. -/
 def FromWhereCorrelatedScalarSubquery := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => SqlExpr.int 0 <.
-      (Query.from' (ts := TestCtx) orders
+      (QueryP.from' (ts := TestCtx) orders
         |>.where' (fun o => o["CustomerId"] ==. c["Id"])
         |>.count).embed)
 
@@ -186,13 +186,13 @@ def DateTimeAddMonthsClamp := Query.from' (ts := TestCtx) products
 least one order. -/
 def FromWhereExistsCorrelated := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => SqlExpr.exists'
-      (Query.from' (ts := TestCtx) orders
+      (QueryP.from' (ts := TestCtx) orders
         |>.where' (fun o => o["CustomerId"] ==. c["Id"])))
 
 /-- NOT EXISTS: customers with no orders. -/
 def FromWhereNotExists := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => SqlExpr.notExists
-      (Query.from' (ts := TestCtx) orders
+      (QueryP.from' (ts := TestCtx) orders
         |>.where' (fun o => o["CustomerId"] ==. c["Id"])))
 
 /-- NOT IN over a subquery. -/

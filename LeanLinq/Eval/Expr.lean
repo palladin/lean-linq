@@ -120,170 +120,17 @@ def SqlPrim.floorV : (t : SqlPrim) → t.interp → Except EvalError (Nullable t
   | t, _ => .error (.unsupported "FLOOR" t)
 
 /-- Apply a strict unary SQL operation: NULL in, NULL out; errors pass. -/
-private def strict1 (x? : Nullable a)
+def strict1 (x? : Nullable a)
     (f : a.interp → Except EvalError (Nullable b)) : Except EvalError (Nullable b) :=
   match x? with
   | none => pure none
   | some x => f x
 
 /-- Apply a strict binary SQL operation: any NULL operand yields NULL. -/
-private def strict2 (x? y? : Nullable a)
+def strict2 (x? y? : Nullable a)
     (f : a.interp → a.interp → Except EvalError (Nullable b)) : Except EvalError (Nullable b) :=
   match x?, y? with
   | some x, some y => f x y
   | _, _ => pure none
-
-mutual
-
-/-- Evaluate an expression over the scopes of the current group
-(singleton = ungrouped row context). -/
-def SqlExprP.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts ⟨t, n⟩ →
-    Except EvalError (Nullable t)
-  | _, .intC i => pure (some i)
-  | _, .longC i => pure (some i)
-  | _, .doubleC f => pure (some f)
-  | _, .decimalC d => pure (some (parseDecimal d))
-  | _, .stringC s => pure (some s)
-  | _, .boolC b => pure (some b)
-  | _, .dateTimeC s => pure (some (normDateTime s))
-  | _, .guidC g => pure (some g.toLower)
-  | _, .nullC _ => pure none
-  | _, .paramE (inst := i) _ => pure (SqlType.toNullable (i.get ee.params))
-  | scs, .widen e => e.evalG ee scs
-  | scs, .field ⟨t', _⟩ row name =>
-      match scs.head? with
-      | none => .error (.internal s!"no row in scope for {row.alias}.{name}")
-      | some sc =>
-          match sc.get? row.alias name t' with
-          | some cell => pure cell
-          | none => .error (.internal s!"unresolved field {row.alias}.{name}")
-  | scs, .arith op a b => do
-      strict2 (← a.evalG ee scs) (← b.evalG ee scs) (t.arithV op)
-  | scs, .concat a b => do
-      strict2 (← a.evalG ee scs) (← b.evalG ee scs) fun x y => pure (some (x ++ y))
-  | scs, .cmp (t := t₀) op a b => do
-      strict2 (← a.evalG ee scs) (← b.evalG ee scs) fun x y =>
-        pure (some (op.holds (t₀.cmpV x y)))
-  | scs, .and a b => do
-      pure (match (← a.evalG ee scs), (← b.evalG ee scs) with
-        | some false, _ => some false
-        | _, some false => some false
-        | some true, some true => some true
-        | _, _ => none)
-  | scs, .or a b => do
-      pure (match (← a.evalG ee scs), (← b.evalG ee scs) with
-        | some true, _ => some true
-        | _, some true => some true
-        | some false, some false => some false
-        | _, _ => none)
-  | scs, .not a => do pure ((← a.evalG ee scs).map (!·))
-  | scs, .isNull e => do pure (some (← e.evalG ee scs).isNone)
-  | scs, .isNotNull e => do pure (some (← e.evalG ee scs).isSome)
-  | scs, .like e p => do
-      strict2 (← e.evalG ee scs) (← p.evalG ee scs) fun s pat =>
-        pure (some (likeMatch s pat))
-  | scs, .inList (c := ⟨t₀, _⟩) e es => do
-      -- `x IN ()` is FALSE without evaluating x (mirrors the compiled `(1 = 0)`)
-      match es with
-      | [] => pure (some false)
-      | es =>
-          match (← e.evalG ee scs) with
-          | none => pure none
-          | some v =>
-              let hits := (← SqlExprP.evalGList ee scs es).map fun ⟨u, cell⟩ =>
-                if h : u = t₀ then
-                  (h ▸ cell).map (fun w => t₀.cmpV v w == Ordering.eq)
-                else some false
-              pure (if hits.any (· == some true) then some true
-                    else if hits.any (·.isNone) then none
-                    else some false)
-      -- the subquery evaluates in the *current* scope, so correlated outer
-      -- references resolve; in aggregate positions (several member scopes)
-      -- the group's first member stands for the group, the same convention
-      -- bare column reads use
-  | scs, .inSub (t := t₀) e sq => do
-      match (← e.evalG ee scs) with
-      | none => pure none
-      | some v =>
-          let hits := (← sq.eval ee (scs.head?.getD [])).map
-            (·.map (fun w => t₀.cmpV v w == Ordering.eq))
-          pure (if hits.any (· == some true) then some true
-                else if hits.any (·.isNone) then none
-                else some false)
-  | scs, .scalarSub sq => do
-      pure (match (← sq.eval ee (scs.head?.getD [])) with
-        | c :: _ => c
-        | [] => none)
-  -- EXISTS: rows or not — never NULL, evaluated in the current scope
-  -- (correlation is the construct's whole point)
-  | scs, .existsSub sub => do
-      pure (some (← sub.eval ee (scs.head?.getD [])))
-  -- CASE is lazy in its branches (SQL semantics): only the taken branch
-  -- evaluates, so a guarded division cannot error
-  | scs, .caseWhen c a b => do
-      if (← c.evalG ee scs) == some true then a.evalG ee scs else b.evalG ee scs
-  | scs, .aggE (t := t₁) op e => do
-      t₁.aggV op ((← scs.mapM fun sc => e.evalG ee [sc]).filterMap id)
-  | scs, .countAll => pure (some (scs.length : Int))
-  | scs, .abs e => do strict1 (← e.evalG ee scs) t.absV
-  | scs, .round e digits => do strict1 (← e.evalG ee scs) (t.roundV digits)
-  | scs, .ceiling e => do strict1 (← e.evalG ee scs) t.ceilV
-  | scs, .floor e => do strict1 (← e.evalG ee scs) t.floorV
-  | scs, .substring e start len => do
-      pure ((← e.evalG ee scs).map (sqlSubstring · start len))
-  | scs, .upper e => do pure ((← e.evalG ee scs).map (·.toUpper))
-  | scs, .lower e => do pure ((← e.evalG ee scs).map (·.toLower))
-  | scs, .trim e => do pure ((← e.evalG ee scs).map (·.trimAscii.toString))
-  | scs, .length e => do pure ((← e.evalG ee scs).map (fun s => (s.length : Int)))
-  | _, .now =>
-      match ee.now with
-      | some s => pure (some s)
-      | none => .error .noClock
-  | scs, .datePart u e => do
-      pure ((← e.evalG ee scs).map fun s =>
-        match u with
-        | .year => (parseYMD s).1
-        | .month => (parseYMD s).2.1
-        | .day => (parseYMD s).2.2)
-  | scs, .dateAdd u e n => do
-      pure ((← e.evalG ee scs).map fun s =>
-        match u with
-        | .day => dateAddDays s n
-        | .month => dateAddMonths s n
-        | .year => dateAddYears s n)
-  | scs, .dateDiff u a b => do
-      strict2 (← a.evalG ee scs) (← b.evalG ee scs) fun x y =>
-        pure (some (match u with
-          | .day => dateDiffDays x y
-          | .month => dateDiffMonths x y
-          | .year => dateDiffYears x y))
-
-def SqlExprP.evalGList (ee : EvalEnv ts) (scs : List Scope) :
-    List ((p : SqlType) × SqlExpr ts p) →
-    Except EvalError (List ((u : SqlPrim) × Nullable u))
-  | [] => pure []
-  | ⟨p, e⟩ :: es => do
-      pure (⟨p.ty, ← e.evalG ee scs⟩ :: (← SqlExprP.evalGList ee scs es))
-
-end
-
-/-- Evaluate every cell of a projected row — the construction boundary
-where `Nullable` computation results become honest cells: a NOT NULL
-column receiving `none` is a loud internal error, never a silent NULL
-(unreachable through the public surface: the flag arithmetic guarantees a
-strict projection evaluates non-NULL). -/
-def RowP.evalRow (ee : EvalEnv ts) (scs : List Scope) :
-    {s : Schema} → Row ts s → Except EvalError (Values s)
-  | _, .nil => pure .nil
-  | _, .cons (name := nm) e r => do
-      pure (.cons (← SqlType.ofNullable nm _ (← e.evalG ee scs)) (← r.evalRow ee scs))
-
-namespace SqlExpr
-export SqlExprP (evalG evalGList)
-end SqlExpr
-
-namespace Row
-export RowP (evalRow)
-end Row
 
 end LeanLinq

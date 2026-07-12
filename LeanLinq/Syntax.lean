@@ -86,10 +86,10 @@ private def foldLeading (acc : Term) (c : Syntax) : MacroM Term := do
   if c.isOfKind ``sqlFrom then
     `(LeanLinq.QuerySource.bind $(⟨c[3]⟩) (fun $(⟨c[1]⟩) => $acc))
   else if c.isOfKind ``sqlJoin then
-    `(LeanLinq.SpineQP.joinT $(⟨c[3]⟩)
+    `(LeanLinq.SpineQP.joinR $(⟨c[3]⟩)
         (fun $(⟨c[1]⟩) => $(⟨c[5]⟩)) (fun $(⟨c[1]⟩) => $acc))
   else if c.isOfKind ``sqlLeftJoin then
-    `(LeanLinq.SpineQP.joinLeftT $(⟨c[3]⟩)
+    `(LeanLinq.SpineQP.joinLeftR $(⟨c[3]⟩)
         (fun $(⟨c[1]⟩) => $(⟨c[5]⟩)) (fun $(⟨c[1]⟩) => $acc))
   else if c.isOfKind ``sqlWhere then
     `(LeanLinq.SpineQP.guard $(⟨c[1]⟩) $acc)
@@ -102,15 +102,15 @@ private def foldLeading (acc : Term) (c : Syntax) : MacroM Term := do
 written order. -/
 private def applyTrailing (acc : Term) (c : Syntax) : MacroM Term := do
   if c.isOfKind ``sqlDistinct then
-    `(LeanLinq.Query.distinct $acc)
+    `(LeanLinq.QueryP.distinct $acc)
   else if c.isOfKind ``sqlLimit then
     let lim : Term := ⟨c[1]⟩
     if c[2].getNumArgs > 0 then
-      `(LeanLinq.Query.limitOffset $acc (some $lim) (some $(⟨c[2][1]⟩)))
+      `(LeanLinq.QueryP.limitOffset $acc (some $lim) (some $(⟨c[2][1]⟩)))
     else
-      `(LeanLinq.Query.limit $acc $lim)
+      `(LeanLinq.QueryP.limit $acc $lim)
   else if c.isOfKind ``sqlOffset then
-    `(LeanLinq.Query.offset $acc $(⟨c[1]⟩))
+    `(LeanLinq.QueryP.offset $acc $(⟨c[1]⟩))
   else
     Macro.throwErrorAt c "only `distinct`, `limit`, and `offset` may follow `select`"
 
@@ -151,7 +151,7 @@ private def expandClauses (clauses : List Syntax) : MacroM Term := do
         let hv ← match havings with
           | [] => `(Option.none)
           | h :: _ => `(Option.some $(⟨h[1]⟩))
-        let terminal ← `(LeanLinq.SpineQP.groupYield __gkeys $hv $selRow)
+        let terminal ← `(LeanLinq.SpineQP.groupYield __gkeys $hv [] $selRow)
         let grouped ← orderBys.foldrM (fun c acc => foldLeading acc c) terminal
         -- `into a` binds the aggregate token over having/orderBy/select —
         -- but NOT over the keys: grouping *by* an aggregate is meaningless
@@ -164,11 +164,30 @@ private def expandClauses (clauses : List Syntax) : MacroM Term := do
     let coreQ ← `(LeanLinq.QueryP.spine $core)
     post.foldlM applyTrailing coreQ
 
-@[macro sqlQuery] def expandQuery : Lean.Macro := fun stx => do
-  let q ← expandClauses stx[3].getSepArgs.toList
-  if stx[1].getNumArgs > 0 then
-    `(($q : LeanLinq.Query $(⟨stx[1][0]⟩) _))
-  else
-    pure q
+open Lean.Elab Lean.Elab.Term Lean.Meta in
+/-- `query!` elaborates by the *expected type*: a per-ρ position (an
+expression-level subquery — possibly correlated, capturing outer binders
+at the ambient ρ) gets the raw tree; anywhere else the comprehension
+elaborates once under an abstract row interpretation — the ∀ρ bundle. -/
+@[term_elab sqlQuery] def elabQuery : TermElab := fun stx expectedType? => do
+  let q ← liftMacroM <| expandClauses stx[3].getSepArgs.toList
+  let perRho ← match expectedType? with
+    | some exp => do
+        let expW ← instantiateMVars (← whnf exp)
+        pure (expW.isAppOf ``LeanLinq.QueryP)
+    | none => pure false
+  let stx' ←
+    if perRho then
+      if stx[1].getNumArgs > 0 then
+        `(($q : LeanLinq.QueryP _ $(⟨stx[1][0]⟩) _))
+      else
+        pure q
+    else
+      if stx[1].getNumArgs > 0 then
+        `((LeanLinq.Query.mk fun (ρ : LeanLinq.Schema → Type) => $q :
+            LeanLinq.Query $(⟨stx[1][0]⟩) _))
+      else
+        `(LeanLinq.Query.mk fun (ρ : LeanLinq.Schema → Type) => $q)
+  elabTerm stx' expectedType?
 
 end LeanLinq

@@ -77,6 +77,21 @@ theorem le_top (b : Bound) : b ≤ .top := rfl
 @[simp] theorem top_add : (a : Bound) → .top + a = .top
   | .fin _ => rfl
   | .top => rfl
+@[simp] theorem fin_one_mul : (b : Bound) → Bound.fin 1 * b = b
+  | .top => rfl
+  | .fin m => congrArg Bound.fin (Nat.one_mul m)
+
+@[simp] theorem mul_fin_one : (a : Bound) → a * Bound.fin 1 = a
+  | .top => rfl
+  | .fin m => congrArg Bound.fin (Nat.mul_one m)
+
+theorem mul_assoc : (a b c : Bound) → a * b * c = a * (b * c)
+  | .top, b, c => by
+      cases b <;> cases c <;> rfl
+  | .fin a, .top, c => by cases c <;> rfl
+  | .fin a, .fin b, .top => rfl
+  | .fin a, .fin b, .fin c => congrArg Bound.fin (Nat.mul_assoc a b c)
+
 @[simp] theorem mul_top : (a : Bound) → a * .top = .top
   | .fin _ => rfl
   | .top => rfl

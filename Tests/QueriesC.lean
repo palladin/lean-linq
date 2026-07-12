@@ -285,7 +285,7 @@ def CFromWhereAgeInSubqueryWithClosure := (query! {
     -- type is not yet resolved when `++` searches for its HAppend instance
     where x["Name"] ==. SqlExpr.concat (c["Name"]) "_VIP"
     select ![x["Age"].as "Age"]
-  } : Query TestCtx _))
+  } : QueryP _ TestCtx _))
   select c
 } : Query TestCtx _)
 def CFromWhereCorrelatedInSubquery := (query! {
@@ -294,7 +294,7 @@ def CFromWhereCorrelatedInSubquery := (query! {
     from o in orders
     where o["CustomerId"] ==. c["Id"]
     select ![o["CustomerId"].as "CustomerId"]
-  } : Query TestCtx _))
+  } : QueryP _ TestCtx _))
   select c
 } : Query TestCtx _)
 def CFromWhereCorrelatedScalarSubquery := (query! {
@@ -303,7 +303,7 @@ def CFromWhereCorrelatedScalarSubquery := (query! {
     from o in orders
     where o["CustomerId"] ==. c["Id"]
     select ![o["CustomerId"].as "CustomerId"]
-  } : Query TestCtx _) |>.count).embed
+  } : QueryP _ TestCtx _) |>.count).embed
   select c
 } : Query TestCtx _)
 def CFromWhereInEmptyList := (query! {
@@ -364,7 +364,7 @@ def CFromWhereExistsCorrelated := (query! {
     from o in orders
     where o["CustomerId"] ==. c["Id"]
     select o
-  } : Query TestCtx _))
+  } : QueryP _ TestCtx _))
   select c
 } : Query TestCtx _)
 def CFromWhereNotExists := (query! {
@@ -373,7 +373,7 @@ def CFromWhereNotExists := (query! {
     from o in orders
     where o["CustomerId"] ==. c["Id"]
     select o
-  } : Query TestCtx _))
+  } : QueryP _ TestCtx _))
   select c
 } : Query TestCtx _)
 def CFromWhereNotInSubquery := (query! {
