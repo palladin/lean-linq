@@ -117,6 +117,13 @@ def Values.beq : {s : List (String × SqlType)} → Values s → Values s → Bo
   | _, .nil, .nil => true
   | _, .cons (c := c) a r, .cons b r' => cellBeq c.ty (SqlType.toNullable a) (SqlType.toNullable b) && r.beq r'
 
+/-- No two rows equal under `Values.beq` (SQL's DISTINCT notion: NULLs
+compare equal). Quadratic — a client-side audit of result sets, not a
+query plan. -/
+def Values.nodupB : List (Values s) → Bool
+  | [] => true
+  | v :: vs => vs.all (fun w => !(Values.beq v w)) && Values.nodupB vs
+
 instance : BEq (Values s) := ⟨Values.beq⟩
 
 /-- A runtime cell packed with its type (order keys, grouping keys). -/

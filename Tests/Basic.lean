@@ -348,3 +348,23 @@ def perRowCard : DbFetch BasicCtx 4 (List Nat) := fetch! {
 }
 
 #guard (perRowCard.exec 4 demoEnv |>.toOption) == some [0, 0]
+
+/-! `fetchInv` — the row invariant travels with the rows. A `distinct`
+query's results carry `Nodup` (under SQL's DISTINCT equality); queries
+outside the analyzed fragment carry `True` — less said, never wrong. -/
+example : DbFetch BasicCtx 1
+    {xs : List (Values [("Name", SqlType.string)]) //
+      (Query.from' (ts := BasicCtx) customers
+        |>.select (fun c => ![c["Name"].as "Name"])
+        |>.distinct).RowInv xs} :=
+  Query.from' (ts := BasicCtx) customers
+    |>.select (fun c => ![c["Name"].as "Name"])
+    |>.distinct |>.fetchInv
+
+-- the invariant is a real, usable fact: Values.nodupB of the fetched rows
+#guard
+  match ((Query.from' (ts := BasicCtx) customers
+      |>.select (fun c => ![c["Name"].as "Name"])
+      |>.distinct |>.fetchInv).exec 1 demoEnv) with
+  | .ok rows => Values.nodupB rows.val && rows.val.length > 0
+  | .error _ => false

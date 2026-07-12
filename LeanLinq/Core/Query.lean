@@ -192,6 +192,46 @@ mutual
 end
 
 
+/-! ## Row invariants: what the query's structure promises about its rows
+
+The second compute-from-the-value family member (after `card`): facts
+about the *result rows* harvested from the clauses. Bool-cored (like
+`Bound.ble`), so decidability is free and the fetch door can realize
+the proof by checking. Every conjunct must be **sublist-closed** (true
+of a list ⇒ true of any sublist), because boundary nodes pass a
+*selection* of the inner rows through (`limit` takes a prefix,
+`distinct` erases duplicates) while transferring the inner invariant.
+
+Phase A carvings: `distinct` contributes `Values.nodupB` (SQL's DISTINCT
+notion — NULLs compare equal). Order facts need key-to-output-column
+analysis and env-free `where'` facts need projection-survival analysis —
+both later; their clauses contribute `true` for now, so the invariant
+says less, never lies. The general env-parameterized form
+(`RowInv q ps xs`) is the M3 design. -/
+def Query.rowInvB : Query ts s → List (Values s) → Bool
+  | .distinctC q, xs => Values.nodupB xs && q.rowInvB xs
+  | .limitC q _ _, xs => q.rowInvB xs
+  | .spine _, _ => true
+  | .groupedC .., _ => true
+  | .setOpC .., _ => true
+
+/-- The row invariant as a proposition — decidable by construction. -/
+def Query.RowInv (q : Query ts s) (xs : List (Values s)) : Prop :=
+  q.rowInvB xs = true
+
+instance (q : Query ts s) (xs : List (Values s)) : Decidable (q.RowInv xs) :=
+  inferInstanceAs (Decidable (_ = true))
+
+/-- Every invariant holds of the empty list — the total fallback the
+fetch door needs when a live engine violates what the query's own
+structure promises (provably unreachable in the reference semantics). -/
+theorem Query.rowInvB_nil : (q : Query ts s) → q.rowInvB [] = true
+  | .distinctC q => by simp [Query.rowInvB, Values.nodupB, rowInvB_nil q]
+  | .limitC q _ _ => by simp [Query.rowInvB, rowInvB_nil q]
+  | .spine _ => rfl
+  | .groupedC .. => rfl
+  | .setOpC .. => rfl
+
 namespace Query
 
 /-- Monadic bind — the normalization workhorse: plain spines splice; grouped

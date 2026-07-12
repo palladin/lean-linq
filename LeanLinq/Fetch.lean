@@ -238,6 +238,25 @@ def Query.fetchBounded (q : Query c s) :
     DbFetch c 1 {xs : List (Values s) // .fin xs.length ≤ q.card} :=
   DbFetch.fetchBounded q
 
+/-- Fetch with the query's **row invariant** in the type: what the
+structure promises about the rows themselves (`distinct` ⇒ no duplicate
+rows; more facts as the analysis grows). Total over any query — clauses
+outside the analyzed fragment contribute `True`, so the invariant says
+less, never lies. The check realizes the proof (rows pass through
+untouched); an engine violating its own DISTINCT is a protocol error,
+answered with the empty list — provably unreachable in the reference
+semantics. -/
+def DbFetch.fetchInv (q : Query c s) :
+    DbFetch c 1 {xs : List (Values s) // q.RowInv xs} :=
+  (fetch q).map fun xs =>
+    if h : q.RowInv xs then ⟨xs, h⟩
+    else ⟨[], q.rowInvB_nil⟩
+
+/-- `q.fetchInv` — flowing spelling. -/
+def Query.fetchInv (q : Query c s) :
+    DbFetch c 1 {xs : List (Values s) // q.RowInv xs} :=
+  DbFetch.fetchInv q
+
 /-! ## `fetch!` — do-notation for the graded monad
 
 `DbFetch` cannot be a `Monad` instance: its bind *changes the index*
