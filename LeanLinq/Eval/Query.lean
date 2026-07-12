@@ -10,18 +10,20 @@ SQL executes as Lean list pipelines. Table resolution happened at
 evaluation reads rows through them — so there is no name lookup, no schema
 check, and no failure mode at run time.
 
-The walk mirrors the compiler's exactly — HOAS binders are instantiated with
-the same `Row.ofAlias` marker rows and a deterministic alias counter, so
-evaluation and compilation interpret the same instantiated trees; where the
-compiler accumulates clause text, the evaluator accumulates an alias→row
-scope.
-
-A spine enumerates *branches* (one per surviving source-row combination),
-each carrying its scope, the ORDER BY keys collected along the way, and the
-terminal's payload — typed by the `Terminal` index, like the compiler's
-`SelectK`. Grouped terminals then bucket branches by evaluated keys; a group
-is simply the list of its members' scopes, which is what `SqlExpr.evalG`
-consumes to fold aggregates. -/
+The walk instantiates the bundle at `AliasOf` — the same instantiation the
+compiler renders — and **scopes flow down**: every source node extends each
+incoming alias→row scope (one recursion over the marker-instantiated
+subtree, alias numbering deterministic along the path, always equal to the
+scope length), guards filter, ORDER BY nodes stable-sort what returns from
+below (stacked nodes compose outermost-primary), and the terminal evaluates
+where its expression trees are structural — plain `yield` projects each
+scope, `groupYield` buckets the arriving scopes by its keys and folds
+HAVING/ORDER BY/projection over each group's member scopes. Expression
+evaluation (`SqlExprP.evalG`) is part of the same structural recursion:
+a subquery stored in an expression evaluates against the site's scope, its
+inner aliases continuing from the scope length — exactly the numbering the
+compiled SQL uses, so correlated references resolve identically in both
+readings. -/
 
 namespace LeanLinq
 

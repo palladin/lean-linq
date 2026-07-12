@@ -315,9 +315,6 @@ def QueryP.avg (q : QueryP ρ ts [(n, ⟨t, nl⟩)]) : ScalarQueryP ρ ts ⟨t, 
 def QueryP.min (q : QueryP ρ ts [(n, ⟨t, nl⟩)]) : ScalarQueryP ρ ts ⟨t, true⟩ := .aggQ .min q.asPlainSpine
 def QueryP.max (q : QueryP ρ ts [(n, ⟨t, nl⟩)]) : ScalarQueryP ρ ts ⟨t, true⟩ := .aggQ .max q.asPlainSpine
 
-/-- Alias-instantiated view. -/
-abbrev GroupedQuery : Ctx → Schema → Type := GroupedQueryP AliasOf
-
 /-- Anything that can appear as a `from` source in a query comprehension:
 tables (their context membership resolved by `HasTable`), and queries
 themselves (plain-spine queries inline; grouped or boundary queries become

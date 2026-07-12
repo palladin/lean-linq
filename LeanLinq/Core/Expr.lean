@@ -251,11 +251,9 @@ evaluating/counting instantiations) arrives with the query layer. -/
 structure AliasOf (s : Schema) where
   alias : String
 
-abbrev StrRow : Schema → Type := AliasOf
-
-/-- `SqlExpr` is the alias-instantiated view — the spelling the whole
-library (and every user) writes. -/
-abbrev SqlExpr : Ctx → SqlType → Type := SqlExprP StrRow
+/-- `SqlExpr` is the alias-instantiated view — the spelling the
+library's internal walks write. -/
+abbrev SqlExpr : Ctx → SqlType → Type := SqlExprP AliasOf
 
 /- Constructor wrappers at the alias view, for the three constructors
 user code spells by full name (dot-notation on receivers resolves
@@ -412,28 +410,5 @@ def Agg.sum (_ : Agg) (e : SqlExprP ρ ts ⟨t, n⟩) : SqlExprP ρ ts ⟨t, tru
 def Agg.avg (_ : Agg) (e : SqlExprP ρ ts ⟨t, n⟩) : SqlExprP ρ ts ⟨t, true⟩ := .aggE .avg e
 def Agg.min (_ : Agg) (e : SqlExprP ρ ts ⟨t, n⟩) : SqlExprP ρ ts ⟨t, true⟩ := .aggE .min e
 def Agg.max (_ : Agg) (e : SqlExprP ρ ts ⟨t, n⟩) : SqlExprP ρ ts ⟨t, true⟩ := .aggE .max e
-
-/- Transitional wrappers: the abbrev-typed world (pre-∀ρ-flip receivers
-and textual spellings) reaches the generalized defs through
-`SqlExpr`-spelled signatures. -/
-namespace SqlExpr
-def anyNull (e : SqlExpr ts ⟨t, n⟩) : SqlExpr ts ⟨t, true⟩ := SqlExprP.anyNull e
-def inValues (e : SqlExpr ts ⟨t, n⟩) (vs : List (SqlExpr ts ⟨t, true⟩)) :
-    SqlExpr ts ⟨.bool, true⟩ := SqlExprP.inValues e vs
-def notInValues (e : SqlExpr ts ⟨t, n⟩) (vs : List (SqlExpr ts ⟨t, true⟩)) :
-    SqlExpr ts ⟨.bool, true⟩ := SqlExprP.notInValues e vs
-def year (e : SqlExpr ts ⟨.dateTime, n⟩) : SqlExpr ts ⟨.int, n⟩ := SqlExprP.year e
-def month (e : SqlExpr ts ⟨.dateTime, n⟩) : SqlExpr ts ⟨.int, n⟩ := SqlExprP.month e
-def day (e : SqlExpr ts ⟨.dateTime, n⟩) : SqlExpr ts ⟨.int, n⟩ := SqlExprP.day e
-def addDays (e : SqlExpr ts ⟨.dateTime, n⟩) (k : Int) : SqlExpr ts ⟨.dateTime, n⟩ := SqlExprP.addDays e k
-def addMonths (e : SqlExpr ts ⟨.dateTime, n⟩) (k : Int) : SqlExpr ts ⟨.dateTime, n⟩ := SqlExprP.addMonths e k
-def addYears (e : SqlExpr ts ⟨.dateTime, n⟩) (k : Int) : SqlExpr ts ⟨.dateTime, n⟩ := SqlExprP.addYears e k
-def diffDays (e : SqlExpr ts ⟨.dateTime, n₁⟩) (x : SqlExpr ts ⟨.dateTime, n₂⟩) : SqlExpr ts ⟨.int, n₁ || n₂⟩ := SqlExprP.diffDays e x
-def diffMonths (e : SqlExpr ts ⟨.dateTime, n₁⟩) (x : SqlExpr ts ⟨.dateTime, n₂⟩) : SqlExpr ts ⟨.int, n₁ || n₂⟩ := SqlExprP.diffMonths e x
-def diffYears (e : SqlExpr ts ⟨.dateTime, n₁⟩) (x : SqlExpr ts ⟨.dateTime, n₂⟩) : SqlExpr ts ⟨.int, n₁ || n₂⟩ := SqlExprP.diffYears e x
-def asc (e : SqlExpr ts c) : OrderKey ts := SqlExprP.asc e
-def desc (e : SqlExpr ts c) : OrderKey ts := SqlExprP.desc e
-def key (e : SqlExpr ts c) : KeyExpr ts := SqlExprP.key e
-end SqlExpr
 
 end LeanLinq

@@ -432,19 +432,29 @@ return `Bool`/`Prop`, so SQL needs its own).
   parameters as capabilities, so the evaluator reads rows and bindings through them with no
   run-time resolution. A parameter's type comes from the context, not an annotation
   (`SqlExpr.param "minAge"`).
-- Two-level query algebra: `SpineQ` (the comprehension spine: `yield`/`guard`/`fromT`/
-  `joinT`/`order`/`fromQ`) and `Query` (boundary nodes: `distinct`, `limit`, grouped
-  selects, set ops). Separate inductives so the statement ↔ spine compiler recursion is
-  structural. HOAS binders; illegal column references are type errors at the binding site.
-- Subqueries inside expressions (`inQuery`, `.embed`) are stored as *staged actions*
-  (compilation and evaluation), not ASTs — a mutual `SqlExpr`/`Query` block would violate
-  strict positivity through the HOAS binders (`Row → Query` puts `Query` inside `Row`'s
-  expression fields, left of an arrow).
+- One mutual query algebra (PHOAS): expressions, rows, and the two query levels —
+  `SpineQP` (the comprehension spine: `yield`/`groupYield`/`guard`/`fromT`/`joinT`/`order`/
+  `fromQ`) and `QueryP` (boundary nodes: `distinct`, `limit`, set ops) — form a single
+  inductive family parameterized by the row representation `ρ : Schema → Type`. Binders
+  take the opaque atom `ρ s` (the one slot a `∀ρ`-polymorphic term cannot inspect), which
+  keeps every mutual occurrence positive; the smart constructors re-wrap with
+  `RowP.ofAtom`, so surface lambdas receive rows. The public `Query ts s` is the bundle
+  `∀ ρ, QueryP ρ ts s`: the compiler reads it at `AliasOf`, the evaluator walks the same
+  instantiation, and `card` counts it — one term, every reading, with agreement by
+  parametricity rather than by discipline.
+- Subqueries inside expressions (`inQuery`, `exists'`, `.embed`) are stored
+  *structurally* at the same ρ, so a correlated subquery captures the outer binder like
+  any other Lean value. That capture pins it to the ambient representation: a correlated
+  inner chain spells its head per-ρ (`QueryP.from' … |>.where' (fun o => o["CustomerId"]
+  ==. c["Id"])`), and an inner `query!` block ascribes `: QueryP _ Ctx _`. Uncorrelated
+  subqueries stay ordinary bundles and drop in unchanged.
 - Compiler: a `StateM` (alias counter + parameter accumulator) walk that renders the spine as
-  one flat SELECT. The evaluator (`Query.run`) is the same walk under a different
-  interpretation — binders instantiated with the same alias-marker rows, an alias→row
-  environment where the compiler accumulates clause text. Everything is total — `Query` is a
-  reflexive inductive, so structural recursion covers HOAS continuations applied to any row —
+  one flat SELECT, recursing structurally into stored subqueries (inner aliases continue the
+  outer numbering). The evaluator (`Query.run`) walks the same instantiation with scopes
+  flowing down — sources extend each alias→row scope, terminals evaluate where their trees
+  are structural — so correlated references resolve identically in both readings.
+  Everything is total — the family is a reflexive inductive, so structural recursion covers
+  binder continuations applied to any atom —
   which means the kernel itself can run both (`#guard` tests of generated SQL *and* of
   evaluated rows at elaboration time).
 

@@ -1,15 +1,18 @@
 import LeanLinq.Core.Schema
 
-/-! # Expression evaluation
+/-! # Value-level evaluation helpers
 
-`SqlExpr.evalG` interprets a staged expression over a *list* of scopes — the
-members of the current group. Plain (ungrouped) contexts pass a singleton
-list; grouped contexts pass one scope per group member, and an aggregate
-node folds its argument's per-member values while every other node simply
+The building blocks of `SqlExprP.evalG` (which lives with the query
+walk — expression evaluation recurses into structural subqueries, so it
+is one mutual ring with `Query.evalRowsIn`): per-type arithmetic,
+aggregate folds, and the strict-application combinators.
+
+`evalG` interprets an expression over a *list* of scopes — the members
+of the current group. Plain (ungrouped) contexts pass a singleton list;
+grouped contexts pass one scope per group member, and an aggregate node
+folds its argument's per-member values while every other node simply
 threads the list through (bare columns read the first member, SQL's
-bare-column-in-group semantics). This is what makes aggregates nested
-anywhere inside an expression (`COUNT(*) > 1`, `SUM(x) DESC`) evaluate
-without any special-casing at use sites.
+bare-column-in-group semantics).
 
 Two result channels, never conflated:
 
