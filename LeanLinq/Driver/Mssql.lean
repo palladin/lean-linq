@@ -169,7 +169,7 @@ private def readRow (conn : Conn) : (s : Schema) → (col : UInt32) → IO (Valu
   | (nm, c) :: rest, col => do
       let cell : Nullable c.ty ←
         if ← colIsNull conn col then pure none
-        else pure (Driver.parseCell c.ty (← colText conn col))
+        else IO.ofExcept ((Driver.parseCell c.ty (← colText conn col)).mapError IO.userError)
       pure (.cons (← Driver.cellFromWire nm c cell) (← readRow conn rest (col + 1)))
 
 /-- Drain any remaining rows/result sets after the interesting one. -/
@@ -206,7 +206,7 @@ def Conn.queryCell (conn : Conn) (sc : ScalarQuery c ⟨t, n⟩)
     else do
       let cell : Nullable t ←
         if ← colIsNull conn 0 then pure none
-        else pure (Driver.parseCell t (← colText conn 0))
+        else IO.ofExcept ((Driver.parseCell t (← colText conn 0)).mapError IO.userError)
       drain conn
       pure cell
 

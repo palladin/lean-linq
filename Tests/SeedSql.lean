@@ -2,8 +2,8 @@ import LeanLinq
 
 /-! # Shared harness policy: seed DDL/SQL and skip sets
 
-Used by both the CLI integration runner (`Tests/Integration.lean`) and the
-native-driver sweep (`Tests/DriverT.lean`). -/
+Used by both the CLI integration runner (`Tests/Integration.lean`) and
+the native-driver sweeps (`Tests/DriverSweep.lean` instantiations). -/
 
 namespace TQ
 
@@ -50,10 +50,13 @@ def skipResults : List String :=
 and evaluator comparison, still checked against their per-dialect golden.
 `FromSelectAvg`: AVG over integers is integer division on SQL Server (256)
 but exact on PostgreSQL/SQLite (256.25). `FromGroupByMultipleOrderBySelect`:
-ORDER BY COUNT(*) DESC where every count ties, so order is engine-specific. -/
+ORDER BY COUNT(*) DESC where every count ties, so order is engine-specific.
+`DateTimeAddMonthsClamp`: month-end overflow clamps on PostgreSQL/SQL
+Server (2020-02-29) but rolls forward on SQLite (2020-03-02). -/
 def crossDialectAllowlist : List String := [
   "FromSelectAvg", "FromGroupByMultipleOrderBySelect",
-  "CFromSelectAvg", "CFromGroupByMultipleOrderBySelect"
+  "CFromSelectAvg", "CFromGroupByMultipleOrderBySelect",
+  "DateTimeAddMonthsClamp", "CDateTimeAddMonthsClamp"
 ]
 
 end TQ

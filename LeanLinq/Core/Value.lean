@@ -54,6 +54,7 @@ inductive EvalError where
   | divByZero
   | noClock                              -- `now` evaluated without a clock in `EvalEnv`
   | unsupported (fn : String) (t : SqlPrim)   -- e.g. ROUND on double: not implemented
+  | invalidStatement (msg : String)           -- e.g. INSERT with no columns: every engine rejects it
   | internal (msg : String)
   deriving Repr, BEq
 
@@ -88,7 +89,12 @@ def Values.nulls : (s : Schema) → Values s.asNull
 def SqlPrim.cmpV : (t : SqlPrim) → t.interp → t.interp → Ordering
   | .int, a, b => compare a b
   | .long, a, b => compare a b
-  | .double, a, b => if a < b then .lt else if b < a then .gt else .eq
+  | .double, a, b =>
+      -- NaN: equal to itself, greater than everything else (the
+      -- PostgreSQL total order) — never silently `.eq` to a number
+      if a.isNaN || b.isNaN then
+        if a.isNaN && b.isNaN then .eq else if a.isNaN then .gt else .lt
+      else if a < b then .lt else if b < a then .gt else .eq
   | .decimal, a, b => compare a b
   | .string, a, b => compare a b
   | .bool, a, b =>
@@ -244,10 +250,14 @@ def renderDecimal (millis : Int) : String :=
       s!"{whole}." ++ (if frac < 10 then s!"00{frac}" else if frac < 100 then s!"0{frac}" else s!"{frac}")
   if millis < 0 then s!"-{body}" else body
 
+/-- ROUND half *away from zero* (all three engines): `-1.5 → -2`. -/
 def decimalRound (digits : Nat) (millis : Int) : Int :=
   let unit : Int := if digits == 0 then 1000 else if digits == 1 then 100 else if digits == 2 then 10 else 1
-  ((millis + unit / 2) / unit) * unit
+  if millis ≥ 0 then ((millis + unit / 2).tdiv unit) * unit
+  else ((millis - unit / 2).tdiv unit) * unit
 
+-- ceil/floor deliberately use Euclidean `/`: its floor direction on
+-- negatives is exactly what CEILING/FLOOR need — do not "fix" to tdiv
 def decimalCeil (millis : Int) : Int := ((millis + 999) / 1000) * 1000
 
 def decimalFloor (millis : Int) : Int := (millis / 1000) * 1000
@@ -288,20 +298,37 @@ def civilFromDays (z : Int) : Int × Int × Int :=
 
 private def pad2 (n : Int) : String := if n < 10 then s!"0{n}" else s!"{n}"
 
-def fmtDateTime (ymd : Int × Int × Int) : String :=
-  s!"{ymd.1}-{pad2 ymd.2.1}-{pad2 ymd.2.2} 00:00:00"
+/-- The time-of-day part of a normalized date-time (midnight for
+date-only strings) — date arithmetic preserves it, as engines do. -/
+def timeOfDay (s : String) : String :=
+  if s.length ≥ 19 then ((s.drop 11).take 8).toString else "00:00:00"
+
+def fmtDateTime (ymd : Int × Int × Int) (time : String := "00:00:00") : String :=
+  s!"{ymd.1}-{pad2 ymd.2.1}-{pad2 ymd.2.2} {time}"
+
+def isLeapYear (y : Int) : Bool :=
+  y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)
+
+def daysInMonth (y m : Int) : Int :=
+  if m == 2 then (if isLeapYear y then 29 else 28)
+  else if m == 4 || m == 6 || m == 9 || m == 11 then 30
+  else 31
 
 def dateAddDays (s : String) (n : Int) : String :=
-  fmtDateTime (civilFromDays (daysFromCivil (parseYMD s) + n))
+  fmtDateTime (civilFromDays (daysFromCivil (parseYMD s) + n)) (timeOfDay s)
 
+/-- Month arithmetic clamps to the target month's last day
+(`2020-01-31 + 1 month = 2020-02-29`), the PostgreSQL/SQL Server
+behavior; SQLite instead rolls the overflow into the next month. -/
 def dateAddMonths (s : String) (n : Int) : String :=
   let (y, m, d) := parseYMD s
   let t := y * 12 + (m - 1) + n
-  fmtDateTime (t / 12, t % 12 + 1, d)
+  let (y', m') := (t / 12, t % 12 + 1)
+  fmtDateTime (y', m', min d (daysInMonth y' m')) (timeOfDay s)
 
 def dateAddYears (s : String) (n : Int) : String :=
   let (y, m, d) := parseYMD s
-  fmtDateTime (y + n, m, d)
+  fmtDateTime (y + n, m, min d (daysInMonth (y + n) m)) (timeOfDay s)
 
 def dateDiffDays (a b : String) : Int := daysFromCivil (parseYMD b) - daysFromCivil (parseYMD a)
 
@@ -330,8 +357,6 @@ where
 /-- SQL SUBSTRING: 1-based start. -/
 def sqlSubstring (s : String) (start len : Int) : String :=
   String.ofList ((s.toList.drop (start - 1).toNat).take len.toNat)
-
-/-! ## Parameter values -/
 
 /-! ## Display -/
 

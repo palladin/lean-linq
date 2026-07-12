@@ -8,6 +8,17 @@ driver, plus the `DbFetch` smokes through `execIO`. -/
 
 open LeanLinq LeanLinq.Sqlite TQ
 
+/-! Wire-decoder pins: parse failures are loud, never silent zeros. -/
+#guard (LeanLinq.Driver.parseFloat? "1.5e3") == some 1500.0
+#guard (LeanLinq.Driver.parseFloat? "-2.5E-2") == some (-0.025)
+#guard (LeanLinq.Driver.parseFloat? "Infinity").isSome
+#guard (LeanLinq.Driver.parseFloat? "abc") == none
+#guard (LeanLinq.Driver.parseFloat? "") == none
+#guard (LeanLinq.Driver.parseIntText? "325.0000000000000000") == some 325
+#guard (LeanLinq.Driver.parseIntText? "xyz") == none
+#guard (LeanLinq.Driver.parseDecimal? "-12.345") == some (-12345)
+#guard (LeanLinq.Driver.parseDecimal? "1,000") == none
+
 -- ⊤ never fits a finite door — over the wire either: only execIOAll runs it
 #check_failure fun (conn : LeanLinq.Sqlite.Conn) =>
   TQ.unboundedFanOut.execIO conn 1000 seedParams

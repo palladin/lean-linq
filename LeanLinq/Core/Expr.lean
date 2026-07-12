@@ -31,9 +31,10 @@ inductive Dir where
   | asc | desc
   deriving DecidableEq, Repr
 
-/-- Intrinsically-typed SQL expressions: `SqlExpr ts t n` can only be built
-from operations valid for `t`, so ill-typed SQL is unrepresentable — and the
-second index `n` tracks **nullability**, flowing by construction: literals
+/-- Intrinsically-typed SQL expressions: `SqlExpr ts c` can only be built
+from operations valid for the column type `c`, so ill-typed SQL is
+unrepresentable — and `c.nullable` tracks **nullability**, flowing by
+construction: literals
 are never NULL, column references carry their declared flag, operators OR
 their operands' flags (SQL's NULL propagation), aggregates may be NULL
 (empty group), `isNull` is never NULL. The context index `ts` is fixed
@@ -134,13 +135,23 @@ instance : FlagFits true true := ⟨id⟩
 @[default_instance 1100] instance : FlagFits false false := ⟨id⟩
 @[default_instance] instance : FlagFits false true := ⟨.widen⟩
 
+/-- `p0`, `p1`, … are the compiler's auto-parameter names (one per inlined
+literal); a user parameter with such a name would silently alias a
+literal's placeholder in the compiled SQL, so the door refuses them. -/
+def _root_.String.isReservedParamName (s : String) : Bool :=
+  match s.data with
+  | 'p' :: rest => !rest.isEmpty && rest.all Char.isDigit
+  | _ => false
+
 /-- Reference a declared parameter, **fitted to the position**: the
 declared flag (from the context) transports to the expected one — a
 strict parameter widens into nullable positions, a nullable parameter
 into a strict position fails. Both flags are concrete at resolution
-(declaration + expectation), so this is order-safe. -/
+(declaration + expectation), so this is order-safe. Reserved auto-shaped
+names (`p{digits}`) are refused by the `rfl` obligation. -/
 def SqlExpr.param (name : String) {pt : SqlPrim} {pn m : Bool}
-    [HasParam ts.params name ⟨pt, pn⟩] [fits : FlagFits pn m] :
+    [HasParam ts.params name ⟨pt, pn⟩] [fits : FlagFits pn m]
+    (_h : name.isReservedParamName = false := by decide) :
     SqlExpr ts ⟨pt, m⟩ :=
   fits.fit (.paramE name)
 

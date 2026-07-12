@@ -43,24 +43,29 @@ private def intArith (op : ArithOp) (a b : Int) : Except EvalError (Nullable .in
   | .add => pure (some (a + b))
   | .sub => pure (some (a - b))
   | .mul => pure (some (a * b))
-  | .div => if b == 0 then .error .divByZero else pure (some (a / b))
+  | .div => if b == 0 then .error .divByZero else pure (some (a.tdiv b))
 
 /-- Arithmetic per SQL type. Decimals are milli-units, so multiplication
-rescales and division pre-scales; integer division truncates toward zero;
-division by zero is an `EvalError`, not NULL. -/
+rescales and division pre-scales; integer and decimal division truncate
+toward zero (`Int.tdiv` — SQL's direction, not Lean's Euclidean `/`);
+division by zero is an `EvalError`, not NULL — for doubles too (the
+PostgreSQL/SQL Server behavior; SQLite yields NULL instead). -/
 def SqlPrim.arithV : (t : SqlPrim) → ArithOp → t.interp → t.interp →
     Except EvalError (Nullable t)
   | .int, op, a, b => intArith op a b
   | .long, op, a, b => intArith op a b
   | .double, op, a, b =>
-      pure (some (match op with
-        | .add => a + b | .sub => a - b | .mul => a * b | .div => a / b))
+      match op with
+      | .add => pure (some (a + b))
+      | .sub => pure (some (a - b))
+      | .mul => pure (some (a * b))
+      | .div => if b == 0.0 then .error .divByZero else pure (some (a / b))
   | .decimal, op, a, b =>
       match op with
       | .add => pure (some (a + b))
       | .sub => pure (some (a - b))
-      | .mul => pure (some (a * b / 1000))
-      | .div => if b == 0 then .error .divByZero else pure (some (a * 1000 / b))
+      | .mul => pure (some ((a * b).tdiv 1000))
+      | .div => if b == 0 then .error .divByZero else pure (some ((a * 1000).tdiv b))
   | t, op, _, _ => .error (.unsupported s!"arith {repr op}" t)
 
 private def SqlPrim.sumV : (t : SqlPrim) → List t.interp → Except EvalError (Nullable t)
@@ -71,10 +76,10 @@ private def SqlPrim.sumV : (t : SqlPrim) → List t.interp → Except EvalError 
   | t, _ => .error (.unsupported "SUM" t)
 
 private def SqlPrim.avgV : (t : SqlPrim) → List t.interp → Except EvalError (Nullable t)
-  | .int, vs => pure (some (vs.foldl (· + ·) 0 / vs.length))
-  | .long, vs => pure (some (vs.foldl (· + ·) 0 / vs.length))
+  | .int, vs => pure (some ((vs.foldl (· + ·) 0).tdiv vs.length))
+  | .long, vs => pure (some ((vs.foldl (· + ·) 0).tdiv vs.length))
   | .double, vs => pure (some (vs.foldl (· + ·) 0 / Float.ofNat vs.length))
-  | .decimal, vs => pure (some (vs.foldl (· + ·) 0 / vs.length))
+  | .decimal, vs => pure (some ((vs.foldl (· + ·) 0).tdiv vs.length))
   | t, _ => .error (.unsupported "AVG" t)
 
 /-- Fold an aggregate over the non-NULL values of a group (SQL semantics:
@@ -178,26 +183,35 @@ def SqlExpr.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts ⟨t, n⟩ →
       strict2 (← e.evalG ee scs) (← p.evalG ee scs) fun s pat =>
         pure (some (likeMatch s pat))
   | scs, .inList (c := ⟨t₀, _⟩) e es => do
-      match (← e.evalG ee scs) with
-      | none => pure none
-      | some v =>
-          let hits := (← SqlExpr.evalGList ee scs es).map fun ⟨u, cell⟩ =>
-            if h : u = t₀ then
-              (h ▸ cell).map (fun w => t₀.cmpV v w == Ordering.eq)
-            else some false
-          pure (if hits.any (· == some true) then some true
-                else if hits.any (·.isNone) then none
-                else some false)
+      -- `x IN ()` is FALSE without evaluating x (mirrors the compiled `(1 = 0)`)
+      match es with
+      | [] => pure (some false)
+      | es =>
+          match (← e.evalG ee scs) with
+          | none => pure none
+          | some v =>
+              let hits := (← SqlExpr.evalGList ee scs es).map fun ⟨u, cell⟩ =>
+                if h : u = t₀ then
+                  (h ▸ cell).map (fun w => t₀.cmpV v w == Ordering.eq)
+                else some false
+              pure (if hits.any (· == some true) then some true
+                    else if hits.any (·.isNone) then none
+                    else some false)
+      -- the subquery evaluates in the *current* scope, so correlated outer
+      -- references resolve; in aggregate positions (several member scopes)
+      -- the group's first member stands for the group, the same convention
+      -- bare column reads use
   | scs, .inSub (t := t₀) e sq => do
       match (← e.evalG ee scs) with
       | none => pure none
       | some v =>
-          let hits := (← sq.eval ee).map (·.map (fun w => t₀.cmpV v w == Ordering.eq))
+          let hits := (← sq.eval ee (scs.head?.getD [])).map
+            (·.map (fun w => t₀.cmpV v w == Ordering.eq))
           pure (if hits.any (· == some true) then some true
                 else if hits.any (·.isNone) then none
                 else some false)
-  | _, .scalarSub sq => do
-      pure (match (← sq.eval ee) with
+  | scs, .scalarSub sq => do
+      pure (match (← sq.eval ee (scs.head?.getD [])) with
         | c :: _ => c
         | [] => none)
   -- CASE is lazy in its branches (SQL semantics): only the taken branch

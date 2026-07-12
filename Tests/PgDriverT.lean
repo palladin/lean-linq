@@ -42,6 +42,21 @@ def main : IO UInt32 := do
         failures := failures + 1
       unless ← checkUnboundedFanOut (← unboundedFanOut.execPgAll conn seedParams) do
         failures := failures + 1
+      -- pipeline recovery: a server error mid-round (division by zero
+      -- evaluated by the engine) must not wedge the connection — the next
+      -- query on the same connection has to succeed
+      let recovered ← do
+        let bad := Query.from' (ts := TestCtx) customers
+          |>.select (fun _ => ![(SqlExpr.int 10 / SqlExpr.int 0).as "X"])
+        try
+          let _ ← (DbFetch.fetch bad).execPg conn 1 seedParams
+          pure false  -- engine unexpectedly accepted 1/0
+        catch _ =>
+          let _ ← conn.query (Query.from' (ts := TestCtx) customers) seedParams
+          pure true
+      unless recovered do
+        IO.eprintln "PIPELINE RECOVERY failed: connection wedged after error"
+        failures := failures + 1
       conn.close
       if failures == 0 then
         IO.println s!"driver(postgres): {passed} cases match the evaluator (typed), {skipped} skipped — all green"

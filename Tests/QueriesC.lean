@@ -3,7 +3,10 @@ import Tests.Queries2
 /-! # Comprehension twins
 
 Every pipeline query case re-expressed with `query!` clause syntax, named
-`C<Original>`. Twins compute the same rows (the integration oracle is shared
+`C<Original>` — except shapes the comprehension cannot spell: split
+`limit`/`offset` chains (`LimitThenOffset`/`OffsetThenLimit`/
+`LimitThenLimit`) and set-operation compositions
+(`UnionThenIntersect`/`ExceptNested`/`UnionWithLimitOperand`). Twins compute the same rows (the integration oracle is shared
 by name fallback), though the generated SQL may legitimately differ — e.g.
 comprehension grouping orders by aggregate *expressions* where the pipeline
 orders by output alias, and comprehension clauses always fuse flat.
@@ -284,6 +287,50 @@ def CFromWhereAgeInSubqueryWithClosure := (query! {
     select ![x["Age"].as "Age"]
   } : Query TestCtx _))
   select c
+} : Query TestCtx _)
+def CFromWhereCorrelatedInSubquery := (query! {
+  from c in customers
+  where c["Id"].inQuery ((query! {
+    from o in orders
+    where o["CustomerId"] ==. c["Id"]
+    select ![o["CustomerId"].as "CustomerId"]
+  } : Query TestCtx _))
+  select c
+} : Query TestCtx _)
+def CFromWhereCorrelatedScalarSubquery := (query! {
+  from c in customers
+  where SqlExpr.int 0 <. ((query! {
+    from o in orders
+    where o["CustomerId"] ==. c["Id"]
+    select ![o["CustomerId"].as "CustomerId"]
+  } : Query TestCtx _) |>.count).embed
+  select c
+} : Query TestCtx _)
+def CFromWhereInEmptyList := (query! {
+  from c in customers
+  where c["Age"].inValues []
+  select c
+} : Query TestCtx _)
+def CFromSelectNegativeDivision := (query! {
+  from c in customers
+  orderBy c["Id"].asc
+  select ![c["Id"].as "Id", ((c["Age"] - 65) / 2).as "H"]
+} : Query TestCtx _)
+def CDateTimeAddMonthsClamp := (query! {
+  from p in products
+  where p["Id"] ==. SqlExpr.long 1
+  select ![((SqlExpr.dt "2020-01-31").addMonths 1).as "Clamped"]
+} : Query TestCtx _)
+def CFromWhereBoolColumnAnd := (query! {
+  from c in customers
+  where c["IsActive"] &&. (c["Age"] >=. 18)
+  select ![c["Id"].as "Id", c["Name"].as "Name"]
+} : Query TestCtx _)
+def CLeftJoinOrderByNullableKey := (query! {
+  from c in customers
+  leftJoin o in orders on c["Id"] ==. o["CustomerId"]
+  orderBy o["Amount"].asc, c["Name"].asc
+  select ![c["Name"].as "Name", o["Amount"].as "Amount"]
 } : Query TestCtx _)
 def CFromSubquery := (query! {
   from x in ((query! {
@@ -973,6 +1020,13 @@ def twinCases : List (String × Case) := [
   ("CFromWhereAgeIn", q CFromWhereAgeIn),
   ("CFromWhereAgeInSubquery", q CFromWhereAgeInSubquery),
   ("CFromWhereAgeInSubqueryWithClosure", q CFromWhereAgeInSubqueryWithClosure),
+  ("CFromWhereCorrelatedInSubquery", q CFromWhereCorrelatedInSubquery),
+  ("CFromWhereCorrelatedScalarSubquery", q CFromWhereCorrelatedScalarSubquery),
+  ("CFromWhereInEmptyList", q CFromWhereInEmptyList),
+  ("CFromSelectNegativeDivision", q CFromSelectNegativeDivision),
+  ("CDateTimeAddMonthsClamp", q CDateTimeAddMonthsClamp),
+  ("CFromWhereBoolColumnAnd", q CFromWhereBoolColumnAnd),
+  ("CLeftJoinOrderByNullableKey", q CLeftJoinOrderByNullableKey),
   ("CFromSubquery", q CFromSubquery),
   ("CFromWhereSelectWhereFromNested", q CFromWhereSelectWhereFromNested),
   ("CFromWhereSelectWhereNested", q CFromWhereSelectWhereNested),

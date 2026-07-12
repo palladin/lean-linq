@@ -7,10 +7,10 @@ Queries are total, deeply-embedded values with a denotational semantics
 This file is the home of that (deliberately small, demand-driven) corpus.
 
 The first inhabitant pays rent immediately: `DbFetch.fetchLimit` returns a
-length-refined list whose proof is realized by a client-side `take` — and
-`run_limit_length_le` is the adequacy statement that the clamp is the
-identity in the reference semantics: a `LIMIT n` query already returns at
-most `n` rows. -/
+length-refined list whose proof is realized by a length check (the `take`
+clamp fires only against a disagreeing engine) — and `run_limit_length_le`
+is the adequacy statement for that check in the reference semantics: a
+`LIMIT n` query already returns at most `n` rows. -/
 
 namespace LeanLinq
 
@@ -21,8 +21,8 @@ theorem Query.evalRows_limitC_length_le {ts : Ctx} {s : Schema}
     {rows : List (Values s)}
     (h : (Query.limitC q (some n) off?).evalRows ee = .ok rows) :
     rows.length ≤ n := by
-  simp only [Query.evalRows] at h
-  cases hq : q.evalRows ee with
+  simp only [Query.evalRows, Query.evalRowsIn] at h
+  cases hq : q.evalRowsIn ee [] with
   | error e =>
       rw [hq] at h
       simp [Bind.bind, Except.bind] at h

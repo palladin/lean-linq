@@ -175,7 +175,7 @@ def perRowAll (ks : List Int) := fetch! {
 #guard ((perRowAll [1, 2]).exec 2 demoEnv |>.toOption) == some [0, 0]
 
 /-- Symbolic dynamic grade under a computed budget: the obligation
-`1 * ks.length + 0 ≤ ks.length` is a theorem, so `omega` closes it for
+`1 * ks.length ≤ ks.length` is a theorem, so `omega` closes it for
 every `ks` — the rounds are visible, priced, and proved, not hidden. -/
 example (ks : List Int) : Except EvalError (List Nat) :=
   (perRowAll ks).exec ks.length demoEnv .nil none
@@ -217,6 +217,16 @@ example (o : Row BasicCtx OrdersS.asNull) : SqlExpr BasicCtx ⟨.int, true⟩ :=
 -- a parameter outside the context: no HasParam instance — unbound is untypeable,
 -- not silently NULL
 #check_failure (SqlExpr.param (ts := BasicCtx) "ghost")
+-- a parameter named like an auto parameter (p0, p1, …) would alias a
+-- literal's placeholder — reserved, statically refused
+#check_failure (SqlExpr.param (ts := BasicCtx) "p1")
+-- the `into a` aggregate binder is not in scope for the groupBy keys:
+-- grouping BY an aggregate is meaningless SQL
+#check_failure (query! {
+  from c in customers
+  groupBy (a.count).key into a
+  select ![(a.count).as "N"]
+} : Query BasicCtx _)
 -- classic N+1: one fetch per row of a runtime collection — the grade is
 -- `ids.length`, the budget obligation is undischargeable, no proof exists
 #check_failure fun (ids : List Int) => (perRow ids).exec 8 demoEnv
@@ -258,3 +268,37 @@ example (o : Row BasicCtx OrdersS.asNull) : SqlExpr BasicCtx ⟨.int, true⟩ :=
   let waves ← for k in ids do .fetch (ordersOf k)
   return waves.length
 }).exec 8 demoEnv
+
+/-! Arithmetic helper pins (engine-verified semantics): SQL division
+truncates toward zero, ROUND halves go away from zero, month arithmetic
+clamps to month-end and preserves the time of day. -/
+#guard (Int.tdiv (-49) 2) == -24
+#guard LeanLinq.decimalRound 0 (-1500) == -2000
+#guard LeanLinq.decimalRound 0 1500 == 2000
+#guard LeanLinq.decimalCeil (-1500) == -1000
+#guard LeanLinq.decimalFloor (-1500) == -2000
+#guard LeanLinq.dateAddMonths "2020-01-31 08:15:00" 1 == "2020-02-29 08:15:00"
+#guard LeanLinq.dateAddMonths "2023-01-31 00:00:00" 1 == "2023-02-28 00:00:00"
+#guard LeanLinq.dateAddYears "2020-02-29 12:00:00" 1 == "2021-02-28 12:00:00"
+#guard LeanLinq.dateAddDays "2023-06-10 14:30:00" 1 == "2023-06-11 14:30:00"
+
+/-! `bindD'` discharges its budget automatically for the documented
+shapes: closed facts by `decide`, ⊤ budgets by `le_top`, and
+`fetchLimit`-refined loops through the refinement itself. -/
+example : DbFetch BasicCtx (1 + 2) (List (Values OrdersS)) :=
+  DbFetch.bindD' (.fetch (Query.from' (ts := BasicCtx) orders))
+    (fun _ => .fetch (Query.from' (ts := BasicCtx) orders)) 2
+
+example (n : Nat) : DbFetch BasicCtx (1 + 1 * n) (List (List (Values OrdersS))) :=
+  DbFetch.bindD'
+    (DbFetch.fetchLimit (Query.from' (ts := BasicCtx) orders) n)
+    (fun a => .forAll a.val
+      (fun _ => .fetch (Query.from' (ts := BasicCtx) orders)))
+    (1 * n)
+
+example : DbFetch BasicCtx (1 + ⊤) (List (List (Values OrdersS))) :=
+  DbFetch.bindD'
+    (.fetch (Query.from' (ts := BasicCtx) orders))
+    (fun rows => .forAll rows
+      (fun _ => .fetch (Query.from' (ts := BasicCtx) orders)))
+    ⊤

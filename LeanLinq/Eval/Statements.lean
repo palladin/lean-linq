@@ -47,12 +47,16 @@ private def buildInsertRow (ee : EvalEnv ts)
 def InsertStmt.apply (i : InsertStmt ts n s) [inst : HasTable ts.tables n s]
     (env : TableEnv ts.tables) (ps : ParamEnv ts.params := by exact .nil)
     (now : Option String := none) : Except EvalError (TableEnv ts.tables) := do
+  if i.values.isEmpty then
+    throw (.invalidStatement "INSERT with no columns")
   let ee : EvalEnv ts := ⟨env, ps, now⟩
   pure (inst.set env (inst.rows env ++ [← buildInsertRow ee i.values s]))
 
 def UpdateStmt.apply (u : UpdateStmt ts n s) [inst : HasTable ts.tables n s]
     (env : TableEnv ts.tables) (ps : ParamEnv ts.params := by exact .nil)
     (now : Option String := none) : Except EvalError (TableEnv ts.tables) := do
+  if u.sets.isEmpty then
+    throw (.invalidStatement "UPDATE with no assignments")
   let ee : EvalEnv ts := ⟨env, ps, now⟩
   let marker := Row.ofAlias "" s
   let rows ← (inst.rows env).mapM fun v => do

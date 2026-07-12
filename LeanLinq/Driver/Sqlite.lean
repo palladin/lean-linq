@@ -133,7 +133,11 @@ private def readCell (st : Stmt) (i : UInt32) : (t : SqlPrim) → IO (Nullable t
     | .int => pure (some (← columnInt64 st i).toInt)
     | .long => pure (some (← columnInt64 st i).toInt)
     | .double => pure (some (← columnDouble st i))
-    | .decimal => pure (some (parseDecimal (← columnText st i)))
+    | .decimal => do
+        let txt ← columnText st i
+        match Driver.parseDecimal? txt with
+        | some m => pure (some m)
+        | none => throw (IO.userError s!"unreadable decimal cell text: '{txt}'")
     | .string => pure (some (← columnText st i))
     | .bool => pure (some ((← columnInt64 st i) != 0))
     | .dateTime => pure (some (normDateTime (← columnText st i)))

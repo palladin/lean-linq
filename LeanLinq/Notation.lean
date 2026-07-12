@@ -2,9 +2,10 @@ import LeanLinq.Core.Expr
 
 /-! # Operator notation for `SqlExpr`
 
-Arithmetic reuses the standard `+`/`-`/`*`/`/` typeclasses via heterogeneous
-instances that **OR the nullability flags** (instances only for the numeric
-SQL types, so `string + string` stays a type error); concatenation is `++`.
+Arithmetic reuses the standard `+`/`-`/`*`/`/` typeclasses via
+**flag-homogeneous** instances — mixed nullability meets through the
+`widen` coercion, and instances exist only for the numeric SQL types, so
+`string + string` stays a type error; concatenation is `++`.
 Comparisons and logic cannot reuse `==`/`<`/`&&` (those return
 `Bool`/`Prop`), so we mint dotted variants with matching precedences — the
 constructors carry the flag arithmetic themselves.

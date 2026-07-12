@@ -275,6 +275,31 @@ LEAN_EXPORT lean_obj_res ll_pq_pipeline_consume_sync(b_lean_obj_arg conn, lean_o
     }
 }
 
+/* pipelineAbort : PgConn → IO Unit — best-effort recovery after an error
+ * mid-round: queue a sync point so the drain terminates, discard every
+ * pending result (including PIPELINE_ABORTED ones and NULL separators)
+ * up to the sync, then leave pipeline mode. Never raises: the original
+ * error is the one worth reporting. */
+LEAN_EXPORT lean_obj_res ll_pq_pipeline_abort(b_lean_obj_arg conn, lean_obj_arg w) {
+    (void)w;
+    ll_pgconn *c = pgconn_of(conn);
+    if (c->conn && PQpipelineStatus(c->conn) != PQ_PIPELINE_OFF) {
+        /* results only flush at a sync point: queue one in case the error
+         * struck before the round's own sync was sent */
+        PQpipelineSync(c->conn);
+        /* consume everything pending (results, aborted markers, sync
+         * results, NULL separators — possibly across SEVERAL sync points)
+         * until libpq agrees to leave pipeline mode */
+        for (int guard = 0; guard < 100000; guard++) {
+            if (PQstatus(c->conn) == CONNECTION_BAD) break;
+            if (PQexitPipelineMode(c->conn) == 1) break;
+            PGresult *res = PQgetResult(c->conn);
+            if (res) PQclear(res);
+        }
+    }
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
 /* exitPipeline : PgConn → IO Unit */
 LEAN_EXPORT lean_obj_res ll_pq_exit_pipeline(b_lean_obj_arg conn, lean_obj_arg w) {
     (void)w;

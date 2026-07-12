@@ -27,7 +27,13 @@ not just enforced at the smart constructors (`SqlExpr.inQuery` /
 `ScalarQuery.embed` — the only intended producers). -/
 structure SubQuery (ts : Ctx) (t : SqlPrim) where
   compile : CompileM String
-  eval : EvalEnv ts → Except EvalError (List (Nullable t))
+  -- the eval action takes the *outer scope* at the evaluation site, so a
+  -- correlated subquery resolves outer column references exactly like the
+  -- compiled SQL does (the compile action runs in the shared CompileM
+  -- state, so inner aliases continue the outer numbering; eval mirrors
+  -- this by starting the inner spine at the scope's length — the alias
+  -- counter always equals the scope length along any evaluation path)
+  eval : EvalEnv ts → Scope → Except EvalError (List (Nullable t))
 
 /-- Allocate a fresh source alias: `a0`, `a1`, … -/
 def freshAlias : CompileM String := fun _ =>

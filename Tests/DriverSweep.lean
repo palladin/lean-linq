@@ -10,8 +10,8 @@ Runs every registered case through a native driver (`DriverOps`) and
 compares against the evaluator **at the `Values s` level, cell for cell** —
 strings appear only in failure messages. Statements run inside rolled-back
 transactions and are verified with a typed read-back query against
-`apply`'s in-memory result. Instantiated by `Tests/DriverT.lean` (SQLite)
-and `Tests/PgDriverT.lean` (PostgreSQL). -/
+`apply`'s in-memory result. Instantiated by `Tests/SqliteDriverT.lean`,
+`Tests/PgDriverT.lean`, and `Tests/MssqlDriverT.lean`. -/
 
 open LeanLinq
 
@@ -84,22 +84,28 @@ def runCase (ops : DriverOps) (name : String) (c : Case) : IO Bool := do
             pure false
   | .ins (inst := inst) i => do
       ops.execRaw ops.begin
-      ops.execIns i
-      let ok ← checkTable ops name inst (i.apply (inst := inst) seedEnv seedParams)
-      ops.execRaw ops.rollback
-      pure ok
+      try
+        ops.execIns i
+        let ok ← checkTable ops name inst (i.apply (inst := inst) seedEnv seedParams)
+        pure ok
+      finally
+        ops.execRaw ops.rollback
   | .upd (inst := inst) u => do
       ops.execRaw ops.begin
-      ops.execUpd u
-      let ok ← checkTable ops name inst (u.apply (inst := inst) seedEnv seedParams)
-      ops.execRaw ops.rollback
-      pure ok
+      try
+        ops.execUpd u
+        let ok ← checkTable ops name inst (u.apply (inst := inst) seedEnv seedParams)
+        pure ok
+      finally
+        ops.execRaw ops.rollback
   | .del (inst := inst) d => do
       ops.execRaw ops.begin
-      ops.execDel d
-      let ok ← checkTable ops name inst (d.apply (inst := inst) seedEnv seedParams)
-      ops.execRaw ops.rollback
-      pure ok
+      try
+        ops.execDel d
+        let ok ← checkTable ops name inst (d.apply (inst := inst) seedEnv seedParams)
+        pure ok
+      finally
+        ops.execRaw ops.rollback
 
 /-- Sweep every registered case; returns (passed, failed, skipped). -/
 def runSweep (ops : DriverOps) : IO (Nat × Nat × Nat) := do

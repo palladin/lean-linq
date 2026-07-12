@@ -151,11 +151,15 @@ private def expandClauses (clauses : List Syntax) : MacroM Term := do
         let hv ← match havings with
           | [] => `(Option.none)
           | h :: _ => `(Option.some $(⟨h[1]⟩))
-        let terminal ← `(LeanLinq.SpineQ.groupYield [$(sepTerms g[1]),*] $hv $selRow)
+        let terminal ← `(LeanLinq.SpineQ.groupYield __gkeys $hv $selRow)
         let grouped ← orderBys.foldrM (fun c acc => foldLeading acc c) terminal
-        -- `into a` binds the aggregate token over having/orderBy/select
+        -- `into a` binds the aggregate token over having/orderBy/select —
+        -- but NOT over the keys: grouping *by* an aggregate is meaningless
+        -- SQL, so the keys elaborate outside the binder (referencing `a`
+        -- in a key is an unknown identifier, as it should be)
         let binder : Ident := ⟨g[3]⟩
-        let withBinder ← `((fun ($binder : LeanLinq.Agg) => $grouped) LeanLinq.Agg.mk)
+        let withBinder ← `(let __gkeys := [$(sepTerms g[1]),*]
+          (fun ($binder : LeanLinq.Agg) => $grouped) LeanLinq.Agg.mk)
         before.foldrM (fun c acc => foldLeading acc c) withBinder
     let coreQ ← `(LeanLinq.Query.spine $core)
     post.foldlM applyTrailing coreQ

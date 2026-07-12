@@ -49,6 +49,17 @@ FromWhereAgeGreaterThanAverageAge
 FromWhereAgeIn	1,25,John Doe,1|2,30,Jane Smith,1
 FromWhereAgeInSubquery	
 FromWhereAgeInSubqueryWithClosure	
+FromWhereCorrelatedInSubquery	1,25,John Doe,1|2,30,Jane Smith,1|4,65,Senior User,1
+FromWhereCorrelatedScalarSubquery	1,25,John Doe,1|2,30,Jane Smith,1|4,65,Senior User,1
+FromWhereInEmptyList	
+FromSelectNegativeDivision	1,-20|2,-17|3,-24|4,0
+DateTimeAddMonthsClamp	2020-02-29 00:00:00
+UnionThenIntersect	1
+ExceptNested	1|2|3|4
+UnionWithLimitOperand	1|3
+FromOrderByGroupBySelect	16,1|25,1|30,1|65,1
+FromWhereBoolColumnAnd	1,John Doe|2,Jane Smith|4,Senior User
+LeftJoinOrderByNullableKey	Minor User,NULL|Senior User,75|John Doe,150|Jane Smith,300|John Doe,500
 FromSubquery	1,26|2,31|3,17|4,66
 FromWhereSelectWhereFromNested	
 FromWhereSelectWhereNested	
@@ -225,6 +236,13 @@ CFromWhereAgeGreaterThanAverageAge
 CFromWhereAgeIn	1,25,John Doe,1|2,30,Jane Smith,1
 CFromWhereAgeInSubquery	
 CFromWhereAgeInSubqueryWithClosure	
+CFromWhereCorrelatedInSubquery	1,25,John Doe,1|2,30,Jane Smith,1|4,65,Senior User,1
+CFromWhereCorrelatedScalarSubquery	1,25,John Doe,1|2,30,Jane Smith,1|4,65,Senior User,1
+CFromWhereInEmptyList	
+CFromSelectNegativeDivision	1,-20|2,-17|3,-24|4,0
+CDateTimeAddMonthsClamp	2020-02-29 00:00:00
+CFromWhereBoolColumnAnd	1,John Doe|2,Jane Smith|4,Senior User
+CLeftJoinOrderByNullableKey	Minor User,NULL|Senior User,75|John Doe,150|Jane Smith,300|John Doe,500
 CFromSubquery	1,26|2,31|3,17|4,66
 CFromWhereSelectWhereFromNested	
 CFromWhereSelectWhereNested	

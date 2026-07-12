@@ -109,7 +109,8 @@ def bigSpenders := Query.from' (ts := PlayCtx) customers
 
 /-! ## Executable semantics — the same query value *runs* in pure Lean
 
-`Query.run : Query ts s → TableEnv ts → List (Values s)` is the library's
+`Query.run : Query ts s → TableEnv ts.tables → ParamEnv ts.params →
+Except EvalError (List (Values s))` is the library's
 denotational semantics: a typed in-memory evaluator over the exact query
 value that compiles to SQL (the integration suite differential-tests all
 three engines against it). Table resolution happened at elaboration, so a

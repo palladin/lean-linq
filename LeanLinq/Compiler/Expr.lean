@@ -34,6 +34,16 @@ def SqlExpr.isPredicate : SqlExpr ts c → Bool
 
 mutual
 
+/-- Compile a boolean expression for a *predicate position* (WHERE / ON /
+HAVING / AND / OR / NOT / CASE WHEN): T-SQL bit values are not predicates,
+so on SQL Server a non-predicate boolean compiles to `({e} = 1)`. -/
+def SqlExpr.compilePred (e : SqlExpr ts ⟨.bool, nb⟩) : CompileM String := do
+  let s ← e.compile
+  if (← read) == .sqlServer && !e.isPredicate then
+    return s!"({s} = 1)"
+  else
+    return s
+
 /-- Render an expression to SQL text for the ambient dialect, allocating a
 named parameter for every literal (never inlining values). -/
 def SqlExpr.compile : SqlExpr ts c → CompileM String
@@ -43,7 +53,7 @@ def SqlExpr.compile : SqlExpr ts c → CompileM String
   | .decimalC d    => pushParam (.decimal d)
   | .stringC s     => pushParam (.string s)
   | .boolC b       => pushParam (.bool b)
-  | .dateTimeC s   => pushParam (.dateTime s)
+  | .dateTimeC s   => pushParam (.dateTime (normDateTime s)) -- SQLite compares strings: ship the normalized form the evaluator uses
   | .guidC g       => pushParam (.guid g)
   | .nullC _       => pure "NULL"
   | .paramE (inst := _) name => refParam name
@@ -65,17 +75,20 @@ def SqlExpr.compile : SqlExpr ts c → CompileM String
         return s!"({wrap a sa} {op.token} {wrap b sb})"
       else
         return s!"({sa} {op.token} {sb})"
-  | .and a b       => return s!"({← a.compile} AND {← b.compile})"
-  | .or a b        => return s!"({← a.compile} OR {← b.compile})"
-  | .not a         => return s!"(NOT {← a.compile})"
+  | .and a b       => return s!"({← a.compilePred} AND {← b.compilePred})"
+  | .or a b        => return s!"({← a.compilePred} OR {← b.compilePred})"
+  | .not a         => return s!"(NOT {← a.compilePred})"
   | .isNull e      => return s!"{← e.compile} IS NULL"
   | .isNotNull e   => return s!"{← e.compile} IS NOT NULL"
   | .like e p      => return s!"{← e.compile} LIKE {← p.compile}"
+  -- an empty IN list is invalid SQL (PostgreSQL/SQL Server reject `IN ()`);
+  -- SQL's `x IN (empty)` is FALSE without evaluating x, so compile exactly that
+  | .inList _ []   => return "(1 = 0)"
   | .inList e es   => return s!"{← e.compile} IN ({String.intercalate ", " (← SqlExpr.compileList es)})"
   | .inSub e sub   => return s!"{← e.compile} IN ({← sub.compile})"
   | .scalarSub sub => return s!"({← sub.compile})"
   | .caseWhen c a b =>
-      return s!"CASE WHEN {← c.compile} THEN {← a.compile} ELSE {← b.compile} END"
+      return s!"CASE WHEN {← c.compilePred} THEN {← a.compile} ELSE {← b.compile} END"
   | .aggE op e     => return s!"{op.token}({← e.compile})"
   | .countAll      => pure "COUNT(*)"
   | .abs e         => return s!"ABS({← e.compile})"

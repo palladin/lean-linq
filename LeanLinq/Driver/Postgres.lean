@@ -75,6 +75,9 @@ private opaque pipelineConsumeSync (conn : @&Conn) : IO Unit
 @[extern "ll_pq_exit_pipeline"]
 private opaque exitPipeline (conn : @&Conn) : IO Unit
 
+@[extern "ll_pq_pipeline_abort"]
+private opaque pipelineAbort (conn : @&Conn) : IO Unit
+
 /-! ## Wire form: `$N` placeholders, OID-typed text values -/
 
 /-- Rewrite `:name` placeholders to positional `$k+1`, longest name first. -/
@@ -133,7 +136,7 @@ private def wireParams (compiled : CompiledSql)
 private def readCell (res : PgResult) (row col : UInt32) (t : SqlPrim) :
     IO (Nullable t) := do
   if ← getisnull res row col then pure none
-  else pure (Driver.parseCell t (← getvalue res row col))
+  else IO.ofExcept ((Driver.parseCell t (← getvalue res row col)).mapError IO.userError)
 
 private def readRow (res : PgResult) (row : UInt32) :
     (s : Schema) → (col : UInt32) → IO (Values s)
@@ -296,15 +299,23 @@ private def fill (conn : Conn) (reqs : Array (Req c)) : IO Unit := do
         if (← ntuples res) == 0 then ref.set (some none)
         else ref.set (some (← readCell res 0 0 t))
 
-/-- Execute one pipeline round: run the send action, sync, fill. -/
+/-- Execute one pipeline round: run the send action, sync, fill. A throw
+anywhere inside (a missing named parameter, a server error, a strict-NULL
+decode) would otherwise leave the connection wedged in pipeline mode with
+undrained results — poisoning every later use — so the round recovers
+before re-raising: drain to a fresh sync point and exit pipeline mode. -/
 private def runRound (conn : Conn) (act : SendM c σ) : IO σ := do
   enterPipeline conn
-  let (stage, reqs) ← act.run #[]
-  pipelineSync conn
-  fill conn reqs
-  pipelineConsumeSync conn
-  exitPipeline conn
-  pure stage
+  try
+    let (stage, reqs) ← act.run #[]
+    pipelineSync conn
+    fill conn reqs
+    pipelineConsumeSync conn
+    exitPipeline conn
+    pure stage
+  catch e =>
+    pipelineAbort conn
+    throw e
 
 private def runStages (conn : Conn) : (n : Nat) → Stage c α n → IO α
   | 0, a => pure a

@@ -254,6 +254,49 @@ def FromOrderByLimitDistinct := Query.from' (ts := TestCtx) customers
   |>.distinct
   |>.orderBy (fun r => [r["Name"].asc])
 
+private def idOnly (k : Int) := Query.from' (ts := TestCtx) customers
+  |>.where' (fun c => c["Id"] ==. SqlExpr.long k)
+  |>.select (fun c => ![c["Id"].as "Id"])
+
+/-- Nested set operations parenthesize *structurally* (derived tables):
+flat rendering would let PostgreSQL/SQL Server bind INTERSECT tighter —
+`({3} ∪ {1}) ∩ {1}` is `{1}`, not `{3} ∪ ({1} ∩ {1}) = {1,3}`. -/
+def UnionThenIntersect := ((idOnly 3).union (idOnly 1)).intersect (idOnly 1)
+
+/-- Right-nested EXCEPT: `{1,2,3,4} \ ({1} \ {1})` is everything —
+flat rendering associates left and loses row 1. -/
+def ExceptNested :=
+  (Query.from' (ts := TestCtx) customers |>.select (fun c => ![c["Id"].as "Id"]))
+    |>.except ((idOnly 1).except (idOnly 1))
+
+/-- A LIMIT inside a set-operation operand stays *inside* (derived
+table); rendered flat, SQLite would apply it to the whole compound. -/
+def UnionWithLimitOperand :=
+  ((Query.from' (ts := TestCtx) customers |>.select (fun c => ![c["Id"].as "Id"])
+      |>.orderBy (fun r => [r["Id"].asc]) |>.limit 1)).union (idOnly 3)
+
+/-- ORDER BY before GROUP BY is meaningless to the grouping and SQL
+cannot express it: the spine's order nodes are stripped at construction,
+leaving one clean GROUP BY statement. -/
+def FromOrderByGroupBySelect := Query.from' (ts := TestCtx) customers
+  |>.orderBy (fun c => [c["Name"].asc])
+  |>.groupBy (fun c => [c["Age"].key])
+  |>.select (fun r a => ![r["Age"].as "Age", (a.count).as "N"])
+
+/-- A boolean column in predicate position: T-SQL bit values are not
+predicates, so SQL Server compiles `([IsActive] = 1)`. -/
+def FromWhereBoolColumnAnd := Query.from' (ts := TestCtx) customers
+  |>.where' (fun c => c["IsActive"] &&. (c["Age"] >=. 18))
+  |>.select (fun c => ![c["Id"].as "Id", c["Name"].as "Name"])
+
+/-- ORDER BY over a nullable key with a NULL present (the LEFT JOIN pad):
+the evaluator and SQLite/SQL Server sort NULL smallest, and the compiler
+now pins PostgreSQL to the same placement (`NULLS FIRST` on ASC). -/
+def LeftJoinOrderByNullableKey := Query.from' (ts := TestCtx) customers
+  |>.leftJoin orders (fun c o => c["Id"] ==. o["CustomerId"])
+      (fun c o => ![c["Name"].as "Name", o["Amount"].as "Amount"])
+  |>.orderBy (fun r => [r["Amount"].asc, r["Name"].asc])
+
 def UnionQ :=
   (Query.from' (ts := TestCtx) customers
     |>.where' (fun c => c["Age"] >. 30)
@@ -372,6 +415,17 @@ def queryCases : List (String × Case) := [
   ("FromWhereAgeIn", q FromWhereAgeIn),
   ("FromWhereAgeInSubquery", q FromWhereAgeInSubquery),
   ("FromWhereAgeInSubqueryWithClosure", q FromWhereAgeInSubqueryWithClosure),
+  ("FromWhereCorrelatedInSubquery", q FromWhereCorrelatedInSubquery),
+  ("FromWhereCorrelatedScalarSubquery", q FromWhereCorrelatedScalarSubquery),
+  ("FromWhereInEmptyList", q FromWhereInEmptyList),
+  ("FromSelectNegativeDivision", q FromSelectNegativeDivision),
+  ("DateTimeAddMonthsClamp", q DateTimeAddMonthsClamp),
+  ("UnionThenIntersect", q UnionThenIntersect),
+  ("ExceptNested", q ExceptNested),
+  ("UnionWithLimitOperand", q UnionWithLimitOperand),
+  ("FromOrderByGroupBySelect", q FromOrderByGroupBySelect),
+  ("FromWhereBoolColumnAnd", q FromWhereBoolColumnAnd),
+  ("LeftJoinOrderByNullableKey", q LeftJoinOrderByNullableKey),
   ("FromSubquery", q FromSubquery),
   ("FromWhereSelectWhereFromNested", q FromWhereSelectWhereFromNested),
   ("FromWhereSelectWhereNested", q FromWhereSelectWhereNested),

@@ -146,6 +146,42 @@ def FromWhereAgeInSubqueryWithClosure := Query.from' (ts := TestCtx) customers
       (Query.from' (ts := TestCtx) customers
         |>.where' (fun x => x["Name"] ==. c["Name"] ++ (SqlExpr.str "_VIP").anyNull)
         |>.select (fun x => ![x["Age"].as "Age"])))
+/-- Correlated IN subquery: the inner WHERE references the *outer* row.
+Regression pin for the evaluator's scope threading — outer references
+must resolve against the outer row (engines: customers with an order),
+not rebind to same-numbered inner aliases. -/
+def FromWhereCorrelatedInSubquery := Query.from' (ts := TestCtx) customers
+  |>.where' (fun c => c["Id"].inQuery
+      (Query.from' (ts := TestCtx) orders
+        |>.where' (fun o => o["CustomerId"] ==. c["Id"])
+        |>.select (fun o => ![o["CustomerId"].as "CustomerId"])))
+
+/-- Correlated scalar embed: a per-outer-row aggregate in WHERE. -/
+def FromWhereCorrelatedScalarSubquery := Query.from' (ts := TestCtx) customers
+  |>.where' (fun c => SqlExpr.int 0 <.
+      (Query.from' (ts := TestCtx) orders
+        |>.where' (fun o => o["CustomerId"] ==. c["Id"])
+        |>.count).embed)
+
+/-- An empty IN list compiles to the constant-false `(1 = 0)` — `IN ()`
+is a syntax error on PostgreSQL/SQL Server. -/
+def FromWhereInEmptyList := Query.from' (ts := TestCtx) customers
+  |>.where' (fun c => c["Age"].inValues [])
+
+/-- Negative integer division truncates toward zero on every engine
+(`-49 / 2 = -24`), not toward −∞. -/
+def FromSelectNegativeDivision := Query.from' (ts := TestCtx) customers
+  |>.select (fun c => ![c["Id"].as "Id",
+      ((c["Age"] - 65) / 2).as "H"])
+  |>.orderBy (fun r => [r["Id"].asc])
+
+/-- Month-end clamping: PostgreSQL/SQL Server (and the evaluator) clamp
+`2020-01-31 + 1 month` to `2020-02-29`; SQLite rolls into March —
+allowlisted as a genuine engine divergence. -/
+def DateTimeAddMonthsClamp := Query.from' (ts := TestCtx) products
+  |>.where' (fun p => p["Id"] ==. SqlExpr.long 1)
+  |>.select (fun _ => ![((SqlExpr.dt "2020-01-31").addMonths 1).as "Clamped"])
+
 def FromSubquery :=
   (Query.from' (ts := TestCtx) customers
     |>.select (fun x => ![x["Id"].as "Id", (x["Age"] + 1).as "NewAge"]))

@@ -37,9 +37,14 @@ private def renderWheres (wheres : Array String) : String :=
   else s!" WHERE {String.intercalate " AND " wheres.toList}"
 
 def compileOrderKeys (ks : List (OrderKey ts)) : CompileM String := do
+  let db ← read
   let items ← ks.mapM fun k => do
     let e ← k.expr.compile
-    return s!"{e} {if k.dir == .asc then "ASC" else "DESC"}"
+    -- the evaluator (and SQLite/SQL Server) sort NULL smallest; PostgreSQL
+    -- defaults to NULLS LAST on ASC — make the placement explicit there
+    let nulls := if db == .postgres then
+        (if k.dir == .asc then " NULLS FIRST" else " NULLS LAST") else ""
+    return s!"{e} {if k.dir == .asc then "ASC" else "DESC"}{nulls}"
   return String.intercalate ", " items
 
 def compileGroupKeys (ks : List (KeyExpr ts)) : CompileM String := do
@@ -139,16 +144,41 @@ def Query.compileStmt : Query ts s → CompileM String
         let hv ← match having? with
           | none => pure ""
           | some h => do
-              let hs ← (h r).compile
+              let hs ← (h r).compilePred
               pure s!" HAVING {hs}"
         let ob ← match orderKeys? with
           | none => pure ""
           | some oks => do
               let rendered ← compileOrderKeys (oks r)
               pure s!" ORDER BY {rendered}"
-        return (String.intercalate ", " items, s!" GROUP BY {ks}{hv}{ob}")
-  | .setOpC op a b => do
-      return s!"{← a.compileStmt} {op.token} {← b.compileStmt}"
+        -- zero keys = one group over all rows: SQL spells that with *no*
+        -- GROUP BY clause (an empty one is a syntax error)
+        let gb := if ks.isEmpty then "" else s!" GROUP BY {ks}"
+        return (String.intercalate ", " items, s!"{gb}{hv}{ob}")
+  | .setOpC (s := s₀) op a b => do
+      -- operands need structural parenthesization: PostgreSQL/SQL Server
+      -- give INTERSECT higher precedence and EXCEPT chains associate left,
+      -- so a nested operand compiled flat silently changes meaning — and
+      -- SQLite rejects parenthesized compounds, so nesting wraps as a
+      -- derived table. Plain spines compile flat with their (dead) ORDER
+      -- BY stripped: an operand's order is discarded by the operation.
+      let ca ← match a with
+        | .spine (g := .plain) sp => sp.compileSpine {} Row.defaultSelect
+        | .spine (g := .grouped) sp => sp.compileSpine {} ()
+        | qa => do
+            let sub ← qa.compileStmt
+            let alias ← freshAlias
+            let (sel, _) ← Row.defaultSelect (Row.ofAlias alias s₀ : Row ts s₀)
+            pure s!"SELECT {sel} FROM ({sub}) {← quote alias}"
+      let cb ← match b with
+        | .spine (g := .plain) sp => sp.compileSpine {} Row.defaultSelect
+        | .spine (g := .grouped) sp => sp.compileSpine {} ()
+        | qb => do
+            let sub ← qb.compileStmt
+            let alias ← freshAlias
+            let (sel, _) ← Row.defaultSelect (Row.ofAlias alias s₀ : Row ts s₀)
+            pure s!"SELECT {sel} FROM ({sub}) {← quote alias}"
+      return s!"{ca} {op.token} {cb}"
 
 /-- Walk a comprehension spine accumulating FROM sources, JOIN clauses, and
 WHERE conjuncts until the terminal, then assemble one flat SELECT. The third
@@ -170,15 +200,16 @@ def SpineQ.compileSpine : SpineQ ts g s → StmtAcc → SelectK ts g s → Compi
       let hvStr ← match hv with
         | none => pure ""
         | some h => do
-            let hs ← h.compile
+            let hs ← h.compilePred
             pure s!" HAVING {hs}"
       let head := if acc.distinct then "SELECT DISTINCT" else "SELECT"
       let orderClause :=
         if acc.orders.isEmpty then ""
         else s!" ORDER BY {String.intercalate ", " acc.orders.toList}"
-      return s!"{head} {String.intercalate ", " items}{renderFroms acc.froms}{renderWheres acc.wheres} GROUP BY {ksStr}{hvStr}{orderClause}"
+      let gb := if ksStr.isEmpty then "" else s!" GROUP BY {ksStr}"
+      return s!"{head} {String.intercalate ", " items}{renderFroms acc.froms}{renderWheres acc.wheres}{gb}{hvStr}{orderClause}"
   | .guard b rest, acc, k => do
-      let w ← b.compile
+      let w ← b.compilePred
       rest.compileSpine { acc with wheres := acc.wheres.push w } k
   | .order ks rest, acc, k => do
       let rendered ← compileOrderKeys ks
@@ -191,13 +222,13 @@ def SpineQ.compileSpine : SpineQ ts g s → StmtAcc → SelectK ts g s → Compi
   | .joinT (n := nm) (s := s₀) (inst := _) _ on' f, acc, k => do
       let alias ← freshAlias
       let row := Row.ofAlias alias s₀
-      let onStr ← (on' row).compile
+      let onStr ← (on' row).compilePred
       let item := s!"{JoinKind.inner.token} {← quote nm} {← quote alias} ON {onStr}"
       (f row).compileSpine { acc with froms := acc.froms.push (true, item) } k
   | .joinLeftT (n := nm) (s := s₀) (inst := _) _ on' f, acc, k => do
       let alias ← freshAlias
       let row := Row.ofAlias alias s₀.asNull
-      let onStr ← (on' row).compile
+      let onStr ← (on' row).compilePred
       let item := s!"{JoinKind.left.token} {← quote nm} {← quote alias} ON {onStr}"
       (f row).compileSpine { acc with froms := acc.froms.push (true, item) } k
   | .fromQ (s := s₀) q f, acc, k => do
@@ -237,12 +268,12 @@ same type. Stored as its staged actions (see `SubQuery`): compilation for
 `toSql`, evaluation for `run`. -/
 def SqlExpr.inQuery (e : SqlExpr ts ⟨t, nf⟩) (q : Query ts [(cn, ⟨t, m⟩)]) :
     SqlExpr ts ⟨.bool, true⟩ :=
-  .inSub e ⟨q.compileStmt, fun ee => (q.evalRows ee).map fun rows =>
+  .inSub e ⟨q.compileStmt, fun ee sc => (q.evalRowsIn ee sc).map fun rows =>
     rows.map fun | .cons cell .nil => SqlType.toNullable cell⟩
 
 /-- Embed a scalar aggregate query as an expression:
 `c["Age"] >. (customers' |>.select … |>.avg).embed`. -/
 def ScalarQuery.embed (sq : ScalarQuery ts ⟨t, n⟩) : SqlExpr ts ⟨t, true⟩ :=
-  .scalarSub ⟨sq.compile, fun ee => (sq.evalCell ee).map fun c => [c]⟩
+  .scalarSub ⟨sq.compile, fun ee sc => (sq.evalCellIn ee sc).map fun c => [c]⟩
 
 end LeanLinq

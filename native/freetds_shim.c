@@ -28,7 +28,37 @@ typedef struct {
     DBPROCESS *dbproc;
     char err[1024];
     char msg[1024];
+    /* malloc'd copies of RPC parameter values: dbrpcparam stores the raw
+     * pointer and serializes only inside dbrpcsend, so the buffers must
+     * outlive the whole build-send window (Lean frees its strings as soon
+     * as the param call returns). Cleared after send and on reset/close. */
+    char **rpc_vals;
+    size_t rpc_nvals;
+    size_t rpc_cap;
 } ll_tdsconn;
+
+static void ll_tds_rpc_vals_clear(ll_tdsconn *c) {
+    for (size_t k = 0; k < c->rpc_nvals; k++) free(c->rpc_vals[k]);
+    free(c->rpc_vals);
+    c->rpc_vals = NULL;
+    c->rpc_nvals = 0;
+    c->rpc_cap = 0;
+}
+
+static char *ll_tds_rpc_vals_push(ll_tdsconn *c, const char *src, size_t len) {
+    if (c->rpc_nvals == c->rpc_cap) {
+        size_t cap = c->rpc_cap ? c->rpc_cap * 2 : 8;
+        char **vs = (char **)realloc(c->rpc_vals, cap * sizeof(char *));
+        if (!vs) return NULL;
+        c->rpc_vals = vs;
+        c->rpc_cap = cap;
+    }
+    char *copy = (char *)malloc(len + 1);
+    if (!copy) return NULL;
+    memcpy(copy, src, len + 1);
+    c->rpc_vals[c->rpc_nvals++] = copy;
+    return copy;
+}
 
 /* Connect-time errors only (no DBPROCESS/userdata exists yet). */
 static pthread_mutex_t g_conn_err_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -105,6 +135,7 @@ static pthread_once_t g_class_once = PTHREAD_ONCE_INIT;
 static void ll_tdsconn_finalize(void *ptr) {
     ll_tdsconn *c = (ll_tdsconn *)ptr;
     if (c->dbproc) dbclose(c->dbproc);
+    ll_tds_rpc_vals_clear(c);
     free(c);
 }
 
@@ -140,9 +171,13 @@ LEAN_EXPORT lean_obj_res ll_tds_connect(b_lean_obj_arg server, b_lean_obj_arg us
     dbloginfree(login);
     if (!dbproc) return ll_tds_err(NULL, "connect");
     ll_tdsconn *c = (ll_tdsconn *)malloc(sizeof(ll_tdsconn));
+    if (!c) { dbclose(dbproc); return ll_tds_err(NULL, "conn alloc"); }
     c->dbproc = dbproc;
     c->err[0] = 0;
     c->msg[0] = 0;
+    c->rpc_vals = NULL;
+    c->rpc_nvals = 0;
+    c->rpc_cap = 0;
     dbsetuserdata(dbproc, (BYTE *)c); /* route this connection's errors to c */
     if (lean_string_size(db) > 1) { /* non-empty */
         if (dbuse(dbproc, lean_string_cstr(db)) == FAIL) {
@@ -172,15 +207,20 @@ static lean_obj_res ll_tds_check_conn(ll_tdsconn *c, const char *what) {
         snprintf(buf, sizeof(buf), "freetds %s: connection is closed", what);
         return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string(buf)));
     }
+    /* a *successful* prior command may have left an informational message
+     * (severity 10); drop it so it cannot decorate an unrelated later error */
+    c->msg[0] = 0;
     return NULL;
 }
 
 /* drain every pending result set */
 static RETCODE drain_results(DBPROCESS *dbproc) {
-    RETCODE r;
+    RETCODE r, r2;
     while ((r = dbresults(dbproc)) != NO_MORE_RESULTS) {
         if (r == FAIL) return FAIL;
-        while (dbnextrow(dbproc) != NO_MORE_ROWS) { }
+        while ((r2 = dbnextrow(dbproc)) != NO_MORE_ROWS) {
+            if (r2 == FAIL) return FAIL; /* dead connection: don't spin */
+        }
     }
     return SUCCEED;
 }
@@ -226,6 +266,10 @@ LEAN_EXPORT lean_obj_res ll_tds_rpc_begin(b_lean_obj_arg conn, b_lean_obj_arg pr
     lean_obj_res bad = ll_tds_check_conn(c, "rpc");
     if (bad) return bad;
     dbcancel(c->dbproc);
+    /* a throw between a previous rpcBegin and rpcSend leaves a half-built
+     * RPC queued (dbcancel does not clear it); reset before building anew */
+    dbrpcinit(c->dbproc, (char *)"", DBRPCRESET);
+    ll_tds_rpc_vals_clear(c);
     if (dbrpcinit(c->dbproc, (char *)lean_string_cstr(proc), 0) == FAIL)
         return ll_tds_err(c, "rpcinit");
     return lean_io_result_mk_ok(lean_box(0));
@@ -256,9 +300,11 @@ LEAN_EXPORT lean_obj_res ll_tds_rpc_param_text(b_lean_obj_arg conn, b_lean_obj_a
         r = dbrpcparam(c->dbproc, (char *)lean_string_cstr(name), 0,
                        type, -1, 0, NULL);
     } else {
+        size_t len = lean_string_size(value) - 1;
+        char *copy = ll_tds_rpc_vals_push(c, lean_string_cstr(value), len);
+        if (!copy) return ll_tds_err(c, "rpcparam alloc");
         r = dbrpcparam(c->dbproc, (char *)lean_string_cstr(name), 0,
-                       type, -1, (DBINT)(lean_string_size(value) - 1),
-                       (BYTE *)lean_string_cstr(value));
+                       type, -1, (DBINT)len, (BYTE *)copy);
     }
     if (r == FAIL) return ll_tds_err(c, "rpcparam");
     return lean_io_result_mk_ok(lean_box(0));
@@ -270,7 +316,11 @@ LEAN_EXPORT lean_obj_res ll_tds_rpc_send(b_lean_obj_arg conn, lean_obj_arg w) {
     ll_tdsconn *c = tdsconn_of(conn);
     lean_obj_res bad = ll_tds_check_conn(c, "rpcsend");
     if (bad) return bad;
-    if (dbrpcsend(c->dbproc) == FAIL) return ll_tds_err(c, "rpcsend");
+    if (dbrpcsend(c->dbproc) == FAIL) {
+        ll_tds_rpc_vals_clear(c);
+        return ll_tds_err(c, "rpcsend");
+    }
+    ll_tds_rpc_vals_clear(c); /* serialized into the TDS stream by dbrpcsend */
     if (dbsqlok(c->dbproc) == FAIL) return ll_tds_err(c, "rpc sqlok");
     return lean_io_result_mk_ok(lean_box(0));
 }
@@ -325,10 +375,21 @@ LEAN_EXPORT lean_obj_res ll_tds_col_text(b_lean_obj_arg conn, uint32_t i,
     if (!data) return lean_io_result_mk_ok(lean_mk_string(""));
     int type = dbcoltype(c->dbproc, col);
     DBINT len = dbdatlen(c->dbproc, col);
-    char buf[4096];
+    /* UCS-2 → UTF-8 expands at most 1.5×; fixed-width types (money,
+     * datetime, decimal) render well under 256 — 2×len + 64 covers all */
+    size_t cap = (size_t)(len > 0 ? (size_t)len * 2 + 64 : 0);
+    if (cap < 256) cap = 256;
+    char sbuf[4096];
+    char *buf = cap <= sizeof(sbuf) ? sbuf : (char *)malloc(cap);
+    if (!buf) return ll_tds_err(c, "convert alloc");
     DBINT n = dbconvert(c->dbproc, type, data, len, SYBCHAR,
-                        (BYTE *)buf, sizeof(buf) - 1);
-    if (n < 0) return ll_tds_err(c, "convert");
+                        (BYTE *)buf, (DBINT)(cap - 1));
+    if (n < 0) {
+        if (buf != sbuf) free(buf);
+        return ll_tds_err(c, "convert");
+    }
     buf[n] = 0;
-    return lean_io_result_mk_ok(lean_mk_string(buf));
+    lean_obj_res out = lean_io_result_mk_ok(lean_mk_string(buf));
+    if (buf != sbuf) free(buf);
+    return out;
 }

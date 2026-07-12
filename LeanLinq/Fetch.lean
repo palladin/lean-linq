@@ -159,6 +159,13 @@ symbolic budgets: `(Bound.fin_le_fin (by omega))`. -/
 theorem fin_le_fin {a b : Nat} (h : a ≤ b) : Bound.fin a ≤ Bound.fin b :=
   decide_eq_true h
 
+theorem le_trans : {a b c : Bound} → a ≤ b → b ≤ c → a ≤ c
+  | _, _, .top, _, _ => rfl
+  | .top, .fin _, _, h, _ => nomatch h
+  | _, .top, .fin _, _, h => nomatch h
+  | .fin _, .fin _, .fin _, h, h' =>
+      decide_eq_true (Nat.le_trans (of_decide_eq_true h) (of_decide_eq_true h'))
+
 theorem mul_le_mul_left (k : Bound) : {a b : Bound} → a ≤ b → k * a ≤ k * b
   | .fin _, .top, _ => by cases k <;> exact rfl
   | .top, .top, _ => by cases k <;> exact rfl
@@ -255,16 +262,19 @@ def withBound (x : DbFetch c m α) {n : Bound}
   h ▸ x
 
 /-- `bindD` with its budget proof discharged automatically where possible:
-`omega` alone for closed facts, `Subtype.property` + `omega` when the value
-is length-refined (a `fetchLimit` result). Anything else needs an explicit
-proof — that is the door doing its job. -/
+`decide` for closed facts, `le_top` at ⊤, and the `fetchLimit` refinement
+(`a.property`, bare or under the loop's `k *`) when the value is
+length-refined. Anything else needs an explicit proof — that is the door
+doing its job. -/
 def bindD' {α β : Type} {g : α → Bound} (x : DbFetch c m α)
     (f : (a : α) → DbFetch c (g a) β) (B : Bound)
     (h : ∀ a, g a ≤ B := by
       intro a
       first
-        | omega
-        | (have := a.property; omega)
+        | decide
+        | exact _root_.LeanLinq.Bound.le_top _
+        | exact a.property
+        | exact _root_.LeanLinq.Bound.mul_le_mul_left _ a.property
         | fail "cannot bound the dependent continuation — fetch the collection through fetchLimit, or supply the proof") :
     DbFetch c (m + B) β :=
   .bindD x f B h

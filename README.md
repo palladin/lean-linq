@@ -91,7 +91,9 @@ lake exe mssqldriver
 
 ## Integration tests
 
-Every pipeline query case has a comprehension twin (`C<Name>`, Tests/QueriesC.lean)
+Nearly every pipeline query case has a comprehension twin (`C<Name>`, Tests/QueriesC.lean;
+the exceptions are shapes `query!` cannot spell — split limit/offset chains and
+set-operation compositions)
 expressing the same shape with `query!` clauses, so both surfaces are covered by
 every layer below. `lake exe integration` executes every registered query and
 statement against real databases: SQLite (local temp file), PostgreSQL and SQL Server (docker compose
@@ -149,8 +151,9 @@ keywords, hence the primes):
 ```lean
 abbrev OrdersS : Schema := [("OrderId", .int), ("CustomerId", .int), ("Amount", .int)]
 def orders : Table "Orders" OrdersS := ⟨⟩
+abbrev ShopDb : Ctx := { tables := [("Customers", CustomersS), ("Orders", OrdersS)] }
 
-def report := Query.from' customers
+def report := Query.from' (ts := ShopDb) customers
   |>.where' (fun c => 18 <. c["Age"])
   |>.innerJoin orders (fun c o => c["Id"] ==. o["CustomerId"])
       (fun c o => ![c["Id"].as "CustId", c["Name"].as "Name", o["Amount"].as "Amount"])
@@ -208,7 +211,7 @@ query! {
 }
 ```
 
-Every pipeline test case has a comprehension twin (Tests/QueriesC.lean), so both surfaces
+Nearly every pipeline test case has a comprehension twin (Tests/QueriesC.lean), so both surfaces
 are exercised by the full test stack.
 
 ## Statements
@@ -216,16 +219,16 @@ are exercised by the full test stack.
 INSERT / UPDATE / DELETE use the same name-checked, typed column machinery:
 
 ```lean
-customers.insert
+customers.insert (ts := MyDb)
   |>.value "Id" 200 |>.value "Name" "John Doe" |>.valueNull "Age"
 -- INSERT INTO "Customers" ("Id", "Name", "Age") VALUES (:p0, :p1, NULL)
 
-customers.update
+customers.update (ts := MyDb)
   |>.setWith "Age" (fun c => c["Age"] + 1)
   |>.where' (fun c => c["Id"] ==. 200)
 -- UPDATE "Customers" SET "Age" = ("Age" + :p0) WHERE ("Id" = :p1)
 
-customers.delete |>.where' (fun c => c["Age"] <. 18)
+customers.delete (ts := MyDb) |>.where' (fun c => c["Age"] <. 18)
 -- DELETE FROM "Customers" WHERE ("Age" < :p0)
 ```
 
@@ -282,10 +285,13 @@ All of it in one definition, written in `fetch!` do-sugar:
 
 ```lean
 def topSpendersDetail (n : Bound) :
-    DbFetch MyDb (n + 1) (List (String × Nat)) := fetch! {
-  let spenders ← adults.fetchLimit n          -- LIMIT n, length-refined rows
+    DbFetch ShopDb (n + 1) (List (String × Nat)) := fetch! {
+  let spenders ← Query.from' (ts := ShopDb) customers
+    |>.where' (fun c => 18 <. c["Age"])
+    |>.orderBy (fun c => [c["Name"].asc])
+    |>.fetchLimit n                           -- LIMIT n, length-refined rows
   let report ← for s in spenders.val do       -- fuses into forRows: the proof is the refinement
-    Query.from' orders
+    Query.from' (ts := ShopDb) orders
       |>.where' (fun o => o["CustomerId"] ==. s["Id"])
       |>.fetch
       |>.map (fun os => (s["Name"], os.length))

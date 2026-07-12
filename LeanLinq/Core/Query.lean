@@ -125,6 +125,21 @@ hypothesis covers `f r` for every `r`. -/
 def bind (sp : SpineQ ts .plain s) (k : Row ts s → SpineQ ts g s') : SpineQ ts g s' :=
   bindAux sp rfl k
 
+/-- Strip `ORDER BY` nodes from a spine. Pre-GROUP-BY row order is
+meaningless to grouping and a set-operation operand's order is discarded
+by the operation — SQL cannot even express either, so both construction
+sites strip, keeping the compiled statement valid and the evaluator
+aligned with it. -/
+def dropOrders : SpineQ ts g s → SpineQ ts g s
+  | .yield r => .yield r
+  | .groupYield ks hv r => .groupYield ks hv r
+  | .guard b rest => .guard b rest.dropOrders
+  | .order _ rest => rest.dropOrders
+  | .fromT (inst := i) t f => .fromT (inst := i) t fun r => (f r).dropOrders
+  | .joinT (inst := i) t on' f => .joinT (inst := i) t on' fun r => (f r).dropOrders
+  | .joinLeftT (inst := i) t on' f => .joinLeftT (inst := i) t on' fun r => (f r).dropOrders
+  | .fromQ q f => .fromQ q fun r => (f r).dropOrders
+
 end SpineQ
 
 /-- View a query as a *plain* spine suitable for extending (binding more
@@ -205,9 +220,20 @@ def offset (q : Query ts s) (n : Nat) : Query ts s :=
   | .limitC q' lim? none => .limitC q' lim? (some n)
   | _ => q.limitOffset none (some n)
 
-def union (q₁ q₂ : Query ts s) : Query ts s := .setOpC .union q₁ q₂
-def intersect (q₁ q₂ : Query ts s) : Query ts s := .setOpC .intersect q₁ q₂
-def except (q₁ q₂ : Query ts s) : Query ts s := .setOpC .except q₁ q₂
+/-- A set-operation operand's ORDER BY is discarded by the operation (SQL
+cannot express it), so spine operands are stripped at construction — the
+compiler then emits them flat, and boundary operands (nested set ops,
+LIMIT, DISTINCT, grouped) as derived tables. -/
+private def asSetOperand : Query ts s → Query ts s
+  | .spine sp => .spine sp.dropOrders
+  | q => q
+
+def union (q₁ q₂ : Query ts s) : Query ts s :=
+  .setOpC .union (asSetOperand q₁) (asSetOperand q₂)
+def intersect (q₁ q₂ : Query ts s) : Query ts s :=
+  .setOpC .intersect (asSetOperand q₁) (asSetOperand q₂)
+def except (q₁ q₂ : Query ts s) : Query ts s :=
+  .setOpC .except (asSetOperand q₁) (asSetOperand q₂)
 
 end Query
 
@@ -242,7 +268,7 @@ def GroupedQuery.orderBy (g : GroupedQuery ts s)
 `g.select (fun c a => ![c["Age"].as "Age", (a.count).as "Cnt"])`. -/
 def GroupedQuery.select (g : GroupedQuery ts s) (f : Row ts s → Agg → Row ts s') :
     Query ts s' :=
-  .groupedC g.query.asPlainSpine g.keys g.having? g.orderKeys? f
+  .groupedC g.query.asPlainSpine.dropOrders g.keys g.having? g.orderKeys? f
 
 /-- A query returning a single scalar value. The `Bool` index is its
 nullability: SUM/AVG/MIN/MAX over an empty group are NULL; `COUNT(*)`

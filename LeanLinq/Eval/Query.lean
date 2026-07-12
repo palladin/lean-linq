@@ -120,26 +120,29 @@ mutual
 /-- The total evaluation core (see `Query.run` for the public entry point).
 Boundary clauses are list operations over the rows of the query underneath
 (SQL set semantics: UNION, INTERSECT, and EXCEPT deduplicate); spines
-enumerate branches. -/
-def Query.evalRows : Query ts s → EvalEnv ts → Except EvalError (List (Values s))
-  | .spine (g := .plain) sp, ee => do finishPlain ee (← sp.evalSpine ee 0 [])
-  | .spine (g := .grouped) sp, ee => do finishGrouped ee (← sp.evalSpine ee 0 [])
-  | .distinctC q, ee => do pure (← q.evalRows ee).eraseDups
-  | .limitC q lim? off?, ee => do
-      let rows := (← q.evalRows ee).drop (off?.getD 0)
+enumerate branches. `sc` is the *outer scope*: `[]` for a top-level query,
+the evaluation site's scope for a correlated subquery — inner alias
+numbering continues from `sc.length`, mirroring the compiler's shared
+alias counter, so outer references resolve identically in both walks. -/
+def Query.evalRowsIn : Query ts s → EvalEnv ts → Scope → Except EvalError (List (Values s))
+  | .spine (g := .plain) sp, ee, sc => do finishPlain ee (← sp.evalSpine ee sc.length sc)
+  | .spine (g := .grouped) sp, ee, sc => do finishGrouped ee (← sp.evalSpine ee sc.length sc)
+  | .distinctC q, ee, sc => do pure (← q.evalRowsIn ee sc).eraseDups
+  | .limitC q lim? off?, ee, sc => do
+      let rows := (← q.evalRowsIn ee sc).drop (off?.getD 0)
       pure (match lim? with
         | some l => rows.take l
         | none => rows)
-  | .groupedC sp keys hv? ord? sel, ee => do
-      groupedCore ee <| (← sp.evalSpine ee 0 []).map fun br =>
+  | .groupedC sp keys hv? ord? sel, ee, sc => do
+      groupedCore ee <| (← sp.evalSpine ee sc.length sc).map fun br =>
         { scope := br.scope
           keys := keys br.data
           having? := hv?.map (· br.data)
           orderKeys := ((ord?.map (· br.data)).getD []) ++ br.orderKeys
           row := sel br.data ⟨⟩ }
-  | .setOpC op a b, ee => do
-      let ra ← a.evalRows ee
-      let rb ← b.evalRows ee
+  | .setOpC op a b, ee, sc => do
+      let ra ← a.evalRowsIn ee sc
+      let rb ← b.evalRowsIn ee sc
       pure (match op with
         | .union => (ra ++ rb).eraseDups
         | .intersect => (ra.filter (rb.contains ·)).eraseDups
@@ -191,11 +194,16 @@ def SpineQ.evalSpine : SpineQ ts g s → EvalEnv ts → Nat → Scope →
   | .fromQ (s := s₀) q f, ee, n, sc => do
       let alias := s!"a{n}"
       let row := Row.ofAlias alias s₀
-      let branches ← (← q.evalRows ee).mapM fun v =>
+      let branches ← (← q.evalRowsIn ee sc).mapM fun v =>
         (f row).evalSpine ee (n + 1) ((alias, ⟨s₀, v⟩) :: sc)
       pure branches.flatten
 
 end
+
+/-- Top-level rows: no outer scope. -/
+def Query.evalRows (q : Query ts s) (ee : EvalEnv ts) :
+    Except EvalError (List (Values s)) :=
+  q.evalRowsIn ee []
 
 /-- Evaluate a query over a typed in-memory database. Everything the query
 references — tables *and* named parameters — was resolved against `ts` at
@@ -209,15 +217,22 @@ def Query.run (q : Query ts s) (env : TableEnv ts.tables)
     Except EvalError (List (Values s)) :=
   q.evalRows ⟨env, ps, now⟩
 
-/-- Evaluate a scalar aggregate query: the spine's branches are the group. -/
-def ScalarQuery.evalCell : ScalarQuery ts ⟨t, n⟩ → EvalEnv ts → Except EvalError (Nullable t)
-  | .countQ sp, ee => do pure (some (((← sp.evalSpine ee 0 [])).length : Int))
-  | .aggQ op sp, ee => do
-      match (← sp.evalSpine ee 0 []) with
+/-- Evaluate a scalar aggregate query: the spine's branches are the group.
+`sc` is the outer scope (see `Query.evalRowsIn`). -/
+def ScalarQuery.evalCellIn (sq : ScalarQuery ts ⟨t, n⟩) (ee : EvalEnv ts)
+    (sc : Scope) : Except EvalError (Nullable t) :=
+  match sq with
+  | .countQ sp => do pure (some (((← sp.evalSpine ee sc.length sc)).length : Int))
+  | .aggQ op sp => do
+      match (← sp.evalSpine ee sc.length sc) with
       | [] => pure none
       | brs@(br₀ :: _) =>
           match br₀.data with
           | .cons e .nil => SqlExpr.evalG ee (brs.map (·.scope)) (.aggE op e)
+
+def ScalarQuery.evalCell (sq : ScalarQuery ts ⟨t, n⟩) (ee : EvalEnv ts) :
+    Except EvalError (Nullable t) :=
+  sq.evalCellIn ee []
 
 /-- Scalar counterpart of `Query.run`; the result cell is `none` for SQL
 NULL (e.g. SUM over no rows). -/
