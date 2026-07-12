@@ -12,9 +12,7 @@ the reference semantics, auditing only live engines:
 
 - `run_limit_length_le` — `LIMIT n` really limits (`fetchLimit`);
 - `run_card_le` — evaluation never exceeds the query's cardinality
-  bound (`fetchBounded`);
-- `run_rowInv` — evaluation satisfies the row invariant the structure
-  promises, e.g. DISTINCT really deduplicates (`fetchInv`). -/
+  bound (`fetchBounded`). -/
 
 namespace LeanLinq
 
@@ -56,13 +54,13 @@ theorem Query.run_limit_length_le {ts : Ctx} {s : Schema}
     · exact Query.evalRows_limitC_length_le _ n _ _ h
     · exact Query.evalRows_limitC_length_le _ n _ _ h
 
-/-! ## Soundness of `card` and `RowInv`
+/-! ## Soundness of `card`
 
-The two compute-from-the-value refinements never underestimate the
-reference semantics: whatever `evalRows` produces fits under `card` and
-satisfies `RowInv`. These are the theorems that make the fetch doors'
-runtime checks principled — provably the identity in the reference
-semantics, auditing only a live engine. -/
+The compute-from-the-value refinement never underestimates the
+reference semantics: whatever `evalRows` produces fits under `card`.
+This is the theorem that makes `fetchBounded`'s runtime check
+principled — provably the identity in the reference semantics,
+auditing only a live engine. -/
 
 /-- The derived-table composition bound: `rows` under `A`, every part
 under `B`, one part per row — the flatten fits under `A * B`. -/
@@ -277,50 +275,11 @@ theorem QueryP.evalRowsIn_card_le {ts : Ctx} {s : Schema} {ee : EvalEnv ts} :
 
 end
 
-/-- **`RowInv` is sound**: evaluation always satisfies the row
-invariant the query's structure promises. -/
-theorem Query.evalRowsIn_rowInv {ts : Ctx} {s : Schema} {ee : EvalEnv ts} :
-    (q : QueryA ts s) → {sc : Scope} → {xs : List (Values s)} →
-    q.evalRowsIn ee sc = .ok xs → q.rowInvB xs = true
-  | .spine .., _, _, _ => rfl
-  | .setOpC .., _, _, _ => rfl
-  | .distinctC q, sc, xs, h => by
-      rw [QueryP.evalRowsIn.eq_def] at h
-      simp only at h
-      obtain ⟨inner, hq, h⟩ := Except.bind_ok h
-      simp only [pure, Except.pure, Except.ok.injEq] at h
-      subst h
-      rw [QueryP.rowInvB, Bool.and_eq_true]
-      exact ⟨Values.nodupB_dedupBy _,
-        Query.rowInvB_of_sublist q (List.dedupBy_sublist _ _)
-          (Query.evalRowsIn_rowInv q hq)⟩
-  | .limitC q lim? off?, sc, xs, h => by
-      rw [QueryP.evalRowsIn.eq_def] at h
-      simp only at h
-      obtain ⟨inner, hq, h⟩ := Except.bind_ok h
-      simp only [pure, Except.pure, Except.ok.injEq] at h
-      subst h
-      cases lim? with
-      | some l =>
-          exact Query.rowInvB_of_sublist q
-            ((List.take_sublist ..).trans (List.drop_sublist ..))
-            (Query.evalRowsIn_rowInv q hq)
-      | none =>
-          exact Query.rowInvB_of_sublist q (List.drop_sublist ..)
-            (Query.evalRowsIn_rowInv q hq)
-
 /-- Public spelling over `Query.run`. -/
 theorem Query.run_card_le {ts : Ctx} {s : Schema}
     (q : Query ts s) (env : TableEnv ts.tables) (ps : ParamEnv ts.params)
     (now : Option String) {xs : List (Values s)}
     (h : q.run env ps now = .ok xs) : Bound.fin xs.length ≤ q.card :=
   QueryP.evalRowsIn_card_le (q AliasOf) h
-
-/-- Public spelling over `Query.run`. -/
-theorem Query.run_rowInv {ts : Ctx} {s : Schema}
-    (q : Query ts s) (env : TableEnv ts.tables) (ps : ParamEnv ts.params)
-    (now : Option String) {xs : List (Values s)}
-    (h : q.run env ps now = .ok xs) : q.RowInv xs :=
-  Query.evalRowsIn_rowInv (q AliasOf) h
 
 end LeanLinq

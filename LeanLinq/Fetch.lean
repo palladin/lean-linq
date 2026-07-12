@@ -32,10 +32,9 @@ shape has its proof story, up a ladder of evidence —
   `m + k * n`, closed, silent. N+1, written deliberately, priced by the
   bounded query;
 - loops priced by the query's own shape: `q.card` computes the row
-  bound from the query value (`fetchBounded` surfaces it as the
-  refinement, `fetchInv` the structure's row invariant), so the budget
-  proof is the structure itself — soundness is a theorem
-  (`Query.run_card_le` / `run_rowInv`);
+  bound from the query value and `fetchBounded` surfaces it as the
+  refinement, so the budget proof is the structure itself — soundness
+  is a theorem (`Query.run_card_le`);
 - loops with no bound at all: the same door at the top of the lattice
   ℕ∞ (`Bound`). `fetchLimit q ⊤` emits no `LIMIT` and its refinement
   is vacuously true, so the same `forRows` fuses — and the grade
@@ -244,57 +243,15 @@ def Query.fetchBounded (q : Query c s) :
     DbFetch c 1 {xs : List (Values s) // .fin xs.length ≤ q.card} :=
   DbFetch.fetchBounded q
 
-/-- Fetch with the query's **row invariant** in the type: what the
-structure promises about the rows themselves (`distinct` ⇒ no duplicate
-rows; more facts as the analysis grows). Total over any query — clauses
-outside the analyzed fragment contribute `True`, so the invariant says
-less, never lies. The check realizes the proof (rows pass through
-untouched); an engine violating its own DISTINCT is a protocol error,
-answered with the empty list — provably unreachable in the reference
-semantics. -/
-def DbFetch.fetchInv (q : Query c s) :
-    DbFetch c 1 {xs : List (Values s) // q.RowInv xs} :=
-  (fetch q).map fun xs =>
-    if h : q.RowInv xs then ⟨xs, h⟩
-    else ⟨[], Query.rowInvB_nil (q AliasOf)⟩
-
-/-- `q.fetchInv` — flowing spelling. -/
-def Query.fetchInv (q : Query c s) :
-    DbFetch c 1 {xs : List (Values s) // q.RowInv xs} :=
-  DbFetch.fetchInv q
-
 /-- Weakening: a program bounded by `m` is bounded by any `n ≥ m` —
 derived, not primitive (`bindD` over `pure ()` with the constant
 family). The door for value-dependent budgets: an inner loop whose
 exact grade mentions a fetched value restates to the uniform bound the
 enclosing combinator needs, paying with the inequality — which is
-where a WHERE-fact (`fetchLimitWhere`) or a refinement gets cashed. -/
+where a refinement gets cashed. -/
 def DbFetch.weaken (x : DbFetch c m α) (n : Bound)
     (h : m ≤ n := by decide) : DbFetch c n α :=
   ((DbFetch.pure ()).bindD (g := fun _ => m) (fun _ => x) n (fun _ => h)).withBound
-
-/-- Fetch at most `n` rows, **each carrying a checked fact**: the rows
-arrive as `{v // P v = true}` subtypes inside a length-refined list, so
-a per-row loop's body receives the fact with the row — the WHERE
-clause's promise, cashed as evidence (state `P` over the same constant
-the SQL guard uses). Rows failing the check are filtered out — the
-identity whenever the query's own WHERE guarantees `P`. -/
-def DbFetch.fetchLimitWhere (q : Query c s) (n : Bound)
-    (P : Values s → Bool) :
-    DbFetch c 1 {xs : List {v : Values s // P v = true} //
-      .fin xs.length ≤ n} :=
-  (DbFetch.fetchLimit q n).map fun xs =>
-    ⟨(xs.val.filter P).pmap Subtype.mk
-        (fun v hv => (List.mem_filter.mp hv).2),
-     by
-      refine Bound.le_trans (Bound.fin_le_fin ?_) xs.property
-      simpa using List.length_filter_le _ _⟩
-
-/-- `q.fetchLimitWhere n P` — flowing spelling. -/
-def Query.fetchLimitWhere (q : Query c s) (n : Bound) (P : Values s → Bool) :
-    DbFetch c 1 {xs : List {v : Values s // P v = true} //
-      .fin xs.length ≤ n} :=
-  DbFetch.fetchLimitWhere q n P
 
 /-! ## `fetch!` — do-notation for the graded monad
 
@@ -398,7 +355,7 @@ open Lean in
     `(LeanLinq.DbFetch.withBound $folded)
 
 namespace QueryB
-export Query (fetch fetchLimit fetchBounded fetchInv fetchLimitWhere)
+export Query (fetch fetchLimit fetchBounded)
 end QueryB
 
 namespace ScalarB

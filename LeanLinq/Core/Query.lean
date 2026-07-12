@@ -114,56 +114,6 @@ end
 
 @[reducible] def QueryP.card (q : QueryA ts s) : Bound := q.cardAux 0
 
-/-! ## Row invariants: what the query's structure promises about its rows
-
-The second compute-from-the-value family member (after `card`): facts
-about the *result rows* harvested from the clauses. Bool-cored (like
-`Bound.ble`), so decidability is free and the fetch door can realize
-the proof by checking. Every conjunct must be **sublist-closed** (true
-of a list ⇒ true of any sublist), because boundary nodes pass a
-*selection* of the inner rows through (`limit` takes a prefix,
-`distinct` erases duplicates) while transferring the inner invariant.
-
-Phase A carvings: `distinct` contributes `Values.nodupB` (SQL's DISTINCT
-notion — NULLs compare equal). Order facts need key-to-output-column
-analysis and env-free `where'` facts need projection-survival analysis —
-both later; their clauses contribute `true` for now, so the invariant
-says less, never lies. The general env-parameterized form
-(`RowInv q ps xs`) is the M3 design. -/
-def QueryP.rowInvB : QueryA ts s → List (Values s) → Bool
-  | .distinctC q, xs => Values.nodupB xs && q.rowInvB xs
-  | .limitC q _ _, xs => q.rowInvB xs
-  | .spine _, _ => true
-  | .setOpC .., _ => true
-
-/-- The row invariant as a proposition — decidable by construction. -/
-def QueryP.RowInvA (q : QueryA ts s) (xs : List (Values s)) : Prop :=
-  q.rowInvB xs = true
-
-instance (q : QueryA ts s) (xs : List (Values s)) : Decidable (QueryP.RowInvA q xs) :=
-  inferInstanceAs (Decidable (_ = true))
-
-/-- The invariant is **sublist-closed**: boundary nodes pass selections
-of the inner rows through, so every conjunct must survive that. -/
-theorem Query.rowInvB_of_sublist {xs' xs : List (Values s)} :
-    (q : QueryA ts s) → List.Sublist xs' xs →
-    q.rowInvB xs = true → q.rowInvB xs' = true
-  | .spine _, _, _ => rfl
-  | .setOpC .., _, _ => rfl
-  | .distinctC q, h, hi => by
-      rw [QueryP.rowInvB, Bool.and_eq_true] at hi ⊢
-      exact ⟨Values.nodupB_of_sublist h hi.1, Query.rowInvB_of_sublist q h hi.2⟩
-  | .limitC q _ _, h, hi => Query.rowInvB_of_sublist q h hi
-
-/-- Every invariant holds of the empty list — the total fallback the
-fetch door needs when a live engine violates what the query's own
-structure promises (provably unreachable in the reference semantics). -/
-theorem Query.rowInvB_nil : (q : QueryA ts s) → q.rowInvB [] = true
-  | .distinctC q => by simp [QueryP.rowInvB, Values.nodupB, rowInvB_nil q]
-  | .limitC q _ _ => by simp [QueryP.rowInvB, rowInvB_nil q]
-  | .spine _ => rfl
-  | .setOpC .. => rfl
-
 namespace QueryP
 
 variable {ρ : Schema → Type}
@@ -523,15 +473,8 @@ end Query
 alignment theorem makes that the sound instantiation, permanently). -/
 @[reducible] def Query.card (q : Query ts s) : Bound := (q AliasOf).card
 
-/-- The row invariant of a bundle. -/
-def Query.RowInv (q : Query ts s) (xs : List (Values s)) : Prop :=
-  QueryP.RowInvA (q AliasOf) xs
-
 namespace QueryB
-export Query (card RowInv)
+export Query (card)
 end QueryB
-
-instance (q : Query ts s) (xs : List (Values s)) : Decidable (q.RowInv xs) :=
-  inferInstanceAs (Decidable (_ = true))
 
 end LeanLinq
