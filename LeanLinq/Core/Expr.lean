@@ -83,6 +83,10 @@ inductive SqlExpr : Ctx → SqlType → Type where
   -- NULL tests accept any operand flag and are themselves never NULL
   | isNull : SqlExpr ts c → SqlExpr ts .bool
   | isNotNull : SqlExpr ts c → SqlExpr ts .bool
+  -- EXISTS (subquery): true or false, never NULL — a strict bool like
+  -- the null tests. Stored staged (see `ExistsSub`); correlation works
+  -- through the scope its eval action receives.
+  | existsSub : ExistsSub ts → SqlExpr ts .bool
   | like : SqlExpr ts ⟨.string, true⟩ → SqlExpr ts ⟨.string, true⟩ → SqlExpr ts ⟨.bool, true⟩
   -- IN over a value list. Stored as Σ-packed elements because the kernel
   -- rejects nested `List (SqlExpr ts t n)` with a local index; the
@@ -202,6 +206,14 @@ def SqlExpr.gd (g : String) {m : Bool} [fits : FlagFits false m] :
 def SqlExpr.inValues (e : SqlExpr ts ⟨t, n⟩) (vs : List (SqlExpr ts ⟨t, true⟩)) :
     SqlExpr ts ⟨.bool, true⟩ :=
   .inList e (vs.map (⟨⟨t, true⟩, ·⟩))
+
+/-- `e NOT IN (v₁, …)` — `.not` of the three-valued IN, inheriting SQL's
+NULL semantics: a NULL among the values turns a miss into UNKNOWN, which
+WHERE filters — the classic `NOT IN` + NULL gotcha behaves exactly as
+the engines do. -/
+def SqlExpr.notInValues (e : SqlExpr ts ⟨t, n⟩)
+    (vs : List (SqlExpr ts ⟨t, true⟩)) : SqlExpr ts ⟨.bool, true⟩ :=
+  .not (e.inValues vs)
 
 /-- Date-part / date-arithmetic surface helpers. -/
 def SqlExpr.year (e : SqlExpr ts ⟨.dateTime, n⟩) : SqlExpr ts ⟨.int, n⟩ := .datePart .year e

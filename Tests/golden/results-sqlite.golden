@@ -52,6 +52,11 @@ FromWhereAgeInSubqueryWithClosure
 FromWhereCorrelatedInSubquery	1,25,John Doe,1|2,30,Jane Smith,1|4,65,Senior User,1
 FromWhereCorrelatedScalarSubquery	1,25,John Doe,1|2,30,Jane Smith,1|4,65,Senior User,1
 FromWhereInEmptyList	
+FromWhereExistsCorrelated	1,25,John Doe,1|2,30,Jane Smith,1|4,65,Senior User,1
+FromWhereNotExists	3,16,Minor User,0
+FromWhereNotInSubquery	3,16,Minor User,0
+FromWhereNotInValues	3,16,Minor User,0|4,65,Senior User,1
+FromWhereNotInWithNull	
 FromSelectNegativeDivision	1,-20|2,-17|3,-24|4,0
 DateTimeAddMonthsClamp	2020-03-02 00:00:00
 UnionThenIntersect	1
@@ -248,6 +253,11 @@ CFromWhereAgeInSubqueryWithClosure
 CFromWhereCorrelatedInSubquery	1,25,John Doe,1|2,30,Jane Smith,1|4,65,Senior User,1
 CFromWhereCorrelatedScalarSubquery	1,25,John Doe,1|2,30,Jane Smith,1|4,65,Senior User,1
 CFromWhereInEmptyList	
+CFromWhereExistsCorrelated	1,25,John Doe,1|2,30,Jane Smith,1|4,65,Senior User,1
+CFromWhereNotExists	3,16,Minor User,0
+CFromWhereNotInSubquery	3,16,Minor User,0
+CFromWhereNotInValues	3,16,Minor User,0|4,65,Senior User,1
+CFromWhereNotInWithNull	
 CFromSelectNegativeDivision	1,-20|2,-17|3,-24|4,0
 CDateTimeAddMonthsClamp	2020-03-02 00:00:00
 CFromWhereBoolColumnAnd	1,John Doe|2,Jane Smith|4,Senior User

@@ -126,7 +126,8 @@ the library itself always emits parameterized SQL.
 - **Types**: int, long, double, decimal, string, bool, dateTime, guid; NULL via
   `isNull`/`isNotNull`, `setNull`/`valueNull` in statements.
 - **Expressions**: `+ - * /` (numeric), `++` (concat), `==. !=. <. <=. >. >=.`,
-  `&&. ||. !.`, `like`, `inValues`, `inQuery` (subquery), `caseWhen`,
+  `&&. ||. !.`, `like`, `inValues`/`notInValues`, `inQuery`/`notInQuery` (subquery),
+  `exists'`/`notExists` (correlated subqueries), `caseWhen`,
   context-typed named parameters (`SqlExpr.param "minAge"`), `abs`/`round`/`ceiling`/`floor`,
   `substring`/`upper`/`lower`/`trim`/`length`,
   `now`/`year`/`month`/`day`/`addDays`/`addMonths`/`addYears`/`diffDays`/`diffMonths`/`diffYears`.

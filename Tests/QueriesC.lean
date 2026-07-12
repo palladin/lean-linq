@@ -358,6 +358,45 @@ def CMeasurementsOrderByFactor := (query! {
   orderBy m["Factor"].asc, m["Id"].asc
   select ![m["Id"].as "Id", m["Factor"].as "Factor"]
 } : Query TestCtx _)
+def CFromWhereExistsCorrelated := (query! {
+  from c in customers
+  where SqlExpr.exists' ((query! {
+    from o in orders
+    where o["CustomerId"] ==. c["Id"]
+    select o
+  } : Query TestCtx _))
+  select c
+} : Query TestCtx _)
+def CFromWhereNotExists := (query! {
+  from c in customers
+  where SqlExpr.notExists ((query! {
+    from o in orders
+    where o["CustomerId"] ==. c["Id"]
+    select o
+  } : Query TestCtx _))
+  select c
+} : Query TestCtx _)
+def CFromWhereNotInSubquery := (query! {
+  from c in customers
+  where c["Id"].notInQuery ((query! {
+    from o in orders
+    select ![o["CustomerId"].as "CustomerId"]
+  } : Query TestCtx _))
+  select c
+} : Query TestCtx _)
+def CFromWhereNotInValues := (query! {
+  from c in customers
+  where c["Age"].notInValues [25, 30]
+  select c
+} : Query TestCtx _)
+def CFromWhereNotInWithNull := (query! {
+  from p in products
+  where p["CreatedDate"].notInQuery ((query! {
+    from x in products
+    select ![x["CreatedDate"].as "CreatedDate"]
+  } : Query TestCtx _))
+  select p
+} : Query TestCtx _)
 def CFromSubquery := (query! {
   from x in ((query! {
     from c in customers
@@ -1049,6 +1088,11 @@ def twinCases : List (String × Case) := [
   ("CFromWhereCorrelatedInSubquery", q CFromWhereCorrelatedInSubquery),
   ("CFromWhereCorrelatedScalarSubquery", q CFromWhereCorrelatedScalarSubquery),
   ("CFromWhereInEmptyList", q CFromWhereInEmptyList),
+  ("CFromWhereExistsCorrelated", q CFromWhereExistsCorrelated),
+  ("CFromWhereNotExists", q CFromWhereNotExists),
+  ("CFromWhereNotInSubquery", q CFromWhereNotInSubquery),
+  ("CFromWhereNotInValues", q CFromWhereNotInValues),
+  ("CFromWhereNotInWithNull", q CFromWhereNotInWithNull),
   ("CFromSelectNegativeDivision", q CFromSelectNegativeDivision),
   ("CDateTimeAddMonthsClamp", q CDateTimeAddMonthsClamp),
   ("CFromWhereBoolColumnAnd", q CFromWhereBoolColumnAnd),

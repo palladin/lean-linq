@@ -214,6 +214,10 @@ def SqlExpr.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts ⟨t, n⟩ →
       pure (match (← sq.eval ee (scs.head?.getD [])) with
         | c :: _ => c
         | [] => none)
+  -- EXISTS: rows or not — never NULL, evaluated in the current scope
+  -- (correlation is the construct's whole point)
+  | scs, .existsSub sub => do
+      pure (some (← sub.eval ee (scs.head?.getD [])))
   -- CASE is lazy in its branches (SQL semantics): only the taken branch
   -- evaluates, so a guarded division cannot error
   | scs, .caseWhen c a b => do

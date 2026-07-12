@@ -271,6 +271,22 @@ def SqlExpr.inQuery (e : SqlExpr ts ⟨t, nf⟩) (q : Query ts [(cn, ⟨t, m⟩)
   .inSub e ⟨q.compileStmt, fun ee sc => (q.evalRowsIn ee sc).map fun rows =>
     rows.map fun | .cons cell .nil => SqlType.toNullable cell⟩
 
+/-- `e NOT IN (subquery)` — `.not` of the three-valued IN (a NULL in the
+subquery result turns a miss into UNKNOWN — the engines' semantics). -/
+def SqlExpr.notInQuery (e : SqlExpr ts ⟨t, nf⟩) (q : Query ts [(cn, ⟨t, m⟩)]) :
+    SqlExpr ts ⟨.bool, true⟩ :=
+  .not (e.inQuery q)
+
+/-- `EXISTS (subquery)` — true iff the subquery returns any row; never
+NULL, so a strict bool. Correlated outer references are the point:
+`… |>.where' (fun c => SqlExpr.exists' (orders-of c))`. -/
+def SqlExpr.exists' (q : Query ts s) : SqlExpr ts .bool :=
+  .existsSub ⟨q.compileStmt, fun ee sc => (q.evalRowsIn ee sc).map (!·.isEmpty)⟩
+
+/-- `NOT EXISTS (subquery)`. -/
+def SqlExpr.notExists (q : Query ts s) : SqlExpr ts .bool :=
+  .not (SqlExpr.exists' q)
+
 /-- Embed a scalar aggregate query as an expression:
 `c["Age"] >. (customers' |>.select … |>.avg).embed`. -/
 def ScalarQuery.embed (sq : ScalarQuery ts ⟨t, n⟩) : SqlExpr ts ⟨t, true⟩ :=

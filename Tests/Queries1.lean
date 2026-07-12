@@ -182,6 +182,37 @@ def DateTimeAddMonthsClamp := Query.from' (ts := TestCtx) products
   |>.where' (fun p => p["Id"] ==. SqlExpr.long 1)
   |>.select (fun _ => ![((SqlExpr.dt "2020-01-31").addMonths 1).as "Clamped"])
 
+/-- Correlated EXISTS — the construct's whole point: customers with at
+least one order. -/
+def FromWhereExistsCorrelated := Query.from' (ts := TestCtx) customers
+  |>.where' (fun c => SqlExpr.exists'
+      (Query.from' (ts := TestCtx) orders
+        |>.where' (fun o => o["CustomerId"] ==. c["Id"])))
+
+/-- NOT EXISTS: customers with no orders. -/
+def FromWhereNotExists := Query.from' (ts := TestCtx) customers
+  |>.where' (fun c => SqlExpr.notExists
+      (Query.from' (ts := TestCtx) orders
+        |>.where' (fun o => o["CustomerId"] ==. c["Id"])))
+
+/-- NOT IN over a subquery. -/
+def FromWhereNotInSubquery := Query.from' (ts := TestCtx) customers
+  |>.where' (fun c => c["Id"].notInQuery
+      (Query.from' (ts := TestCtx) orders
+        |>.select (fun o => ![o["CustomerId"].as "CustomerId"])))
+
+/-- NOT IN over a value list. -/
+def FromWhereNotInValues := Query.from' (ts := TestCtx) customers
+  |>.where' (fun c => c["Age"].notInValues [25, 30])
+
+/-- The classic gotcha, pinned: NOT IN against a set containing NULL
+returns **no rows** (a miss is UNKNOWN, and WHERE filters it) — on
+every engine and in the evaluator alike. -/
+def FromWhereNotInWithNull := Query.from' (ts := TestCtx) products
+  |>.where' (fun p => p["CreatedDate"].notInQuery
+      (Query.from' (ts := TestCtx) products
+        |>.select (fun x => ![x["CreatedDate"].as "CreatedDate"])))
+
 def FromSubquery :=
   (Query.from' (ts := TestCtx) customers
     |>.select (fun x => ![x["Id"].as "Id", (x["Age"] + 1).as "NewAge"]))

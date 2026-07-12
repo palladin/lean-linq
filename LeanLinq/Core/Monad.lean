@@ -35,6 +35,15 @@ structure SubQuery (ts : Ctx) (t : SqlPrim) where
   -- counter always equals the scope length along any evaluation path)
   eval : EvalEnv ts → Scope → Except EvalError (List (Nullable t))
 
+/-- A staged `EXISTS` subquery: like `SubQuery`, the erased query lives
+on as its two actions — but no column type is involved (`EXISTS` asks
+only whether rows exist), so any schema embeds. The eval action takes
+the evaluation site's scope: correlated `EXISTS` is the construct's
+whole point. -/
+structure ExistsSub (ts : Ctx) where
+  compile : CompileM String
+  eval : EvalEnv ts → Scope → Except EvalError Bool
+
 /-- Allocate a fresh source alias: `a0`, `a1`, … -/
 def freshAlias : CompileM String := fun _ =>
   modifyGet fun st =>

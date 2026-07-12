@@ -28,7 +28,7 @@ first-class booleans: comparing a predicate requires converting it to a value
 first (`CASE WHEN p THEN 1 ELSE 0 END`). -/
 def SqlExpr.isPredicate : SqlExpr ts c → Bool
   | .cmp .. | .and .. | .or .. | .not .. | .isNull .. | .isNotNull ..
-  | .like .. | .inList .. | .inSub .. => true
+  | .like .. | .inList .. | .inSub .. | .existsSub .. => true
   | .widen e => e.isPredicate
   | _ => false
 
@@ -86,6 +86,7 @@ def SqlExpr.compile : SqlExpr ts c → CompileM String
   | .inList _ []   => return "(1 = 0)"
   | .inList e es   => return s!"{← e.compile} IN ({String.intercalate ", " (← SqlExpr.compileList es)})"
   | .inSub e sub   => return s!"{← e.compile} IN ({← sub.compile})"
+  | .existsSub sub => return s!"EXISTS ({← sub.compile})"
   | .scalarSub sub => return s!"({← sub.compile})"
   | .caseWhen c a b =>
       return s!"CASE WHEN {← c.compilePred} THEN {← a.compile} ELSE {← b.compile} END"
