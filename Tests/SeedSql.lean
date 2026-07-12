@@ -21,25 +21,31 @@ def seedProducts : String :=
 def seedOrders : String :=
   "INSERT INTO orders VALUES (1, 1, 1, 500), (2, 1, 2, 150), (3, 2, 1, 300), (4, 4, 2, 75);"
 
+def seedMeasurements : String :=
+  "INSERT INTO measurements VALUES (1, 0.5, 2.0), (2, 2.25, NULL), (3, -1.5, 0.5), (4, 100.0, -2.0);"
+
 def setupSql : LeanLinq.DatabaseType → String
   | .sqlite =>
-      "DROP TABLE IF EXISTS orders; DROP TABLE IF EXISTS products; DROP TABLE IF EXISTS customers;
+      "DROP TABLE IF EXISTS measurements; DROP TABLE IF EXISTS orders; DROP TABLE IF EXISTS products; DROP TABLE IF EXISTS customers;
 CREATE TABLE customers (\"Id\" INTEGER PRIMARY KEY, \"Age\" INTEGER, \"Name\" TEXT, \"IsActive\" INTEGER);
 CREATE TABLE products (\"Id\" INTEGER PRIMARY KEY, \"ProductName\" TEXT, \"Price\" REAL, \"CreatedDate\" TEXT, \"UniqueId\" TEXT);
 CREATE TABLE orders (\"Id\" INTEGER PRIMARY KEY, \"CustomerId\" INTEGER, \"ProductId\" INTEGER, \"Amount\" INTEGER);
-" ++ seedCustomers (fun b => if b then "1" else "0") ++ seedProducts ++ seedOrders
+CREATE TABLE measurements (\"Id\" INTEGER PRIMARY KEY, \"Value\" REAL, \"Factor\" REAL);
+" ++ seedCustomers (fun b => if b then "1" else "0") ++ seedProducts ++ seedOrders ++ seedMeasurements
   | .postgres =>
-      "DROP TABLE IF EXISTS orders; DROP TABLE IF EXISTS products; DROP TABLE IF EXISTS customers;
+      "DROP TABLE IF EXISTS measurements; DROP TABLE IF EXISTS orders; DROP TABLE IF EXISTS products; DROP TABLE IF EXISTS customers;
 CREATE TABLE customers (\"Id\" INT PRIMARY KEY, \"Age\" INT, \"Name\" VARCHAR(255), \"IsActive\" BOOLEAN);
 CREATE TABLE products (\"Id\" INT PRIMARY KEY, \"ProductName\" VARCHAR(255), \"Price\" DECIMAL(18,2), \"CreatedDate\" TIMESTAMP, \"UniqueId\" UUID);
 CREATE TABLE orders (\"Id\" INT PRIMARY KEY, \"CustomerId\" INT, \"ProductId\" INT, \"Amount\" INT);
-" ++ seedCustomers (fun b => if b then "true" else "false") ++ seedProducts ++ seedOrders
+CREATE TABLE measurements (\"Id\" INT PRIMARY KEY, \"Value\" DOUBLE PRECISION, \"Factor\" DOUBLE PRECISION);
+" ++ seedCustomers (fun b => if b then "true" else "false") ++ seedProducts ++ seedOrders ++ seedMeasurements
   | .sqlServer =>
-      "DROP TABLE IF EXISTS [orders]; DROP TABLE IF EXISTS [products]; DROP TABLE IF EXISTS [customers];
+      "DROP TABLE IF EXISTS [measurements]; DROP TABLE IF EXISTS [orders]; DROP TABLE IF EXISTS [products]; DROP TABLE IF EXISTS [customers];
 CREATE TABLE [customers] ([Id] INT PRIMARY KEY, [Age] INT, [Name] NVARCHAR(255), [IsActive] BIT);
 CREATE TABLE [products] ([Id] INT PRIMARY KEY, [ProductName] NVARCHAR(255), [Price] DECIMAL(18,2), [CreatedDate] DATETIME2, [UniqueId] UNIQUEIDENTIFIER);
 CREATE TABLE [orders] ([Id] INT PRIMARY KEY, [CustomerId] INT, [ProductId] INT, [Amount] INT);
-" ++ seedCustomers (fun b => if b then "1" else "0") ++ seedProducts ++ seedOrders
+CREATE TABLE [measurements] ([Id] INT PRIMARY KEY, [Value] FLOAT, [Factor] FLOAT);
+" ++ seedCustomers (fun b => if b then "1" else "0") ++ seedProducts ++ seedOrders ++ seedMeasurements
 
 /-- Cases whose output depends on the current time: execute-only. -/
 def skipResults : List String :=

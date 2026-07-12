@@ -78,6 +78,12 @@ def sd (d : DeleteStmt TestCtx n s) [inst : HasTable TestCtx.tables n s] : Case 
     ordered := true
     payload := .del d }
 
+def MeasurementsInsert := measurements.insert (ts := TestCtx)
+  |>.value "Id" 200 |>.value "Value" 12.5 |>.value "Factor" 0.25
+def MeasurementsUpdate := measurements.update (ts := TestCtx)
+  |>.setWith "Value" (fun m => m["Value"] * 2.0)
+  |>.where' (fun m => m["Id"] ==. 1)
+
 /-- The statement registry: name ↦ per-dialect compilation + expected state. -/
 def statementCases : List (String × Case) := [
   ("InsertBasic", si InsertBasic), ("UpdateBasic", su UpdateBasic),
@@ -90,7 +96,9 @@ def statementCases : List (String × Case) := [
   ("InsertWithNewColumns", si InsertWithNewColumns),
   ("UpdateWithNewColumns", su UpdateWithNewColumns),
   ("InsertWithNewColumnsNull", si InsertWithNewColumnsNull),
-  ("UpdateSetNewColumnsNull", su UpdateSetNewColumnsNull)
+  ("UpdateSetNewColumnsNull", su UpdateSetNewColumnsNull),
+  ("MeasurementsInsert", si MeasurementsInsert),
+  ("MeasurementsUpdate", su MeasurementsUpdate)
 ]
 
 end TQ

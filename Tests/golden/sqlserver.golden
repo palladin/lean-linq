@@ -60,6 +60,15 @@ UnionWithLimitOperand	SELECT [a1].[Id] AS [Id] FROM (SELECT [a0].[Id] AS [Id] FR
 FromOrderByGroupBySelect	SELECT [a0].[Age] AS [Age], COUNT(*) AS [N] FROM [customers] [a0] GROUP BY [a0].[Age]	
 FromWhereBoolColumnAnd	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE (([a0].[IsActive] = 1) AND ([a0].[Age] >= @p0))	@p0=int 18
 LeftJoinOrderByNullableKey	SELECT [a0].[Name] AS [Name], [a1].[Amount] AS [Amount] FROM [customers] [a0] LEFT JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId]) ORDER BY [a1].[Amount] ASC, [a0].[Name] ASC	
+MeasurementsSelect	SELECT [a0].[Id] AS [Id], [a0].[Value] AS [Value], [a0].[Factor] AS [Factor] FROM [measurements] [a0] ORDER BY [a0].[Id] ASC	
+MeasurementsArith	SELECT [a0].[Id] AS [Id], (([a0].[Value] * @p0) + @p1) AS [Scaled], ([a0].[Value] / @p2) AS [Halved] FROM [measurements] [a0] ORDER BY [a0].[Id] ASC	@p0=double 2.000000; @p1=double 0.500000; @p2=double 2.000000
+MeasurementsCompare	SELECT [a0].[Id] AS [Id], [a0].[Value] AS [Value] FROM [measurements] [a0] WHERE ([a0].[Value] > @p0)	@p0=double 1.000000
+MeasurementsFactorNull	SELECT [a0].[Id] AS [Id] FROM [measurements] [a0] WHERE [a0].[Factor] IS NULL	
+MeasurementsOrderByFactor	SELECT [a0].[Id] AS [Id], [a0].[Factor] AS [Factor] FROM [measurements] [a0] ORDER BY [a0].[Factor] ASC, [a0].[Id] ASC	
+MeasurementsSum	SELECT SUM([a0].[Value]) FROM [measurements] [a0]	
+MeasurementsAvg	SELECT AVG([a0].[Value]) FROM [measurements] [a0]	
+MeasurementsMin	SELECT MIN([a0].[Value]) FROM [measurements] [a0]	
+MeasurementsMax	SELECT MAX([a0].[Value]) FROM [measurements] [a0]	
 FromSubquery	SELECT [a0].[Id] AS [Id], ([a0].[Age] + @p0) AS [NewAge] FROM [customers] [a0]	@p0=int 1
 FromWhereSelectWhereFromNested	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) AND ([a0].[Id] > @p1)	@p0=int 18; @p1=long 100
 FromWhereSelectWhereNested	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) AND ([a0].[Id] > @p1)	@p0=int 18; @p1=long 100
@@ -243,6 +252,11 @@ CFromSelectNegativeDivision	SELECT [a0].[Id] AS [Id], (([a0].[Age] - @p0) / @p1)
 CDateTimeAddMonthsClamp	SELECT DATEADD(month, @p2, @p1) AS [Clamped] FROM [products] [a0] WHERE ([a0].[Id] = @p0)	@p0=long 1; @p1=dateTime "2020-01-31 00:00:00"; @p2=int 1
 CFromWhereBoolColumnAnd	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE (([a0].[IsActive] = 1) AND ([a0].[Age] >= @p0))	@p0=int 18
 CLeftJoinOrderByNullableKey	SELECT [a0].[Name] AS [Name], [a1].[Amount] AS [Amount] FROM [customers] [a0] LEFT JOIN [orders] [a1] ON ([a0].[Id] = [a1].[CustomerId]) ORDER BY [a1].[Amount] ASC, [a0].[Name] ASC	
+CMeasurementsSelect	SELECT [a0].[Id] AS [Id], [a0].[Value] AS [Value], [a0].[Factor] AS [Factor] FROM [measurements] [a0] ORDER BY [a0].[Id] ASC	
+CMeasurementsArith	SELECT [a0].[Id] AS [Id], (([a0].[Value] * @p0) + @p1) AS [Scaled], ([a0].[Value] / @p2) AS [Halved] FROM [measurements] [a0] ORDER BY [a0].[Id] ASC	@p0=double 2.000000; @p1=double 0.500000; @p2=double 2.000000
+CMeasurementsCompare	SELECT [a0].[Id] AS [Id], [a0].[Value] AS [Value] FROM [measurements] [a0] WHERE ([a0].[Value] > @p0)	@p0=double 1.000000
+CMeasurementsFactorNull	SELECT [a0].[Id] AS [Id] FROM [measurements] [a0] WHERE [a0].[Factor] IS NULL	
+CMeasurementsOrderByFactor	SELECT [a0].[Id] AS [Id], [a0].[Factor] AS [Factor] FROM [measurements] [a0] ORDER BY [a0].[Factor] ASC, [a0].[Id] ASC	
 CFromSubquery	SELECT [a0].[Id] AS [Id], ([a0].[Age] + @p0) AS [NewAge] FROM [customers] [a0]	@p0=int 1
 CFromWhereSelectWhereFromNested	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) AND ([a0].[Id] > @p1)	@p0=int 18; @p1=long 100
 CFromWhereSelectWhereNested	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @p0) AND ([a0].[Id] > @p1)	@p0=int 18; @p1=long 100
@@ -374,3 +388,5 @@ InsertWithNewColumns	INSERT INTO [products] ([Id], [ProductName], [Price], [Crea
 UpdateWithNewColumns	UPDATE [products] SET [Price] = @p0, [CreatedDate] = @p1, [UniqueId] = @p2 WHERE ([Id] = @p3)	@p0=decimal 119.99; @p1=dateTime "2024-12-25 00:00:00"; @p2=guid "87654321-4321-4321-4321-210987654321"; @p3=long 100
 InsertWithNewColumnsNull	INSERT INTO [products] ([Id], [ProductName], [Price], [CreatedDate], [UniqueId]) VALUES (@p0, @p1, NULL, NULL, NULL)	@p0=long 201; @p1=string "Null Test"
 UpdateSetNewColumnsNull	UPDATE [products] SET [Price] = NULL, [CreatedDate] = NULL, [UniqueId] = NULL WHERE ([Id] = @p0)	@p0=long 101
+MeasurementsInsert	INSERT INTO [measurements] ([Id], [Value], [Factor]) VALUES (@p0, @p1, @p2)	@p0=long 200; @p1=double 12.500000; @p2=double 0.250000
+MeasurementsUpdate	UPDATE [measurements] SET [Value] = ([Value] * @p0) WHERE ([Id] = @p1)	@p0=double 2.000000; @p1=long 1

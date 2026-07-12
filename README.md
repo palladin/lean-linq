@@ -442,8 +442,7 @@ round-budgeted `DbFetch` layer are implemented, with a 358-case × 3-dialect
 golden suite (both surfaces), an executable in-memory oracle, per-driver
 corpus sweeps, and live 3-engine integration tests.
 
-Known limitations: the `double` type is implemented but not exercised by the
-test models (the reference suite has the same hole); trailing `orderBy` after
+Known limitations: trailing `orderBy` after
 `distinct`/`limit` is pipeline-only (the comprehension fuses ordering before
 them). Possible next steps: EXISTS/NOT IN, window functions, CTEs, and
 cardinality-indexed queries — row bounds, predicate satisfaction, and

@@ -332,6 +332,32 @@ def CLeftJoinOrderByNullableKey := (query! {
   orderBy o["Amount"].asc, c["Name"].asc
   select ![c["Name"].as "Name", o["Amount"].as "Amount"]
 } : Query TestCtx _)
+def CMeasurementsSelect := (query! {
+  from m in measurements
+  orderBy m["Id"].asc
+  select ![m["Id"].as "Id", m["Value"].as "Value", m["Factor"].as "Factor"]
+} : Query TestCtx _)
+def CMeasurementsArith := (query! {
+  from m in measurements
+  orderBy m["Id"].asc
+  select ![m["Id"].as "Id", (m["Value"] * 2.0 + 0.5).as "Scaled",
+           (m["Value"] / 2.0).as "Halved"]
+} : Query TestCtx _)
+def CMeasurementsCompare := (query! {
+  from m in measurements
+  where m["Value"] >. 1.0
+  select ![m["Id"].as "Id", m["Value"].as "Value"]
+} : Query TestCtx _)
+def CMeasurementsFactorNull := (query! {
+  from m in measurements
+  where m["Factor"].isNull
+  select ![m["Id"].as "Id"]
+} : Query TestCtx _)
+def CMeasurementsOrderByFactor := (query! {
+  from m in measurements
+  orderBy m["Factor"].asc, m["Id"].asc
+  select ![m["Id"].as "Id", m["Factor"].as "Factor"]
+} : Query TestCtx _)
 def CFromSubquery := (query! {
   from x in ((query! {
     from c in customers
@@ -1027,6 +1053,11 @@ def twinCases : List (String × Case) := [
   ("CDateTimeAddMonthsClamp", q CDateTimeAddMonthsClamp),
   ("CFromWhereBoolColumnAnd", q CFromWhereBoolColumnAnd),
   ("CLeftJoinOrderByNullableKey", q CLeftJoinOrderByNullableKey),
+  ("CMeasurementsSelect", q CMeasurementsSelect),
+  ("CMeasurementsArith", q CMeasurementsArith),
+  ("CMeasurementsCompare", q CMeasurementsCompare),
+  ("CMeasurementsFactorNull", q CMeasurementsFactorNull),
+  ("CMeasurementsOrderByFactor", q CMeasurementsOrderByFactor),
   ("CFromSubquery", q CFromSubquery),
   ("CFromWhereSelectWhereFromNested", q CFromWhereSelectWhereFromNested),
   ("CFromWhereSelectWhereNested", q CFromWhereSelectWhereNested),

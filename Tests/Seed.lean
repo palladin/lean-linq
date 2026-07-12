@@ -22,6 +22,10 @@ private def prod (id : Int) (name : String) (priceM : Option Int)
 private def ord (id cid pid amt : Int) : Values OrdersS :=
   .cons id (.cons cid (.cons pid (.cons amt .nil)))
 
+-- binary-exact doubles only: every engine stores and prints them identically
+private def meas (id : Int) (v : Float) (f : Option Float) : Values MeasurementsS :=
+  .cons id (.cons v (.cons f .nil))
+
 def seedEnv : TableEnv TestCtx.tables :=
   .cons
     [cust 1 25 "John Doe" true, cust 2 30 "Jane Smith" true,
@@ -33,6 +37,9 @@ def seedEnv : TableEnv TestCtx.tables :=
        (some "22222222-2222-2222-2222-222222222222"),
      prod 3 "Discontinued" none none none] <|
   .cons
-    [ord 1 1 1 500, ord 2 1 2 150, ord 3 2 1 300, ord 4 4 2 75] .nil
+    [ord 1 1 1 500, ord 2 1 2 150, ord 3 2 1 300, ord 4 4 2 75] <|
+  .cons
+    [meas 1 0.5 (some 2.0), meas 2 2.25 none,
+     meas 3 (-1.5) (some 0.5), meas 4 100.0 (some (-2.0))] .nil
 
 end TQ

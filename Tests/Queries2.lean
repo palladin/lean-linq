@@ -297,6 +297,40 @@ def LeftJoinOrderByNullableKey := Query.from' (ts := TestCtx) customers
       (fun c o => ![c["Name"].as "Name", o["Amount"].as "Amount"])
   |>.orderBy (fun r => [r["Amount"].asc, r["Name"].asc])
 
+/-! Double coverage: the `.double` column type, differentially tested for
+the first time — decode, arithmetic, comparison, NULLs, ordering,
+aggregates. Seed values are binary-exact so engine text never wobbles. -/
+def MeasurementsSelect := Query.from' (ts := TestCtx) measurements
+  |>.orderBy (fun m => [m["Id"].asc])
+  |>.select (fun m => ![m["Id"].as "Id", m["Value"].as "Value", m["Factor"].as "Factor"])
+
+def MeasurementsArith := Query.from' (ts := TestCtx) measurements
+  |>.orderBy (fun m => [m["Id"].asc])
+  |>.select (fun m => ![m["Id"].as "Id",
+      (m["Value"] * 2.0 + 0.5).as "Scaled",
+      (m["Value"] / 2.0).as "Halved"])
+
+def MeasurementsCompare := Query.from' (ts := TestCtx) measurements
+  |>.where' (fun m => m["Value"] >. 1.0)
+  |>.select (fun m => ![m["Id"].as "Id", m["Value"].as "Value"])
+
+def MeasurementsFactorNull := Query.from' (ts := TestCtx) measurements
+  |>.where' (fun m => m["Factor"].isNull)
+  |>.select (fun m => ![m["Id"].as "Id"])
+
+def MeasurementsOrderByFactor := Query.from' (ts := TestCtx) measurements
+  |>.orderBy (fun m => [m["Factor"].asc, m["Id"].asc])
+  |>.select (fun m => ![m["Id"].as "Id", m["Factor"].as "Factor"])
+
+def MeasurementsSum := Query.from' (ts := TestCtx) measurements
+  |>.select (fun m => ![m["Value"].as "Value"]) |>.sum
+def MeasurementsAvg := Query.from' (ts := TestCtx) measurements
+  |>.select (fun m => ![m["Value"].as "Value"]) |>.avg
+def MeasurementsMin := Query.from' (ts := TestCtx) measurements
+  |>.select (fun m => ![m["Value"].as "Value"]) |>.min
+def MeasurementsMax := Query.from' (ts := TestCtx) measurements
+  |>.select (fun m => ![m["Value"].as "Value"]) |>.max
+
 def UnionQ :=
   (Query.from' (ts := TestCtx) customers
     |>.where' (fun c => c["Age"] >. 30)
@@ -426,6 +460,15 @@ def queryCases : List (String × Case) := [
   ("FromOrderByGroupBySelect", q FromOrderByGroupBySelect),
   ("FromWhereBoolColumnAnd", q FromWhereBoolColumnAnd),
   ("LeftJoinOrderByNullableKey", q LeftJoinOrderByNullableKey),
+  ("MeasurementsSelect", q MeasurementsSelect),
+  ("MeasurementsArith", q MeasurementsArith),
+  ("MeasurementsCompare", q MeasurementsCompare),
+  ("MeasurementsFactorNull", q MeasurementsFactorNull),
+  ("MeasurementsOrderByFactor", q MeasurementsOrderByFactor),
+  ("MeasurementsSum", sq MeasurementsSum),
+  ("MeasurementsAvg", sq MeasurementsAvg),
+  ("MeasurementsMin", sq MeasurementsMin),
+  ("MeasurementsMax", sq MeasurementsMax),
   ("FromSubquery", q FromSubquery),
   ("FromWhereSelectWhereFromNested", q FromWhereSelectWhereFromNested),
   ("FromWhereSelectWhereNested", q FromWhereSelectWhereNested),

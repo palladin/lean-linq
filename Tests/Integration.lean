@@ -157,7 +157,9 @@ def normalizeOutput (sql : String) (out : String) : String :=
 def stmtVerifyTable (name : String) : String :=
   if name == "InsertWithNewColumns" || name == "UpdateWithNewColumns" ||
      name == "InsertWithNewColumnsNull" || name == "UpdateSetNewColumnsNull"
-  then "products" else "customers"
+  then "products"
+  else if name.startsWith "Measurements" then "measurements"
+  else "customers"
 
 def stmtBatch (db : DatabaseType) (name : String) (stmt : String) : String :=
   let table := stmtVerifyTable name

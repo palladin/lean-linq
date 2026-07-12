@@ -25,11 +25,16 @@ abbrev OrdersS : Schema :=
   [("Id", .long), ("CustomerId", .long), ("ProductId", .long), ("Amount", .int)]
 def orders : Table "orders" OrdersS := ⟨⟩
 
+abbrev MeasurementsS : Schema :=
+  [("Id", .long), ("Value", .double), ("Factor", .null .double)]
+def measurements : Table "measurements" MeasurementsS := ⟨⟩
+
 /-- The test context: what the seed database provides. Queries are defined
 polymorphically over any context with the tables they use; the registry
 instantiates them here. -/
 abbrev TestCtx : Ctx := {
-  tables := [("customers", CustomersS), ("products", ProductsS), ("orders", OrdersS)]
+  tables := [("customers", CustomersS), ("products", ProductsS), ("orders", OrdersS),
+             ("measurements", MeasurementsS)]
   params := [("minAge", .int), ("maxAge", .int), ("customerName", .string),
              ("isAdult", .bool), ("isActive", .bool), ("minPrice", .decimal),
              ("startDate", .dateTime), ("targetId", .guid)] }
@@ -56,11 +61,23 @@ def bindings : List (String × SqlValue) := [
 
 /-! ## Rendering evaluated rows (the harness's normalized cell format) -/
 
+/-- Canonical float text: `toString (0.5 : Float)` is `"0.500000"`, engines
+print `0.5` — trim to the harness's numeric normal form (same rule as the
+integration runner's `trimTrailingZeros`). Seed doubles are binary-exact,
+so no shortest-round-trip subtleties arise. -/
+def renderFloat (f : Float) : String :=
+  let s := toString f
+  if s.contains '.' then
+    let t := (s.toList.reverse.dropWhile (· == '0')).reverse
+    let t := if t.getLast? == some '.' then t.dropLast else t
+    String.ofList t
+  else s
+
 def renderCell : (t : SqlPrim) → Nullable t → String
   | _, none => "NULL"
   | .int, some i => toString i
   | .long, some i => toString i
-  | .double, some f => toString f
+  | .double, some f => renderFloat f
   | .decimal, some m => renderDecimal m
   | .string, some s => s
   | .bool, some b => if b then "1" else "0"
