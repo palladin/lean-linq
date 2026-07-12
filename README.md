@@ -247,9 +247,15 @@ def demo : IO Unit := do
   conn.close
 ```
 
-- **Parameters are bound natively** — auto parameters from the compiled statement's
-  values, user-named parameters from the same typed `ParamEnv c.params` the evaluator
-  reads. Nothing is ever inlined, at compile time or execution time.
+- **Parameters are bound natively**, and there are two kinds. *User parameters*
+  (`Ctx.params`) are the query's typed interface — declared names whose values the
+  caller supplies at execution, read from the same typed `ParamEnv c.params` by the
+  evaluator and the drivers alike. *Auto parameters* (`p0, p1, …`) are a compilation
+  artifact: one per literal, value shipped alongside the SQL — the evaluator never
+  sees them (it evaluates literals directly), and they exist so no value ever appears
+  in the SQL text (injection safety, plan-cache reuse, typed wire transfer). Nothing
+  is ever inlined, at compile time or execution time; user names shaped like `p0` are
+  statically refused to keep the namespaces apart.
 - **Rows decode schema-directed into `Values s`** using the `SqlType.interp`
   conventions, so driver output is cell-for-cell comparable with `Query.run` — and the
   test suite does exactly that: `lake exe sqlitedriver` runs all registered cases through the

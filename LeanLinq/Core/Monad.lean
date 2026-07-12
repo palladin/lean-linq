@@ -70,7 +70,20 @@ def refParam (name : String) : CompileM String := fun db =>
     else (full, { st with params := st.params.push (full, .null) })
 
 /-- The result of compiling a query or statement: SQL text plus its named
-parameters (auto parameters carry their values, user-named ones `null`). -/
+parameters. Two kinds share the array:
+
+- **auto parameters** (`p0, p1, …`, one per literal in the AST) carry
+  their values here. They are a *compilation artifact*: the evaluator
+  never sees them — it evaluates the literal constructors directly —
+  and they exist so a value never appears inside the SQL text. That is
+  the injection guarantee, and also what lets engines reuse one
+  prepared plan across literal values and lets values travel through
+  typed bind APIs (OIDs, declarations) instead of string escaping.
+- **user parameters** (declared in `Ctx.params`) are recorded with a
+  `null` placeholder meaning "supplied at execution": drivers bind
+  them by name from the same typed `ParamEnv` the evaluator reads.
+
+Data travels as data; only structure travels as text. -/
 structure CompiledSql where
   sql : String
   params : Array (String × SqlValue)

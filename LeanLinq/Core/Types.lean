@@ -89,7 +89,17 @@ database provides. Queries carry a `Ctx` index; membership of each
 referenced table/parameter is established by instance search
 (`HasTable`/`HasParam`) at construction, and a `TableEnv c.tables` /
 `ParamEnv c.params` supplies rows and bindings at evaluation. Like schemas,
-concrete contexts must be `abbrev`. -/
+concrete contexts must be `abbrev`.
+
+`params` is the query's **typed interface to the caller** — the
+user-declared names whose values arrive at execution time, honored
+symmetrically by both interpreters (the evaluator reads the `ParamEnv`,
+the drivers bind the same values by name). It is *not* where literals
+live: constants are stored in the AST and evaluated directly; only
+compilation turns them into auto-allocated `p0, p1, …` placeholders so
+that values never enter the SQL text (see `CompiledSql`). The two kinds
+share the placeholder syntax, which is why user names of the shape
+`p{digits}` are reserved and statically refused (`SqlExpr.param`). -/
 structure Ctx where
   tables : List (String × Schema)
   params : List (String × SqlType) := []
