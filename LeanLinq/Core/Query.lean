@@ -35,39 +35,39 @@ table is a type error.
 `SpineQ` and `Query` are separate inductives (rather than one) so that the
 compiler's mutual recursion — statement ↔ spine — is structural: each hop
 recurses on a strict subterm. -/
-inductive SpineQ : Ctx → Terminal → Schema → Type where
-  | yield : {ts : Ctx} → {s : Schema} → Row ts s → SpineQ ts .plain s
+inductive SpineQP (ρ : Schema → Type) : Ctx → Terminal → Schema → Type where
+  | yield : {ts : Ctx} → {s : Schema} → RowP ρ ts s → SpineQP ρ ts .plain s
   -- A *grouped* terminal (the `groupBy`/`having`/`select` tail of a
   -- comprehension): GROUP BY keys, optional HAVING, and the grouped
   -- projection — all plain expressions over the rows bound earlier in the
   -- spine.
-  | groupYield : {ts : Ctx} → {s : Schema} → List (KeyExpr ts) →
-      Option (SqlExpr ts ⟨.bool, true⟩) → Row ts s → SpineQ ts .grouped s
+  | groupYield : {ts : Ctx} → {s : Schema} → List (KeyExprP ρ ts) →
+      Option (SqlExprP ρ ts ⟨.bool, true⟩) → RowP ρ ts s → SpineQP ρ ts .grouped s
   | guard : {ts : Ctx} → {g : Terminal} → {s : Schema} → {nb : Bool} →
-      SqlExpr ts ⟨.bool, nb⟩ → SpineQ ts g s → SpineQ ts g s
+      SqlExprP ρ ts ⟨.bool, nb⟩ → SpineQP ρ ts g s → SpineQP ρ ts g s
   -- ORDER BY belongs to the statement being assembled, so it lives on the
   -- spine (keys already applied to the bound rows) and `bind` splices
   -- through it — projections/filters after `orderBy` fuse into the same
   -- flat statement (SQL Server in particular forbids ORDER BY inside a
   -- derived table). In a grouped spine the keys may reference aggregates.
   | order : {ts : Ctx} → {g : Terminal} → {s : Schema} →
-      List (OrderKey ts) → SpineQ ts g s → SpineQ ts g s
+      List (OrderKeyP ρ ts) → SpineQP ρ ts g s → SpineQP ρ ts g s
   | fromT : {ts : Ctx} → {g : Terminal} → {n : String} → {s s' : Schema} →
       [inst : HasTable ts.tables n s] → Table n s →
-      (Row ts s → SpineQ ts g s') → SpineQ ts g s'
+      (RowP ρ ts s → SpineQP ρ ts g s') → SpineQP ρ ts g s'
   | joinT : {ts : Ctx} → {g : Terminal} → {n : String} → {s s' : Schema} →
       {nb : Bool} → [inst : HasTable ts.tables n s] → Table n s →
-      (Row ts s → SqlExpr ts ⟨.bool, nb⟩) →
-      (Row ts s → SpineQ ts g s') → SpineQ ts g s'
+      (RowP ρ ts s → SqlExprP ρ ts ⟨.bool, nb⟩) →
+      (RowP ρ ts s → SpineQP ρ ts g s') → SpineQP ρ ts g s'
   -- LEFT JOIN: the joined row is NULL-lifted — its columns read as
   -- nullable in the ON predicate and everything downstream: the
   -- type-level truth of the padding row.
   | joinLeftT : {ts : Ctx} → {g : Terminal} → {n : String} → {s s' : Schema} →
       {nb : Bool} → [inst : HasTable ts.tables n s] → Table n s →
-      (Row ts s.asNull → SqlExpr ts ⟨.bool, nb⟩) →
-      (Row ts s.asNull → SpineQ ts g s') → SpineQ ts g s'
-  | fromQ : {ts : Ctx} → {g : Terminal} → {s s' : Schema} → Query ts s →
-      (Row ts s → SpineQ ts g s') → SpineQ ts g s'
+      (RowP ρ ts s.asNull → SqlExprP ρ ts ⟨.bool, nb⟩) →
+      (RowP ρ ts s.asNull → SpineQP ρ ts g s') → SpineQP ρ ts g s'
+  | fromQ : {ts : Ctx} → {g : Terminal} → {s s' : Schema} → QueryP ρ ts s →
+      (RowP ρ ts s → SpineQP ρ ts g s') → SpineQP ρ ts g s'
 
 /-- A full query: a spine (of either terminal shape), or a spine decorated by
 *boundary* clauses that `bind` must not splice through (DISTINCT,
@@ -76,18 +76,22 @@ wraps the query as a derived table, which is exactly SQL's semantics.
 
 Use the `query! { … }` syntax or the pipeline smart constructors rather than
 the raw constructors. -/
-inductive Query : Ctx → Schema → Type where
-  | spine : {ts : Ctx} → {g : Terminal} → {s : Schema} → SpineQ ts g s → Query ts s
-  | distinctC : {ts : Ctx} → {s : Schema} → Query ts s → Query ts s
-  | limitC : {ts : Ctx} → {s : Schema} → Query ts s → Option Nat → Option Nat → Query ts s
-  | groupedC : {ts : Ctx} → {s s' : Schema} → SpineQ ts .plain s →
-      (Row ts s → List (KeyExpr ts)) →
-      Option (Row ts s → SqlExpr ts ⟨.bool, true⟩) →
-      Option (Row ts s → List (OrderKey ts)) →
-      (Row ts s → Agg → Row ts s') → Query ts s'
-  | setOpC : {ts : Ctx} → {s : Schema} → SetOp → Query ts s → Query ts s → Query ts s
+inductive QueryP (ρ : Schema → Type) : Ctx → Schema → Type where
+  | spine : {ts : Ctx} → {g : Terminal} → {s : Schema} → SpineQP ρ ts g s → QueryP ρ ts s
+  | distinctC : {ts : Ctx} → {s : Schema} → QueryP ρ ts s → QueryP ρ ts s
+  | limitC : {ts : Ctx} → {s : Schema} → QueryP ρ ts s → Option Nat → Option Nat → QueryP ρ ts s
+  | groupedC : {ts : Ctx} → {s s' : Schema} → SpineQP ρ ts .plain s →
+      (RowP ρ ts s → List (KeyExprP ρ ts)) →
+      Option (RowP ρ ts s → SqlExprP ρ ts ⟨.bool, true⟩) →
+      Option (RowP ρ ts s → List (OrderKeyP ρ ts)) →
+      (RowP ρ ts s → Agg → RowP ρ ts s') → QueryP ρ ts s'
+  | setOpC : {ts : Ctx} → {s : Schema} → SetOp → QueryP ρ ts s → QueryP ρ ts s → QueryP ρ ts s
 
 end
+
+/-- Alias-instantiated views — the spellings the library writes. -/
+abbrev SpineQ : Ctx → Terminal → Schema → Type := SpineQP AliasOf
+abbrev Query : Ctx → Schema → Type := QueryP AliasOf
 
 instance : Inhabited (SpineQ ts .plain s) := ⟨.yield default⟩
 instance : Inhabited (SpineQ ts .grouped s) := ⟨.groupYield [] none default⟩
@@ -100,8 +104,9 @@ structural recursion over an indexed family needs the index to be a
 *variable*, so we recurse at `SpineQ ts g₀ s` carrying the proof
 `g₀ = .plain` and discharge the `groupYield` case with it (`nomatch` on
 `.grouped = .plain` — impossibility proved, not handled). -/
-private def bindAux : {g₀ : Terminal} → {s : Schema} → SpineQ ts g₀ s →
-    g₀ = .plain → (Row ts s → SpineQ ts g s') → SpineQ ts g s'
+private def _root_.LeanLinq.SpineQP.bindAux {ρ : Schema → Type} :
+    {g₀ : Terminal} → {s : Schema} → SpineQP ρ ts g₀ s →
+    g₀ = .plain → (RowP ρ ts s → SpineQP ρ ts g s') → SpineQP ρ ts g s'
   | _, _, .yield r,         _, k => k r
   | _, _, .groupYield ..,   h, _ => nomatch h
   | _, _, .guard b rest,    h, k => .guard b (bindAux rest h k)
@@ -123,15 +128,17 @@ spines have no `bind` — a `groupYield` terminal cannot appear at index
 
 Total: `SpineQ` is a reflexive inductive, so structural recursion's inductive
 hypothesis covers `f r` for every `r`. -/
-def bind (sp : SpineQ ts .plain s) (k : Row ts s → SpineQ ts g s') : SpineQ ts g s' :=
-  bindAux sp rfl k
+def _root_.LeanLinq.SpineQP.bind {ρ : Schema → Type} (sp : SpineQP ρ ts .plain s)
+    (k : RowP ρ ts s → SpineQP ρ ts g s') : SpineQP ρ ts g s' :=
+  SpineQP.bindAux sp rfl k
 
 /-- Strip `ORDER BY` nodes from a spine. Pre-GROUP-BY row order is
 meaningless to grouping and a set-operation operand's order is discarded
 by the operation — SQL cannot even express either, so both construction
 sites strip, keeping the compiled statement valid and the evaluator
 aligned with it. -/
-def dropOrders : SpineQ ts g s → SpineQ ts g s
+def _root_.LeanLinq.SpineQP.dropOrders {ρ : Schema → Type} :
+    SpineQP ρ ts g s → SpineQP ρ ts g s
   | .yield r => .yield r
   | .groupYield ks hv r => .groupYield ks hv r
   | .guard b rest => .guard b rest.dropOrders
@@ -147,7 +154,7 @@ end SpineQ
 clauses onto it): plain spines unwrap; grouped spines and boundary-decorated
 queries become a derived-table source. The grouped/plain distinction is an
 O(1) match on the `Terminal` index — no spine traversal. -/
-def Query.asPlainSpine : Query ts s → SpineQ ts .plain s
+def QueryP.asPlainSpine {ρ : Schema → Type} : QueryP ρ ts s → SpineQP ρ ts .plain s
   | .spine (g := .plain) sp => sp
   | q => .fromQ q (fun r => .yield r)
 
@@ -155,48 +162,48 @@ def Query.asPlainSpine : Query ts s → SpineQ ts .plain s
 
 `card` computes an upper bound on the result size from the query value
 itself, over the same `Bound` lattice that grades `DbFetch` round trips —
-one lattice, two currencies. Table sources are statically unbounded (⊤);
-the bound concentrates at `limit` (`min`), joins multiply, unions add,
-filters and reshaping never grow. For literal queries `card` reduces
-definitionally, so `by decide` can consume it inside types — the same
-discipline as the round-trip grades. -/
+one lattice, two currencies. Bare-table sources are statically unbounded
+(⊤ is the truth about them, until keys); **derived-table sources
+multiply** — `from x in (q.limit 3)` contributes at most 3 × the
+continuation's bound. The continuation is priced at the evaluator's own
+marker rows with the evaluator's own alias numbering (`n`, maintained
+equal to the scope length): the soundness proof then compares the same
+function application on both sides, which is what makes the precision
+provable — no uniformity assumption about the HOAS continuation is
+needed. For literal queries `card` reduces definitionally, so `by
+decide` can consume it inside types. -/
 
 mutual
 
-@[reducible] def SpineQ.card : SpineQ ts g s → Bound
-  | .yield _ => .fin 1
-  | .groupYield .. => .fin 1
-  | .guard _ rest => rest.card
-  | .order _ rest => rest.card
-  | .fromT (g := .plain) (inst := _) _ f => .top * (f default).card
-  | .fromT (g := .grouped) (inst := _) _ f => .top * (f default).card
-  | .joinT (g := .plain) (inst := _) _ _ f => .top * (f default).card
-  | .joinT (g := .grouped) (inst := _) _ _ f => .top * (f default).card
-  | .joinLeftT (g := .plain) (inst := _) _ _ f => .top * (f default).card
-  | .joinLeftT (g := .grouped) (inst := _) _ _ f => .top * (f default).card
-  -- a derived-table source is ⊤ like any other source: the continuation's
-  -- card under a *marker* row is not provably equal to its card under
-  -- `default` (the HOAS parametricity gap), so the sound bound is ⊤ —
-  -- and the flagship boundary `limit` caps it from outside regardless
-  | .fromQ (g := .plain) _ f => .top * (f default).card
-  | .fromQ (g := .grouped) _ f => .top * (f default).card
+@[reducible] def SpineQP.cardAux : SpineQ ts g s → Nat → Bound
+  | .yield _, _ => .fin 1
+  | .groupYield .., _ => .fin 1
+  | .guard _ rest, n => rest.cardAux n
+  | .order _ rest, n => rest.cardAux n
+  -- a bare table's size is not a static fact — ⊤ is the honest bound
+  | .fromT (inst := _) _ _, _ => .top
+  | .joinT (inst := _) _ _ _, _ => .top
+  | .joinLeftT (inst := _) _ _ _, _ => .top
+  -- a derived table's size IS a static fact: its query's own card —
+  -- priced at the evaluator's marker, so the bound is the one that runs
+  | .fromQ (s := s₀) q f, n =>
+      q.cardAux n * (f (Row.ofAlias s!"a{n}" s₀)).cardAux (n + 1)
 
-@[reducible] def Query.card : Query ts s → Bound
-  | .spine sp => sp.card
-  | .distinctC q => q.card
-  | .limitC q lim? _ =>
+@[reducible] def QueryP.cardAux : Query ts s → Nat → Bound
+  | .spine sp, n => sp.cardAux n
+  | .distinctC q, n => q.cardAux n
+  | .limitC q lim? _, n =>
       match lim? with
-      | some l => min q.card (.fin l)
-      | none => q.card
-  | .groupedC sp _ _ _ _ => sp.card
-  | .setOpC .union a b => a.card + b.card
-  -- intersect/except: subsets of the left operand (the `min` with the
-  -- right side needs a nodup-subset counting lemma — precision deferred)
-  | .setOpC .intersect a _ => a.card
-  | .setOpC .except a _ => a.card
+      | some l => min (q.cardAux n) (.fin l)
+      | none => q.cardAux n
+  | .groupedC sp _ _ _ _, n => sp.cardAux n
+  | .setOpC .union a b, n => a.cardAux n + b.cardAux n
+  | .setOpC .intersect a _, n => a.cardAux n
+  | .setOpC .except a _, n => a.cardAux n
 
 end
 
+@[reducible] def QueryP.card (q : Query ts s) : Bound := q.cardAux 0
 
 /-! ## Row invariants: what the query's structure promises about its rows
 
@@ -214,7 +221,7 @@ analysis and env-free `where'` facts need projection-survival analysis —
 both later; their clauses contribute `true` for now, so the invariant
 says less, never lies. The general env-parameterized form
 (`RowInv q ps xs`) is the M3 design. -/
-def Query.rowInvB : Query ts s → List (Values s) → Bool
+def QueryP.rowInvB : Query ts s → List (Values s) → Bool
   | .distinctC q, xs => Values.nodupB xs && q.rowInvB xs
   | .limitC q _ _, xs => q.rowInvB xs
   | .spine _, _ => true
@@ -237,7 +244,7 @@ theorem Query.rowInvB_of_sublist {xs' xs : List (Values s)} :
   | .groupedC .., _, _ => rfl
   | .setOpC .., _, _ => rfl
   | .distinctC q, h, hi => by
-      rw [Query.rowInvB, Bool.and_eq_true] at hi ⊢
+      rw [QueryP.rowInvB, Bool.and_eq_true] at hi ⊢
       exact ⟨Values.nodupB_of_sublist h hi.1, Query.rowInvB_of_sublist q h hi.2⟩
   | .limitC q _ _, h, hi => Query.rowInvB_of_sublist q h hi
 
@@ -245,62 +252,65 @@ theorem Query.rowInvB_of_sublist {xs' xs : List (Values s)} :
 fetch door needs when a live engine violates what the query's own
 structure promises (provably unreachable in the reference semantics). -/
 theorem Query.rowInvB_nil : (q : Query ts s) → q.rowInvB [] = true
-  | .distinctC q => by simp [Query.rowInvB, Values.nodupB, rowInvB_nil q]
-  | .limitC q _ _ => by simp [Query.rowInvB, rowInvB_nil q]
+  | .distinctC q => by simp [QueryP.rowInvB, Values.nodupB, rowInvB_nil q]
+  | .limitC q _ _ => by simp [QueryP.rowInvB, rowInvB_nil q]
   | .spine _ => rfl
   | .groupedC .. => rfl
   | .setOpC .. => rfl
 
-namespace Query
+namespace QueryP
+
+variable {ρ : Schema → Type}
+
 
 /-- Monadic bind — the normalization workhorse: plain spines splice; grouped
 spines and boundary queries wrap as derived tables (on both the receiver and
 the continuation's results). -/
-def bind (q : Query ts s) (k : Row ts s → Query ts s') : Query ts s' :=
+def bind (q : QueryP ρ ts s) (k : RowP ρ ts s → QueryP ρ ts s') : QueryP ρ ts s' :=
   .spine (q.asPlainSpine.bind (fun r => (k r).asPlainSpine))
 
 /-- `FROM t` (named `from'` because `from` is a Lean keyword). -/
-def from' (t : Table n s) [HasTable ts.tables n s] : Query ts s :=
+def from' (t : Table n s) [HasTable ts.tables n s] : QueryP ρ ts s :=
   .spine (.fromT t (fun r => .yield r))
 
 /-- `WHERE p` (named `where'` because `where` is a Lean keyword). Splices the
 predicate into the query's own WHERE clause. -/
-def where' (q : Query ts s) (p : Row ts s → SqlExpr ts ⟨.bool, nb⟩) : Query ts s :=
+def where' (q : QueryP ρ ts s) (p : RowP ρ ts s → SqlExprP ρ ts ⟨.bool, nb⟩) : QueryP ρ ts s :=
   .spine (q.asPlainSpine.bind fun r => .guard (p r) (.yield r))
 
 /-- `SELECT f`: project each row into a new schema, replacing the query's
 projection in place. -/
-def select (q : Query ts s) (f : Row ts s → Row ts s') : Query ts s' :=
+def select (q : QueryP ρ ts s) (f : RowP ρ ts s → RowP ρ ts s') : QueryP ρ ts s' :=
   .spine (q.asPlainSpine.bind fun r => .yield (f r))
 
 /-- `INNER JOIN t ON on'` with a result selector. Splices into the spine, so
 chained joins compile to one flat statement. -/
-def innerJoin (q : Query ts s₁) (t : Table n s₂) [HasTable ts.tables n s₂]
-    (on' : Row ts s₁ → Row ts s₂ → SqlExpr ts ⟨.bool, nb⟩)
-    (sel : Row ts s₁ → Row ts s₂ → Row ts s') : Query ts s' :=
+def innerJoin (q : QueryP ρ ts s₁) (t : Table n s₂) [HasTable ts.tables n s₂]
+    (on' : RowP ρ ts s₁ → RowP ρ ts s₂ → SqlExprP ρ ts ⟨.bool, nb⟩)
+    (sel : RowP ρ ts s₁ → RowP ρ ts s₂ → RowP ρ ts s') : QueryP ρ ts s' :=
   .spine (q.asPlainSpine.bind fun a => .joinT t (on' a) (fun b => .yield (sel a b)))
 
 /-- `LEFT JOIN t ON on'` with a result selector. The joined row's columns
 are NULL-lifted (`s₂.asNull`) in both the predicate and the selector — an
 unmatched left row pads them with NULL, and the types say so. -/
-def leftJoin (q : Query ts s₁) (t : Table n s₂) [HasTable ts.tables n s₂]
-    (on' : Row ts s₁ → Row ts s₂.asNull → SqlExpr ts ⟨.bool, nb⟩)
-    (sel : Row ts s₁ → Row ts s₂.asNull → Row ts s') : Query ts s' :=
+def leftJoin (q : QueryP ρ ts s₁) (t : Table n s₂) [HasTable ts.tables n s₂]
+    (on' : RowP ρ ts s₁ → RowP ρ ts s₂.asNull → SqlExprP ρ ts ⟨.bool, nb⟩)
+    (sel : RowP ρ ts s₁ → RowP ρ ts s₂.asNull → RowP ρ ts s') : QueryP ρ ts s' :=
   .spine (q.asPlainSpine.bind fun a => .joinLeftT t (on' a) (fun b => .yield (sel a b)))
 
 /-- `ORDER BY` with one or more directed keys:
 `q.orderBy (fun c => [c["Name"].asc, c["Age"].desc])`. Keys reference the
 query's *output* columns; ordering fuses into the query's own statement. -/
-def orderBy (q : Query ts s) (ks : Row ts s → List (OrderKey ts)) : Query ts s :=
+def orderBy (q : QueryP ρ ts s) (ks : RowP ρ ts s → List (OrderKeyP ρ ts)) : QueryP ρ ts s :=
   .spine (q.asPlainSpine.bind fun r => .order (ks r) (.yield r))
 
 /-- `SELECT DISTINCT`. -/
-def distinct (q : Query ts s) : Query ts s := .distinctC q
+def distinct (q : QueryP ρ ts s) : QueryP ρ ts s := .distinctC q
 
 /-- `LIMIT`/`OFFSET` (rendered per dialect; SQL Server uses OFFSET/FETCH).
 Applying it to an already-limited query wraps that query as a derived table —
 stacking two LIMIT clauses on one statement is not valid SQL. -/
-def limitOffset (q : Query ts s) (limit? offset? : Option Nat) : Query ts s :=
+def limitOffset (q : QueryP ρ ts s) (limit? offset? : Option Nat) : QueryP ρ ts s :=
   match q with
   | .limitC .. => .limitC (.spine (.fromQ q (fun r => .yield r))) limit? offset?
   | _ => .limitC q limit? offset?
@@ -308,7 +318,7 @@ def limitOffset (q : Query ts s) (limit? offset? : Option Nat) : Query ts s :=
 /-- `LIMIT n`. Chaining onto a pending `offset` merges into one clause
 (`q.offset 10 |>.limit 5` ⇒ `LIMIT 5 OFFSET 10`); onto an existing limit it
 wraps (`LIMIT` of a `LIMIT` via a derived table). -/
-def limit (q : Query ts s) (n : Nat) : Query ts s :=
+def limit (q : QueryP ρ ts s) (n : Nat) : QueryP ρ ts s :=
   match q with
   | .limitC q' none off? => .limitC q' (some n) off?
   | _ => q.limitOffset (some n) none
@@ -316,7 +326,7 @@ def limit (q : Query ts s) (n : Nat) : Query ts s :=
 /-- `OFFSET n`. Chaining onto a pending `limit` merges into one clause
 (`q.limit 5 |>.offset 10` ⇒ `LIMIT 5 OFFSET 10`); onto an existing offset it
 wraps. -/
-def offset (q : Query ts s) (n : Nat) : Query ts s :=
+def offset (q : QueryP ρ ts s) (n : Nat) : QueryP ρ ts s :=
   match q with
   | .limitC q' lim? none => .limitC q' lim? (some n)
   | _ => q.limitOffset none (some n)
@@ -325,68 +335,86 @@ def offset (q : Query ts s) (n : Nat) : Query ts s :=
 cannot express it), so spine operands are stripped at construction — the
 compiler then emits them flat, and boundary operands (nested set ops,
 LIMIT, DISTINCT, grouped) as derived tables. -/
-private def asSetOperand : Query ts s → Query ts s
+private def asSetOperand : QueryP ρ ts s → QueryP ρ ts s
   | .spine sp => .spine sp.dropOrders
   | q => q
 
-def union (q₁ q₂ : Query ts s) : Query ts s :=
+def union (q₁ q₂ : QueryP ρ ts s) : QueryP ρ ts s :=
   .setOpC .union (asSetOperand q₁) (asSetOperand q₂)
-def intersect (q₁ q₂ : Query ts s) : Query ts s :=
+def intersect (q₁ q₂ : QueryP ρ ts s) : QueryP ρ ts s :=
   .setOpC .intersect (asSetOperand q₁) (asSetOperand q₂)
-def except (q₁ q₂ : Query ts s) : Query ts s :=
+def except (q₁ q₂ : QueryP ρ ts s) : QueryP ρ ts s :=
   .setOpC .except (asSetOperand q₁) (asSetOperand q₂)
 
-end Query
+end QueryP
 
 /-- A query grouped by keys, awaiting `having`/`orderBy`/`select` (staged
 GroupBy → Having → OrderBy → Select surface; aggregates in a plain `where'`
 are unrepresentable). -/
-structure GroupedQuery (ts : Ctx) (s : Schema) where
-  query : Query ts s
-  keys : Row ts s → List (KeyExpr ts)
-  having? : Option (Row ts s → SqlExpr ts ⟨.bool, true⟩) := none
-  orderKeys? : Option (Row ts s → List (OrderKey ts)) := none
+structure GroupedQueryP (ρ : Schema → Type) (ts : Ctx) (s : Schema) where
+  query : QueryP ρ ts s
+  keys : RowP ρ ts s → List (KeyExprP ρ ts)
+  having? : Option (RowP ρ ts s → SqlExprP ρ ts ⟨.bool, true⟩) := none
+  orderKeys? : Option (RowP ρ ts s → List (OrderKeyP ρ ts)) := none
 
 /-- `GROUP BY` one or more keys: `q.groupBy (fun c => [c["Age"].key])`. -/
-def Query.groupBy (q : Query ts s) (keys : Row ts s → List (KeyExpr ts)) :
-    GroupedQuery ts s :=
+def QueryP.groupBy (q : QueryP ρ ts s) (keys : RowP ρ ts s → List (KeyExprP ρ ts)) :
+    GroupedQueryP ρ ts s :=
   ⟨q, keys, none, none⟩
 
 /-- `HAVING` over the grouped rows; the `Agg` token builds aggregates:
 `g.having (fun c a => 1 <. a.count)`. -/
-def GroupedQuery.having (g : GroupedQuery ts s)
-    (p : Row ts s → Agg → SqlExpr ts ⟨.bool, nb⟩) : GroupedQuery ts s :=
+def GroupedQueryP.having (g : GroupedQueryP ρ ts s)
+    (p : RowP ρ ts s → Agg → SqlExprP ρ ts ⟨.bool, nb⟩) : GroupedQueryP ρ ts s :=
   { g with having? := some (fun r => (p r ⟨⟩).anyNull) }
 
 /-- Aggregate-aware `ORDER BY` on a grouped query, before its `select`:
 `g.orderBy (fun o a => [(a.sum o["Amount"]).desc, (a.count).asc])` — renders
 inside the grouped statement (`… GROUP BY … HAVING … ORDER BY SUM(…) DESC`). -/
-def GroupedQuery.orderBy (g : GroupedQuery ts s)
-    (ks : Row ts s → Agg → List (OrderKey ts)) : GroupedQuery ts s :=
+def GroupedQueryP.orderBy (g : GroupedQueryP ρ ts s)
+    (ks : RowP ρ ts s → Agg → List (OrderKeyP ρ ts)) : GroupedQueryP ρ ts s :=
   { g with orderKeys? := some (fun r => ks r ⟨⟩) }
 
 /-- Grouped projection over keys and aggregates:
 `g.select (fun c a => ![c["Age"].as "Age", (a.count).as "Cnt"])`. -/
-def GroupedQuery.select (g : GroupedQuery ts s) (f : Row ts s → Agg → Row ts s') :
-    Query ts s' :=
+def GroupedQueryP.select (g : GroupedQueryP ρ ts s) (f : RowP ρ ts s → Agg → RowP ρ ts s') :
+    QueryP ρ ts s' :=
   .groupedC g.query.asPlainSpine.dropOrders g.keys g.having? g.orderKeys? f
 
 /-- A query returning a single scalar value. The `Bool` index is its
 nullability: SUM/AVG/MIN/MAX over an empty group are NULL; `COUNT(*)`
 never is. -/
-inductive ScalarQuery : Ctx → SqlType → Type where
+inductive ScalarQueryP (ρ : Schema → Type) : Ctx → SqlType → Type where
   | aggQ (op : AggOp) {ts : Ctx} {n : String} {t : SqlPrim} {nl : Bool}
-      (sp : SpineQ ts .plain [(n, ⟨t, nl⟩)]) : ScalarQuery ts ⟨t, true⟩
-  | countQ {ts : Ctx} {s : Schema} (sp : SpineQ ts .plain s) : ScalarQuery ts .int
+      (sp : SpineQP ρ ts .plain [(n, ⟨t, nl⟩)]) : ScalarQueryP ρ ts ⟨t, true⟩
+  | countQ {ts : Ctx} {s : Schema} (sp : SpineQP ρ ts .plain s) : ScalarQueryP ρ ts .int
 
 /-- `COUNT(*)` over a query. -/
-def Query.count (q : Query ts s) : ScalarQuery ts .int := .countQ q.asPlainSpine
+def QueryP.count (q : QueryP ρ ts s) : ScalarQueryP ρ ts .int := .countQ q.asPlainSpine
 
 /-- `SUM` over a single-column query (project first: `q.select … |>.sum`). -/
-def Query.sum (q : Query ts [(n, ⟨t, nl⟩)]) : ScalarQuery ts ⟨t, true⟩ := .aggQ .sum q.asPlainSpine
-def Query.avg (q : Query ts [(n, ⟨t, nl⟩)]) : ScalarQuery ts ⟨t, true⟩ := .aggQ .avg q.asPlainSpine
-def Query.min (q : Query ts [(n, ⟨t, nl⟩)]) : ScalarQuery ts ⟨t, true⟩ := .aggQ .min q.asPlainSpine
-def Query.max (q : Query ts [(n, ⟨t, nl⟩)]) : ScalarQuery ts ⟨t, true⟩ := .aggQ .max q.asPlainSpine
+def QueryP.sum (q : QueryP ρ ts [(n, ⟨t, nl⟩)]) : ScalarQueryP ρ ts ⟨t, true⟩ := .aggQ .sum q.asPlainSpine
+def QueryP.avg (q : QueryP ρ ts [(n, ⟨t, nl⟩)]) : ScalarQueryP ρ ts ⟨t, true⟩ := .aggQ .avg q.asPlainSpine
+def QueryP.min (q : QueryP ρ ts [(n, ⟨t, nl⟩)]) : ScalarQueryP ρ ts ⟨t, true⟩ := .aggQ .min q.asPlainSpine
+def QueryP.max (q : QueryP ρ ts [(n, ⟨t, nl⟩)]) : ScalarQueryP ρ ts ⟨t, true⟩ := .aggQ .max q.asPlainSpine
+
+/-- Alias-instantiated views. -/
+abbrev GroupedQuery : Ctx → Schema → Type := GroupedQueryP AliasOf
+abbrev ScalarQuery : Ctx → SqlType → Type := ScalarQueryP AliasOf
+
+namespace QueryP
+export Query (RowInv)
+end QueryP
+
+/- Textual entry points stay pinned at the alias instantiation until the
+∀ρ bundle flips them (`Query.from' …` spellings across the corpus). -/
+def Query.from' (t : Table n s) [HasTable ts.tables n s] : Query ts s :=
+  QueryP.from' t
+def Query.distinct (q : Query ts s) : Query ts s := QueryP.distinct q
+def Query.limitOffset (q : Query ts s) (l? o? : Option Nat) : Query ts s :=
+  QueryP.limitOffset q l? o?
+def Query.limit (q : Query ts s) (n : Nat) : Query ts s := QueryP.limit q n
+def Query.offset (q : Query ts s) (n : Nat) : Query ts s := QueryP.offset q n
 
 /-- Anything that can appear as a `from` source in a query comprehension:
 tables (their context membership resolved by `HasTable`), and queries

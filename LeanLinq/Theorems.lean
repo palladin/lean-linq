@@ -23,9 +23,9 @@ namespace LeanLinq
 theorem Query.evalRows_limitC_length_le {ts : Ctx} {s : Schema}
     (q : Query ts s) (n : Nat) (off? : Option Nat) (ee : EvalEnv ts)
     {rows : List (Values s)}
-    (h : (Query.limitC q (some n) off?).evalRows ee = .ok rows) :
+    (h : (QueryP.limitC q (some n) off?).evalRows ee = .ok rows) :
     rows.length ≤ n := by
-  simp only [Query.evalRows, Query.evalRowsIn] at h
+  simp only [Query.evalRows, QueryP.evalRowsIn] at h
   cases hq : q.evalRowsIn ee [] with
   | error e =>
       rw [hq] at h
@@ -47,10 +47,10 @@ theorem Query.run_limit_length_le {ts : Ctx} {s : Schema}
     (h : (q.limit n).run env ps now = .ok rows) :
     rows.length ≤ n := by
   unfold Query.run at h
-  unfold Query.limit at h
+  unfold Query.limit QueryP.limit at h
   split at h
   · exact Query.evalRows_limitC_length_le _ n _ _ h
-  · unfold Query.limitOffset at h
+  · unfold QueryP.limitOffset at h
     split at h
     · exact Query.evalRows_limitC_length_le _ n _ _ h
     · exact Query.evalRows_limitC_length_le _ n _ _ h
@@ -63,73 +63,112 @@ satisfies `RowInv`. These are the theorems that make the fetch doors'
 runtime checks principled — provably the identity in the reference
 semantics, auditing only a live engine. -/
 
-/-- Sources are ⊤-headed (trivial), sourceless chains yield at most one
-branch — so a spine's branch count is bounded by its card. -/
-theorem SpineQ.evalSpine_length_le {ts : Ctx} {g : Terminal} {s : Schema}
+/-- The derived-table composition bound: `rows` under `A`, every part
+under `B`, one part per row — the flatten fits under `A * B`. -/
+theorem Bound.fin_flatten_le {A B : Bound} {rows : List α}
+    {parts : List (List β)}
+    (hlen : parts.length = rows.length)
+    (hrows : Bound.fin rows.length ≤ A)
+    (hparts : ∀ part ∈ parts, Bound.fin part.length ≤ B) :
+    Bound.fin parts.flatten.length ≤ A * B := by
+  cases hA : A with
+  | top => exact Bound.le_top _
+  | fin a =>
+      cases hB : B with
+      | top =>
+          cases a <;> exact Bound.le_top _
+      | fin b =>
+          subst hA; subst hB
+          refine Bound.fin_le_fin ?_
+          calc parts.flatten.length
+              ≤ parts.length * b :=
+                List.length_flatten_le parts (fun l hl =>
+                  of_decide_eq_true (hparts l hl))
+            _ = rows.length * b := by rw [hlen]
+            _ ≤ a * b :=
+                Nat.mul_le_mul_right b (of_decide_eq_true hrows)
+
+mutual
+
+/-- Branch counts are bounded by the spine's card. The `hn` invariant —
+the alias counter equals the scope length — is what aligns the card's
+marker instantiation with the evaluator's: the `fromQ` case compares
+the *same* continuation application on both sides. -/
+theorem SpineQP.evalSpine_length_le {ts : Ctx} {g : Terminal} {s : Schema}
     {ee : EvalEnv ts} : (sp : SpineQ ts g s) → {n : Nat} → {sc : Scope} →
-    {brs : List (Branch ts g s)} →
-    sp.evalSpine ee n sc = .ok brs → Bound.fin brs.length ≤ sp.card
-  | .yield r, _, _, brs, h => by
-      simp only [SpineQ.evalSpine, pure, Except.pure, Except.ok.injEq] at h
+    {brs : List (Branch ts g s)} → (hn : n = sc.length) →
+    sp.evalSpine ee n sc = .ok brs → Bound.fin brs.length ≤ sp.cardAux n
+  | .yield r, _, _, brs, _, h => by
+      simp only [SpineQP.evalSpine, pure, Except.pure, Except.ok.injEq] at h
       subst h
       exact Bound.le_refl _
-  | .groupYield .., _, _, brs, h => by
-      simp only [SpineQ.evalSpine, pure, Except.pure, Except.ok.injEq] at h
+  | .groupYield .., _, _, brs, _, h => by
+      simp only [SpineQP.evalSpine, pure, Except.pure, Except.ok.injEq] at h
       subst h
       exact Bound.le_refl _
-  | .guard b rest, _, _, brs, h => by
-      simp only [SpineQ.evalSpine] at h
+  | .guard b rest, _, _, brs, hn, h => by
+      simp only [SpineQP.evalSpine] at h
       obtain ⟨bv, _, h⟩ := Except.bind_ok h
       split at h
-      · exact SpineQ.evalSpine_length_le rest h
+      · exact SpineQP.evalSpine_length_le rest hn h
       · simp only [pure, Except.pure, Except.ok.injEq] at h
         subst h
         exact Bound.zero_le _
-  | .order _ rest, _, _, brs, h => by
-      simp only [SpineQ.evalSpine] at h
+  | .order _ rest, _, _, brs, hn, h => by
+      simp only [SpineQP.evalSpine] at h
       obtain ⟨brs₀, hrest, h⟩ := Except.bind_ok h
       simp only [pure, Except.pure, Except.ok.injEq] at h
       subst h
-      simpa using SpineQ.evalSpine_length_le rest hrest
-  | .fromT (g := .plain) (inst := _) _ _, _, _, _, _ => rfl
-  | .fromT (g := .grouped) (inst := _) _ _, _, _, _, _ => rfl
-  | .joinT (g := .plain) (inst := _) _ _ _, _, _, _, _ => rfl
-  | .joinT (g := .grouped) (inst := _) _ _ _, _, _, _, _ => rfl
-  | .joinLeftT (g := .plain) (inst := _) _ _ _, _, _, _, _ => rfl
-  | .joinLeftT (g := .grouped) (inst := _) _ _ _, _, _, _, _ => rfl
-  | .fromQ (g := .plain) _ _, _, _, _, _ => rfl
-  | .fromQ (g := .grouped) _ _, _, _, _, _ => rfl
+      simpa using SpineQP.evalSpine_length_le rest hn hrest
+  | .fromT (g := .plain) (inst := _) _ _, _, _, _, _, _ => rfl
+  | .fromT (g := .grouped) (inst := _) _ _, _, _, _, _, _ => rfl
+  | .joinT (g := .plain) (inst := _) _ _ _, _, _, _, _, _ => rfl
+  | .joinT (g := .grouped) (inst := _) _ _ _, _, _, _, _, _ => rfl
+  | .joinLeftT (g := .plain) (inst := _) _ _ _, _, _, _, _, _ => rfl
+  | .joinLeftT (g := .grouped) (inst := _) _ _ _, _, _, _, _, _ => rfl
+  | .fromQ (s := s₀) q f, n, sc, brs, hn, h => by
+      simp only [SpineQP.evalSpine] at h
+      obtain ⟨rows, hq, h⟩ := Except.bind_ok h
+      obtain ⟨parts, hm, h⟩ := Except.bind_ok h
+      simp only [pure, Except.pure, Except.ok.injEq] at h
+      subst h
+      refine Bound.fin_flatten_le (List.length_mapM_except _ hm)
+        (hn ▸ QueryP.evalRowsIn_card_le q hq) ?_
+      intro part hpart
+      obtain ⟨v, _, hev⟩ := List.mem_of_mapM_except _ hm part hpart
+      exact SpineQP.evalSpine_length_le _ (by simp [hn]) hev
 
 /-- **`card` is sound**: evaluation never returns more rows than the
-query's cardinality bound. -/
-theorem Query.evalRowsIn_card_le {ts : Ctx} {s : Schema} {ee : EvalEnv ts} :
+query's cardinality bound — including through derived tables, where the
+bound genuinely multiplies. -/
+theorem QueryP.evalRowsIn_card_le {ts : Ctx} {s : Schema} {ee : EvalEnv ts} :
     (q : Query ts s) → {sc : Scope} → {xs : List (Values s)} →
-    q.evalRowsIn ee sc = .ok xs → Bound.fin xs.length ≤ q.card
+    q.evalRowsIn ee sc = .ok xs → Bound.fin xs.length ≤ q.cardAux sc.length
   | .spine (g := .plain) sp, sc, xs, h => by
-      simp only [Query.evalRowsIn] at h
+      simp only [QueryP.evalRowsIn] at h
       obtain ⟨brs, hsp, hfin⟩ := Except.bind_ok h
       rw [show xs.length = brs.length from finishPlain_length hfin]
-      exact SpineQ.evalSpine_length_le sp hsp
+      exact SpineQP.evalSpine_length_le sp rfl hsp
   | .spine (g := .grouped) sp, sc, xs, h => by
-      simp only [Query.evalRowsIn] at h
+      simp only [QueryP.evalRowsIn] at h
       obtain ⟨brs, hsp, hfin⟩ := Except.bind_ok h
       exact Bound.le_trans
         (Bound.fin_le_fin (finishGrouped_length_le hfin))
-        (SpineQ.evalSpine_length_le sp hsp)
+        (SpineQP.evalSpine_length_le sp rfl hsp)
   | .distinctC q, sc, xs, h => by
-      simp only [Query.evalRowsIn] at h
+      simp only [QueryP.evalRowsIn] at h
       obtain ⟨inner, hq, h⟩ := Except.bind_ok h
       simp only [pure, Except.pure, Except.ok.injEq] at h
       subst h
       exact Bound.le_trans
         (Bound.fin_le_fin (List.length_dedupBy_le _ _))
-        (Query.evalRowsIn_card_le q hq)
+        (QueryP.evalRowsIn_card_le q hq)
   | .limitC q lim? off?, sc, xs, h => by
-      simp only [Query.evalRowsIn] at h
+      simp only [QueryP.evalRowsIn] at h
       obtain ⟨inner, hq, h⟩ := Except.bind_ok h
       simp only [pure, Except.pure, Except.ok.injEq] at h
       subst h
-      have hin := Query.evalRowsIn_card_le q hq
+      have hin := QueryP.evalRowsIn_card_le q hq
       cases lim? with
       | some l =>
           refine Bound.le_min (Bound.le_trans (Bound.fin_le_fin ?_) hin)
@@ -141,14 +180,14 @@ theorem Query.evalRowsIn_card_le {ts : Ctx} {s : Schema} {ee : EvalEnv ts} :
       | none =>
           exact Bound.le_trans (Bound.fin_le_fin (by simp [List.length_drop])) hin
   | .groupedC sp keys hv? ord? sel, sc, xs, h => by
-      simp only [Query.evalRowsIn] at h
+      simp only [QueryP.evalRowsIn] at h
       obtain ⟨brs, hsp, hcore⟩ := Except.bind_ok h
       have hlen := groupedCore_length_le hcore
       rw [List.length_map] at hlen
       exact Bound.le_trans (Bound.fin_le_fin hlen)
-        (SpineQ.evalSpine_length_le sp hsp)
+        (SpineQP.evalSpine_length_le sp rfl hsp)
   | .setOpC op a b, sc, xs, h => by
-      simp only [Query.evalRowsIn] at h
+      simp only [QueryP.evalRowsIn] at h
       obtain ⟨ra, hra, h⟩ := Except.bind_ok h
       obtain ⟨rb, hrb, h⟩ := Except.bind_ok h
       simp only [pure, Except.pure, Except.ok.injEq] at h
@@ -156,23 +195,25 @@ theorem Query.evalRowsIn_card_le {ts : Ctx} {s : Schema} {ee : EvalEnv ts} :
       | union =>
           subst h
           refine Bound.le_trans (Bound.fin_le_fin ?_)
-            (Bound.add_le_add (Query.evalRowsIn_card_le a hra)
-              (Query.evalRowsIn_card_le b hrb))
+            (Bound.add_le_add (QueryP.evalRowsIn_card_le a hra)
+              (QueryP.evalRowsIn_card_le b hrb))
           calc (List.dedupBy Values.beq (ra ++ rb)).length
               ≤ (ra ++ rb).length := List.length_dedupBy_le _ _
             _ = ra.length + rb.length := List.length_append
       | intersect =>
           subst h
-          refine Bound.le_trans (Bound.fin_le_fin ?_) (Query.evalRowsIn_card_le a hra)
+          refine Bound.le_trans (Bound.fin_le_fin ?_) (QueryP.evalRowsIn_card_le a hra)
           calc (List.dedupBy Values.beq _).length
               ≤ (ra.filter _).length := List.length_dedupBy_le _ _
             _ ≤ ra.length := List.length_filter_le _ _
       | except =>
           subst h
-          refine Bound.le_trans (Bound.fin_le_fin ?_) (Query.evalRowsIn_card_le a hra)
+          refine Bound.le_trans (Bound.fin_le_fin ?_) (QueryP.evalRowsIn_card_le a hra)
           calc (List.dedupBy Values.beq _).length
               ≤ (ra.filter _).length := List.length_dedupBy_le _ _
             _ ≤ ra.length := List.length_filter_le _ _
+
+end
 
 /-- **`RowInv` is sound**: evaluation always satisfies the row
 invariant the query's structure promises. -/
@@ -187,7 +228,7 @@ theorem Query.evalRowsIn_rowInv {ts : Ctx} {s : Schema} {ee : EvalEnv ts} :
       obtain ⟨inner, hq, h⟩ := Except.bind_ok h
       simp only [pure, Except.pure, Except.ok.injEq] at h
       subst h
-      rw [Query.rowInvB, Bool.and_eq_true]
+      rw [QueryP.rowInvB, Bool.and_eq_true]
       exact ⟨Values.nodupB_dedupBy _,
         Query.rowInvB_of_sublist q (List.dedupBy_sublist _ _)
           (Query.evalRowsIn_rowInv q hq)⟩
@@ -210,7 +251,7 @@ theorem Query.run_card_le {ts : Ctx} {s : Schema}
     (q : Query ts s) (env : TableEnv ts.tables) (ps : ParamEnv ts.params)
     (now : Option String) {xs : List (Values s)}
     (h : q.run env ps now = .ok xs) : Bound.fin xs.length ≤ q.card :=
-  Query.evalRowsIn_card_le q h
+  QueryP.evalRowsIn_card_le q h
 
 /-- Public spelling over `Query.run`. -/
 theorem Query.run_rowInv {ts : Ctx} {s : Schema}

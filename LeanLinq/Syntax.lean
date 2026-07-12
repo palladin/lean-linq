@@ -86,15 +86,15 @@ private def foldLeading (acc : Term) (c : Syntax) : MacroM Term := do
   if c.isOfKind ``sqlFrom then
     `(LeanLinq.QuerySource.bind $(⟨c[3]⟩) (fun $(⟨c[1]⟩) => $acc))
   else if c.isOfKind ``sqlJoin then
-    `(LeanLinq.SpineQ.joinT $(⟨c[3]⟩)
+    `(LeanLinq.SpineQP.joinT $(⟨c[3]⟩)
         (fun $(⟨c[1]⟩) => $(⟨c[5]⟩)) (fun $(⟨c[1]⟩) => $acc))
   else if c.isOfKind ``sqlLeftJoin then
-    `(LeanLinq.SpineQ.joinLeftT $(⟨c[3]⟩)
+    `(LeanLinq.SpineQP.joinLeftT $(⟨c[3]⟩)
         (fun $(⟨c[1]⟩) => $(⟨c[5]⟩)) (fun $(⟨c[1]⟩) => $acc))
   else if c.isOfKind ``sqlWhere then
-    `(LeanLinq.SpineQ.guard $(⟨c[1]⟩) $acc)
+    `(LeanLinq.SpineQP.guard $(⟨c[1]⟩) $acc)
   else if c.isOfKind ``sqlOrderBy then
-    `(LeanLinq.SpineQ.order [$(sepTerms c[1]),*] $acc)
+    `(LeanLinq.SpineQP.order [$(sepTerms c[1]),*] $acc)
   else
     Macro.throwErrorAt c "unexpected clause before `select` (allowed: from, join, leftJoin, where, orderBy, groupBy, having)"
 
@@ -129,7 +129,7 @@ private def expandClauses (clauses : List Syntax) : MacroM Term := do
         match pre.find? (·.isOfKind ``sqlHaving) with
         | some h => Macro.throwErrorAt h "`having` requires a `groupBy … into …` clause"
         | none => do
-          let terminal ← `(LeanLinq.SpineQ.yield $selRow)
+          let terminal ← `(LeanLinq.SpineQP.yield $selRow)
           pre.foldrM (fun c acc => foldLeading acc c) terminal
       | some gi => do
         let g := pre[gi]!
@@ -151,7 +151,7 @@ private def expandClauses (clauses : List Syntax) : MacroM Term := do
         let hv ← match havings with
           | [] => `(Option.none)
           | h :: _ => `(Option.some $(⟨h[1]⟩))
-        let terminal ← `(LeanLinq.SpineQ.groupYield __gkeys $hv $selRow)
+        let terminal ← `(LeanLinq.SpineQP.groupYield __gkeys $hv $selRow)
         let grouped ← orderBys.foldrM (fun c acc => foldLeading acc c) terminal
         -- `into a` binds the aggregate token over having/orderBy/select —
         -- but NOT over the keys: grouping *by* an aggregate is meaningless
@@ -161,7 +161,7 @@ private def expandClauses (clauses : List Syntax) : MacroM Term := do
         let withBinder ← `(let __gkeys := [$(sepTerms g[1]),*]
           (fun ($binder : LeanLinq.Agg) => $grouped) LeanLinq.Agg.mk)
         before.foldrM (fun c acc => foldLeading acc c) withBinder
-    let coreQ ← `(LeanLinq.Query.spine $core)
+    let coreQ ← `(LeanLinq.QueryP.spine $core)
     post.foldlM applyTrailing coreQ
 
 @[macro sqlQuery] def expandQuery : Lean.Macro := fun stx => do

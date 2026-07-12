@@ -396,4 +396,12 @@ open Lean in
         Macro.throwErrorAt c "expected `let x ← e`, `let x := e`, `let ys ← for x in xs do e`, or a final `return e`"
     `(LeanLinq.DbFetch.withBound $folded)
 
+namespace QueryP
+export Query (fetch fetchLimit fetchBounded fetchInv fetchLimitWhere)
+end QueryP
+
+namespace ScalarQueryP
+export ScalarQuery (fetch)
+end ScalarQueryP
+
 end LeanLinq

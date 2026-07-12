@@ -26,7 +26,7 @@ def DateUnit.upperName : DateUnit → String
 opposed to a BIT-like value (column, parameter, literal, CASE). T-SQL has no
 first-class booleans: comparing a predicate requires converting it to a value
 first (`CASE WHEN p THEN 1 ELSE 0 END`). -/
-def SqlExpr.isPredicate : SqlExpr ts c → Bool
+def SqlExprP.isPredicate : SqlExpr ts c → Bool
   | .cmp .. | .and .. | .or .. | .not .. | .isNull .. | .isNotNull ..
   | .like .. | .inList .. | .inSub .. | .existsSub .. => true
   | .widen e => e.isPredicate
@@ -37,7 +37,7 @@ mutual
 /-- Compile a boolean expression for a *predicate position* (WHERE / ON /
 HAVING / AND / OR / NOT / CASE WHEN): T-SQL bit values are not predicates,
 so on SQL Server a non-predicate boolean compiles to `({e} = 1)`. -/
-def SqlExpr.compilePred (e : SqlExpr ts ⟨.bool, nb⟩) : CompileM String := do
+def SqlExprP.compilePred (e : SqlExpr ts ⟨.bool, nb⟩) : CompileM String := do
   let s ← e.compile
   if (← read) == .sqlServer && !e.isPredicate then
     return s!"({s} = 1)"
@@ -46,7 +46,7 @@ def SqlExpr.compilePred (e : SqlExpr ts ⟨.bool, nb⟩) : CompileM String := do
 
 /-- Render an expression to SQL text for the ambient dialect, allocating a
 named parameter for every literal (never inlining values). -/
-def SqlExpr.compile : SqlExpr ts c → CompileM String
+def SqlExprP.compile : SqlExpr ts c → CompileM String
   | .intC i        => pushParam (.int i)
   | .longC i       => pushParam (.long i)
   | .doubleC f     => pushParam (.double f)
@@ -58,9 +58,9 @@ def SqlExpr.compile : SqlExpr ts c → CompileM String
   | .nullC _       => pure "NULL"
   | .paramE (inst := _) name => refParam name
   | .widen e => e.compile
-  | .field _ alias name => do
-      if alias.isEmpty then quote name
-      else return s!"{← quote alias}.{← quote name}"
+  | .field _ row name => do
+      if row.alias.isEmpty then quote name
+      else return s!"{← quote row.alias}.{← quote name}"
   | .arith op a b  => return s!"({← a.compile} {op.token} {← b.compile})"
   | .concat a b    => do
       let tok := if (← read) == .sqlServer then "+" else "||"
@@ -84,7 +84,7 @@ def SqlExpr.compile : SqlExpr ts c → CompileM String
   -- an empty IN list is invalid SQL (PostgreSQL/SQL Server reject `IN ()`);
   -- SQL's `x IN (empty)` is FALSE without evaluating x, so compile exactly that
   | .inList _ []   => return "(1 = 0)"
-  | .inList e es   => return s!"{← e.compile} IN ({String.intercalate ", " (← SqlExpr.compileList es)})"
+  | .inList e es   => return s!"{← e.compile} IN ({String.intercalate ", " (← SqlExprP.compileList es)})"
   | .inSub e sub   => return s!"{← e.compile} IN ({← sub.compile})"
   | .existsSub sub => return s!"EXISTS ({← sub.compile})"
   | .scalarSub sub => return s!"({← sub.compile})"
@@ -151,11 +151,15 @@ def SqlExpr.compile : SqlExpr ts c → CompileM String
           | .month => s!"(EXTRACT(YEAR FROM {y}) - EXTRACT(YEAR FROM {x})) * 12 + (EXTRACT(MONTH FROM {y}) - EXTRACT(MONTH FROM {x}))"
           | .year => s!"(EXTRACT(YEAR FROM {y}) - EXTRACT(YEAR FROM {x}))"
 
-def SqlExpr.compileList :
+def SqlExprP.compileList :
     List ((p : SqlType) × SqlExpr ts p) → CompileM (List String)
   | [] => pure []
-  | ⟨_, e⟩ :: es => return (← e.compile) :: (← SqlExpr.compileList es)
+  | ⟨_, e⟩ :: es => return (← e.compile) :: (← SqlExprP.compileList es)
 
 end
+
+namespace SqlExpr
+export SqlExprP (isPredicate compile compileList compilePred)
+end SqlExpr
 
 end LeanLinq

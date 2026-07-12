@@ -311,10 +311,12 @@ example : (Query.from' (ts := BasicCtx) customers).card = ⊤ := rfl
 example : (Query.from' (ts := BasicCtx) customers
   |>.where' (fun c => c["Age"] >=. 18)).card = ⊤ := rfl
 example : (Query.from' (ts := BasicCtx) customers |>.limit 5).card = .fin 5 := rfl
--- re-limiting wraps as a derived table (fromQ), whose source card is ⊤
--- (the HOAS-parametricity trade-off): the OUTER limit is what survives
+-- re-limiting wraps as a derived table — and the derived table's card
+-- MULTIPLIES (5 × 1), so the inner limit survives: min (5·1) 10 = 5.
+-- Provably sound: card prices the continuation at the evaluator's own
+-- markers, so the theorem compares the same application on both sides
 example : (Query.from' (ts := BasicCtx) customers |>.limit 5 |>.limit 10).card
-    = .fin 10 := rfl
+    = .fin 5 := rfl
 example : (Query.from' (ts := BasicCtx) customers
   |>.innerJoin orders (fun c o => c["Id"] ==. o["CustomerId"])
       (fun c o => ![c["Id"].as "Id", o["OrderId"].as "OId"])

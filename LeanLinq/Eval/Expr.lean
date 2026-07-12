@@ -137,7 +137,7 @@ mutual
 
 /-- Evaluate an expression over the scopes of the current group
 (singleton = ungrouped row context). -/
-def SqlExpr.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts ⟨t, n⟩ →
+def SqlExprP.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts ⟨t, n⟩ →
     Except EvalError (Nullable t)
   | _, .intC i => pure (some i)
   | _, .longC i => pure (some i)
@@ -150,13 +150,13 @@ def SqlExpr.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts ⟨t, n⟩ →
   | _, .nullC _ => pure none
   | _, .paramE (inst := i) _ => pure (SqlType.toNullable (i.get ee.params))
   | scs, .widen e => e.evalG ee scs
-  | scs, .field ⟨t', _⟩ alias name =>
+  | scs, .field ⟨t', _⟩ row name =>
       match scs.head? with
-      | none => .error (.internal s!"no row in scope for {alias}.{name}")
+      | none => .error (.internal s!"no row in scope for {row.alias}.{name}")
       | some sc =>
-          match sc.get? alias name t' with
+          match sc.get? row.alias name t' with
           | some cell => pure cell
-          | none => .error (.internal s!"unresolved field {alias}.{name}")
+          | none => .error (.internal s!"unresolved field {row.alias}.{name}")
   | scs, .arith op a b => do
       strict2 (← a.evalG ee scs) (← b.evalG ee scs) (t.arithV op)
   | scs, .concat a b => do
@@ -190,7 +190,7 @@ def SqlExpr.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts ⟨t, n⟩ →
           match (← e.evalG ee scs) with
           | none => pure none
           | some v =>
-              let hits := (← SqlExpr.evalGList ee scs es).map fun ⟨u, cell⟩ =>
+              let hits := (← SqlExprP.evalGList ee scs es).map fun ⟨u, cell⟩ =>
                 if h : u = t₀ then
                   (h ▸ cell).map (fun w => t₀.cmpV v w == Ordering.eq)
                 else some false
@@ -258,12 +258,12 @@ def SqlExpr.evalG (ee : EvalEnv ts) : List Scope → SqlExpr ts ⟨t, n⟩ →
           | .month => dateDiffMonths x y
           | .year => dateDiffYears x y))
 
-def SqlExpr.evalGList (ee : EvalEnv ts) (scs : List Scope) :
+def SqlExprP.evalGList (ee : EvalEnv ts) (scs : List Scope) :
     List ((p : SqlType) × SqlExpr ts p) →
     Except EvalError (List ((u : SqlPrim) × Nullable u))
   | [] => pure []
   | ⟨p, e⟩ :: es => do
-      pure (⟨p.ty, ← e.evalG ee scs⟩ :: (← SqlExpr.evalGList ee scs es))
+      pure (⟨p.ty, ← e.evalG ee scs⟩ :: (← SqlExprP.evalGList ee scs es))
 
 end
 
@@ -272,10 +272,18 @@ where `Nullable` computation results become honest cells: a NOT NULL
 column receiving `none` is a loud internal error, never a silent NULL
 (unreachable through the public surface: the flag arithmetic guarantees a
 strict projection evaluates non-NULL). -/
-def Row.evalRow (ee : EvalEnv ts) (scs : List Scope) :
+def RowP.evalRow (ee : EvalEnv ts) (scs : List Scope) :
     {s : Schema} → Row ts s → Except EvalError (Values s)
   | _, .nil => pure .nil
   | _, .cons (name := nm) e r => do
       pure (.cons (← SqlType.ofNullable nm _ (← e.evalG ee scs)) (← r.evalRow ee scs))
+
+namespace SqlExpr
+export SqlExprP (evalG evalGList)
+end SqlExpr
+
+namespace Row
+export RowP (evalRow)
+end Row
 
 end LeanLinq

@@ -124,7 +124,7 @@ enumerate branches. `sc` is the *outer scope*: `[]` for a top-level query,
 the evaluation site's scope for a correlated subquery — inner alias
 numbering continues from `sc.length`, mirroring the compiler's shared
 alias counter, so outer references resolve identically in both walks. -/
-def Query.evalRowsIn : Query ts s → EvalEnv ts → Scope → Except EvalError (List (Values s))
+def QueryP.evalRowsIn : Query ts s → EvalEnv ts → Scope → Except EvalError (List (Values s))
   | .spine (g := .plain) sp, ee, sc => do finishPlain ee (← sp.evalSpine ee sc.length sc)
   | .spine (g := .grouped) sp, ee, sc => do finishGrouped ee (← sp.evalSpine ee sc.length sc)
   | .distinctC q, ee, sc => do
@@ -156,7 +156,7 @@ row, rows read through the node's stored `HasTable` instance, alias
 numbering deterministic along the path), guards filter (`some true` only —
 SQL three-valued WHERE), ORDER BY nodes contribute keys (outermost first:
 chained `orderBy` is primary-then-secondary), the terminal seals the branch. -/
-def SpineQ.evalSpine : SpineQ ts g s → EvalEnv ts → Nat → Scope →
+def SpineQP.evalSpine : SpineQ ts g s → EvalEnv ts → Nat → Scope →
     Except EvalError (List (Branch ts g s))
   | .yield r, _, _, sc => pure [{ scope := sc, orderKeys := [], data := r }]
   | .groupYield ks hv r, _, _, sc => pure [{ scope := sc, orderKeys := [], data := (ks, hv, r) }]
@@ -253,6 +253,38 @@ theorem Except.bind_ok {ε α β : Type _} {x : Except ε α} {f : α → Except
   | error e => simp [Bind.bind, Except.bind] at h
   | ok a => exact ⟨a, rfl, by simpa [Bind.bind, Except.bind] using h⟩
 
+/-- A flatten of uniformly bounded parts is bounded by count × bound. -/
+theorem List.length_flatten_le {K : Nat} :
+    (parts : List (List α)) → (h : ∀ l ∈ parts, l.length ≤ K) →
+    parts.flatten.length ≤ parts.length * K
+  | [], _ => by simp
+  | l :: t, h => by
+      simp only [List.flatten_cons, List.length_append, List.length_cons,
+        Nat.succ_mul]
+      have ht := List.length_flatten_le t (fun x hx => h x (List.mem_cons_of_mem _ hx))
+      have hl := h l (List.mem_cons_self ..)
+      omega
+
+/-- Every element of a successful `Except`-mapM's output is the image of
+a member of the input. -/
+theorem List.mem_of_mapM_except {ε α β : Type _} {f : α → Except ε β} :
+    (l : List α) → {ys : List β} → l.mapM f = .ok ys →
+    ∀ y ∈ ys, ∃ x ∈ l, f x = .ok y
+  | [], ys, h => by
+      simp only [List.mapM_nil, pure, Except.pure, Except.ok.injEq] at h
+      subst h; intro y hy; cases hy
+  | a :: l, ys, h => by
+      rw [List.mapM_cons] at h
+      obtain ⟨b, hfa, h⟩ := Except.bind_ok h
+      obtain ⟨bs, hml, h⟩ := Except.bind_ok h
+      simp only [pure, Except.pure, Except.ok.injEq] at h
+      subst h
+      intro y hy
+      rcases List.mem_cons.mp hy with rfl | hy'
+      · exact ⟨a, List.mem_cons_self .., hfa⟩
+      · obtain ⟨x, hx, hfx⟩ := List.mem_of_mapM_except l hml y hy'
+        exact ⟨x, List.mem_cons_of_mem _ hx, hfx⟩
+
 theorem List.length_mapM_except {ε α β : Type _} {f : α → Except ε β} :
     (l : List α) → {ys : List β} → l.mapM f = .ok ys → ys.length = l.length
   | [], ys, h => by
@@ -330,5 +362,21 @@ theorem finishGrouped_length_le {ts : Ctx} {s : Schema} {ee : EvalEnv ts}
     (h : finishGrouped ee brs = .ok rows) : rows.length ≤ brs.length := by
   unfold finishGrouped at h
   simpa using groupedCore_length_le h
+
+namespace Query
+export QueryP (evalRowsIn)
+end Query
+
+namespace QueryP
+export Query (evalRows run)
+end QueryP
+
+namespace SpineQ
+export SpineQP (evalSpine)
+end SpineQ
+
+namespace ScalarQueryP
+export ScalarQuery (evalCellIn evalCell run)
+end ScalarQueryP
 
 end LeanLinq

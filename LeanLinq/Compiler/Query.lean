@@ -5,7 +5,7 @@ import LeanLinq.Eval.Query
 namespace LeanLinq
 
 /-- Render a projected row as a SELECT list: `expr AS name` per column. -/
-def Row.selectList : {s : Schema} → Row ts s → CompileM (List String)
+def RowP.selectList : {s : Schema} → Row ts s → CompileM (List String)
   | [], .nil => pure []
   | (name, _) :: _, .cons e r => do
       let item ← e.compile
@@ -13,8 +13,12 @@ def Row.selectList : {s : Schema} → Row ts s → CompileM (List String)
       return s!"{item} AS {← quote name}" :: rest
 
 /-- The default projection callback: render the yielded row, no extra tail. -/
-def Row.defaultSelect (r : Row ts s) : CompileM (String × String) := do
+def RowP.defaultSelect (r : Row ts s) : CompileM (String × String) := do
   return (String.intercalate ", " (← r.selectList), "")
+
+namespace Row
+export RowP (selectList defaultSelect)
+end Row
 
 def SetOp.token : SetOp → String
   | .union => "UNION" | .intersect => "INTERSECT" | .except => "EXCEPT"
@@ -64,7 +68,7 @@ structure StmtAcc where
 Purely structural: continuations are applied to a default row (the spine's
 shape does not depend on row values). ORDER BY inside a derived table
 (`fromQ`) does not count — it belongs to the inner statement. -/
-def SpineQ.hasOrder : SpineQ ts g s → Bool
+def SpineQP.hasOrder : SpineQ ts g s → Bool
   | .yield _ => false
   | .groupYield .. => false
   | .guard _ rest => rest.hasOrder
@@ -80,12 +84,20 @@ def SpineQ.hasOrder : SpineQ ts g s → Bool
 
 /-- Does the statement produced for this query end with an ORDER BY clause
 (needed by SQL Server, whose OFFSET/FETCH requires one)? -/
-def Query.hasOrderBy : Query ts s → Bool
+def QueryP.hasOrderBy : Query ts s → Bool
   | .spine sp => sp.hasOrder
   | .distinctC q => q.hasOrderBy
   | .limitC q _ _ => q.hasOrderBy
   | .groupedC sp _ _ ord? _ => sp.hasOrder || ord?.isSome
   | .setOpC .. => false
+
+namespace SpineQ
+export SpineQP (hasOrder)
+end SpineQ
+
+namespace Query
+export QueryP (hasOrderBy)
+end Query
 
 /-- What spine assembly needs from the caller, by terminal shape: *plain*
 terminals take a projection callback — select list plus statement tail —
@@ -100,7 +112,7 @@ mutual
 
 /-- Compile a full query. Boundary clauses (DISTINCT, LIMIT, set ops,
 GROUP BY) decorate the statement produced by the spine underneath. -/
-def Query.compileStmt : Query ts s → CompileM String
+def QueryP.compileStmt : Query ts s → CompileM String
   | .spine (g := .plain) sp => sp.compileSpine {} Row.defaultSelect
   | .spine (g := .grouped) sp => sp.compileSpine {} ()
   -- spines assemble with the DISTINCT flag …
@@ -184,7 +196,7 @@ def Query.compileStmt : Query ts s → CompileM String
 WHERE conjuncts until the terminal, then assemble one flat SELECT. The third
 argument's type follows the terminal (`SelectK`): a projection callback for
 plain spines, nothing for grouped ones. -/
-def SpineQ.compileSpine : SpineQ ts g s → StmtAcc → SelectK ts g s → CompileM String
+def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelectK ts g s → CompileM String
   | .yield r, acc, k => do
       let (sel, tail) ← k r
       let head := if acc.distinct then "SELECT DISTINCT" else "SELECT"
@@ -240,6 +252,15 @@ def SpineQ.compileSpine : SpineQ ts g s → StmtAcc → SelectK ts g s → Compi
 
 end
 
+namespace SpineQ
+export SpineQP (compileSpine)
+end SpineQ
+
+namespace Query
+export QueryP (compileStmt)
+end Query
+
+
 /-- Compile a scalar aggregate query. -/
 def ScalarQuery.compile : ScalarQuery ts c → CompileM String
   | .countQ sp => sp.compileSpine {} fun _ => pure ("COUNT(*)", "")
@@ -257,6 +278,10 @@ def Query.toSql (q : Query ts s) (db : DatabaseType := .sqlite) : CompiledSql :=
 
 def Query.toSqlite (q : Query ts s) : CompiledSql := q.toSql .sqlite
 def Query.toSqlServer (q : Query ts s) : CompiledSql := q.toSql .sqlServer
+
+namespace QueryP
+export Query (toSql toSqlite toSqlServer)
+end QueryP
 def Query.toPostgres (q : Query ts s) : CompiledSql := q.toSql .postgres
 
 /-- Compile a scalar query for the given dialect. -/
@@ -291,5 +316,13 @@ def SqlExpr.notExists (q : Query ts s) : SqlExpr ts .bool :=
 `c["Age"] >. (customers' |>.select … |>.avg).embed`. -/
 def ScalarQuery.embed (sq : ScalarQuery ts ⟨t, n⟩) : SqlExpr ts ⟨t, true⟩ :=
   .scalarSub ⟨sq.compile, fun ee sc => (sq.evalCellIn ee sc).map fun c => [c]⟩
+
+namespace SqlExprP
+export SqlExpr (inQuery notInQuery exists' notExists)
+end SqlExprP
+
+namespace ScalarQueryP
+export ScalarQuery (compile toSql embed)
+end ScalarQueryP
 
 end LeanLinq

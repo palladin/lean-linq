@@ -160,6 +160,16 @@ theorem le_trans : {a b c : Bound} → a ≤ b → b ≤ c → a ≤ c
   | .fin _, .fin _, .fin _, h, h' =>
       decide_eq_true (Nat.le_trans (of_decide_eq_true h) (of_decide_eq_true h'))
 
+theorem mul_le_mul : {a A b B : Bound} → a ≤ A → b ≤ B → a * b ≤ A * B
+  | _, .top, _, _, _, _ => by
+      rename_i a _ _; cases a <;> rename_i b _ <;> cases b <;> rfl
+  | _, .fin _, _, .top, _, _ => by
+      rename_i a _ _ _; cases a <;> rename_i b _ <;> cases b <;> rfl
+  | .top, .fin _, _, _, h, _ => nomatch h
+  | _, .fin _, .top, .fin _, _, h => nomatch h
+  | .fin _, .fin _, .fin _, .fin _, h, h' =>
+      decide_eq_true (Nat.mul_le_mul (of_decide_eq_true h) (of_decide_eq_true h'))
+
 theorem mul_le_mul_left (k : Bound) : {a b : Bound} → a ≤ b → k * a ≤ k * b
   | .fin _, .top, _ => by cases k <;> exact rfl
   | .top, .top, _ => by cases k <;> exact rfl
