@@ -160,6 +160,22 @@ def boundedFanOut : DbFetch TestCtx 4 (List Nat) := fetch! {
   return waves.map (·.length)
 }
 
+/-- The card-priced fan-out smoke: the LIMIT lives in the query,
+`fetchBounded` surfaces it as the refinement, and the loop's budget is
+the query's own structure — grade `1 + 1 * 3 = 4` with no bound
+restated. -/
+def cardFanOut : DbFetch TestCtx 4 (List Nat) := fetch! {
+  let parents ← Query.from' (ts := TestCtx) customers
+    |>.orderBy (fun c => [c["Id"].asc])
+    |>.limit 3
+    |>.fetchBounded
+  let waves ← for p in parents.val do
+    Query.from' (ts := TestCtx) orders
+      |>.where' (fun o => o["CustomerId"] ==. p["Id"])
+      |>.fetch
+  return waves.map (·.length)
+}
+
 /-- The unbounded post-fetch loop smoke: `fetchLimit ⊤` (no LIMIT emitted)
 + the same `for … .val` fusion — grade `1 + 1 * ⊤ = ⊤`, statically refused
 by every finite door and runnable only through the per-driver All doors. -/
@@ -220,6 +236,17 @@ def checkBoundedFanOut (live : List Nat) : IO Bool := do
       if live == mem then pure true
       else do
         IO.eprintln s!"DRIVER MISMATCH boundedFanOut (DbFetch forRows): {live} vs {mem}"
+        pure false
+
+def checkCardFanOut (live : List Nat) : IO Bool := do
+  match cardFanOut.runWith ⟨seedEnv, seedParams, none⟩ with
+  | .error e =>
+      IO.eprintln s!"EVAL ERROR cardFanOut (DbFetch fetchBounded): {repr e}"
+      pure false
+  | .ok mem =>
+      if live == mem then pure true
+      else do
+        IO.eprintln s!"DRIVER MISMATCH cardFanOut (DbFetch fetchBounded): {live} vs {mem}"
         pure false
 
 def checkUnboundedFanOut (live : List Nat) : IO Bool := do

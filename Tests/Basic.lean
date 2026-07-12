@@ -324,3 +324,27 @@ example : ((Query.from' (ts := BasicCtx) customers |>.limit 5).intersect
            (Query.from' (ts := BasicCtx) customers |>.limit 3)).card
     = .fin 3 := rfl
 example : (Query.from' (ts := BasicCtx) customers |>.limit 5).card ≤ .fin 9 := by decide
+
+/-! `fetchBounded` — rows arrive refined by the query's *own* `card`;
+for literal queries the bound in the type is definitional, so the door
+subsumes `fetchLimit` wherever the query already carries its LIMIT, and
+`forRows` composes off the query's structure alone. -/
+example : DbFetch BasicCtx 1 {xs : List (Values CustomersS) // Bound.fin xs.length ≤ Bound.fin 3} :=
+  Query.from' (ts := BasicCtx) customers |>.limit 3 |>.fetchBounded
+
+example : DbFetch BasicCtx 1 {xs : List (Values CustomersS) // Bound.fin xs.length ≤ ⊤} :=
+  Query.from' (ts := BasicCtx) customers |>.fetchBounded
+
+/-- The N+1 idiom priced by the query's own shape: the LIMIT lives in the
+query, `fetchBounded` surfaces it as the refinement, and the loop's
+budget proof is the query's structure — no bound restated anywhere. -/
+def perRowCard : DbFetch BasicCtx 4 (List Nat) := fetch! {
+  let parents ← Query.from' (ts := BasicCtx) customers |>.limit 3 |>.fetchBounded
+  let waves ← for p in parents.val do
+    Query.from' (ts := BasicCtx) orders
+      |>.where' (fun o => o["CustomerId"] ==. p["Id"])
+      |>.fetch
+  return waves.map (·.length)
+}
+
+#guard (perRowCard.exec 4 demoEnv |>.toOption) == some [0, 0]

@@ -46,6 +46,8 @@ def main : IO UInt32 := do
     failures := failures + 1
   unless ← checkBoundedFanOut (← boundedFanOut.execIO conn 4 seedParams) do
     failures := failures + 1
+  unless ← checkCardFanOut (← cardFanOut.execIO conn 4 seedParams) do
+    failures := failures + 1
   unless ← checkUnboundedFanOut (← unboundedFanOut.execIOAll conn seedParams) do
     failures := failures + 1
   conn.close

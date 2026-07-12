@@ -194,6 +194,25 @@ def DbFetch.fetchLimit (q : Query c s) (n : Bound) :
         else ⟨xs.take k, Bound.fin_le_fin (List.length_take_le k xs)⟩
   | .top => (fetch q).map fun xs => ⟨xs, rfl⟩
 
+/-- Fetch **with the query's own cardinality bound** in the type: rows
+refined by `.fin xs.length ≤ q.card`. For an unbounded query the
+refinement is `≤ ⊤` — vacuously true, and the check below is
+definitionally the identity; under a `limit` the bound is real and
+`forRows` composes off it directly (the refinement's `n` is `q.card`,
+whatever shape it takes). Like `fetchLimit`, the engine's answer is only
+*checked*: rows pass through untouched, and the clamp arm exists solely
+for an engine that disagrees with the query's own structure — the
+soundness theorem (`card` never underestimates the reference semantics)
+is what makes the check principled rather than defensive. -/
+def DbFetch.fetchBounded (q : Query c s) :
+    DbFetch c 1 {xs : List (Values s) // .fin xs.length ≤ q.card} :=
+  (fetch q).map fun xs =>
+    match q.card with
+    | .top => ⟨xs, Bound.le_top _⟩
+    | .fin k =>
+        if hl : xs.length ≤ k then ⟨xs, Bound.fin_le_fin hl⟩
+        else ⟨xs.take k, Bound.fin_le_fin (List.length_take_le k xs)⟩
+
 /-! Pipeline-flowing spellings: a query ends in `|>.fetch` /
 `|>.fetchLimit n` instead of being wrapped in a prefix call — same
 constructors, dot-notation on the query. -/
@@ -212,6 +231,12 @@ def ScalarQuery.fetch (sc : ScalarQuery c ⟨t, n⟩) : DbFetch c 1 (Nullable t)
 def Query.fetchLimit (q : Query c s) (n : Bound) :
     DbFetch c 1 {xs : List (Values s) // .fin xs.length ≤ n} :=
   DbFetch.fetchLimit q n
+
+/-- `q.fetchBounded` — the fetch refined by the query's own `card`,
+flowing: `Query.from' … |>.limit 5 |>.fetchBounded`. -/
+def Query.fetchBounded (q : Query c s) :
+    DbFetch c 1 {xs : List (Values s) // .fin xs.length ≤ q.card} :=
+  DbFetch.fetchBounded q
 
 /-! ## `fetch!` — do-notation for the graded monad
 
