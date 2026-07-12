@@ -370,3 +370,31 @@ example : DbFetch BasicCtx 1
       |>.distinct |>.fetchInv).exec 1 demoEnv) with
   | .ok rows => Values.nodupB rows.val && rows.val.length > 0
   | .error _ => false
+
+/-! The M3 payoff: a WHERE fact cashes as a budget proof. Parents are
+fetched with `Age ≤ 30` checked onto each row (`fetchLimitWhere`), the
+per-parent fan-out does exactly `Age` rounds, and `weaken` restates
+that value-dependent grade at the uniform cap — paying with the row's
+own fact. The evidence chain: SQL WHERE → checked subtype → `weaken`'s
+inequality → the door's `by decide`. -/
+def ageOf (v : Values CustomersS) : Int := v["Age"]
+
+def whereBudgeted (n : Nat) : DbFetch BasicCtx (1 + 30 * n) (List Nat) := fetch! {
+  let parents ← Query.from' (ts := BasicCtx) customers
+    |>.where' (fun c => c["Age"] <=. 30)
+    |>.orderBy (fun c => [c["Id"].asc])
+    |>.fetchLimitWhere n (fun v => decide (ageOf v ≤ 30))
+  let waves ← for p in parents.val do
+    (DbFetch.forAll (List.range (ageOf p.val).toNat) (fun _ =>
+        .fetch (Query.from' (ts := BasicCtx) orders))).weaken 30
+      (by
+        have hfact : ageOf p.val ≤ 30 := of_decide_eq_true p.property
+        have hn : (ageOf p.val).toNat ≤ 30 := by omega
+        simp only [Bound.one_mul, List.length_range]
+        exact Bound.fin_le_fin hn)
+  return waves.map (·.length)
+}
+
+-- ages 30 and 17 pass the filter: 30 + 17 inner rounds under budget 1 + 30·2
+#guard ((whereBudgeted 2).exec 61 demoEnv |>.toOption)
+    == some [30, 17]

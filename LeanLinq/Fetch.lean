@@ -262,6 +262,39 @@ def Query.fetchInv (q : Query c s) :
     DbFetch c 1 {xs : List (Values s) // q.RowInv xs} :=
   DbFetch.fetchInv q
 
+/-- Weakening: a program bounded by `m` is bounded by any `n ≥ m` —
+derived, not primitive (`bindD` over `pure ()` with the constant
+family). The door for value-dependent budgets: an inner loop whose
+exact grade mentions a fetched value restates to the uniform bound the
+enclosing combinator needs, paying with the inequality — which is
+where a WHERE-fact (`fetchLimitWhere`) or a refinement gets cashed. -/
+def DbFetch.weaken (x : DbFetch c m α) (n : Bound)
+    (h : m ≤ n := by decide) : DbFetch c n α :=
+  ((DbFetch.pure ()).bindD (g := fun _ => m) (fun _ => x) n (fun _ => h)).withBound
+
+/-- Fetch at most `n` rows, **each carrying a checked fact**: the rows
+arrive as `{v // P v = true}` subtypes inside a length-refined list, so
+a per-row loop's body receives the fact with the row — the WHERE
+clause's promise, cashed as evidence (state `P` over the same constant
+the SQL guard uses). Rows failing the check are filtered out — the
+identity whenever the query's own WHERE guarantees `P`. -/
+def DbFetch.fetchLimitWhere (q : Query c s) (n : Bound)
+    (P : Values s → Bool) :
+    DbFetch c 1 {xs : List {v : Values s // P v = true} //
+      .fin xs.length ≤ n} :=
+  (DbFetch.fetchLimit q n).map fun xs =>
+    ⟨(xs.val.filter P).pmap Subtype.mk
+        (fun v hv => (List.mem_filter.mp hv).2),
+     by
+      refine Bound.le_trans (Bound.fin_le_fin ?_) xs.property
+      simpa using List.length_filter_le _ _⟩
+
+/-- `q.fetchLimitWhere n P` — flowing spelling. -/
+def Query.fetchLimitWhere (q : Query c s) (n : Bound) (P : Values s → Bool) :
+    DbFetch c 1 {xs : List {v : Values s // P v = true} //
+      .fin xs.length ≤ n} :=
+  DbFetch.fetchLimitWhere q n P
+
 /-! ## `fetch!` — do-notation for the graded monad
 
 `DbFetch` cannot be a `Monad` instance: its bind *changes the index*
