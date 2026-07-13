@@ -215,7 +215,7 @@ private def Sqlite.interp (conn : Sqlite.Conn) (ps : ParamEnv c.params) :
 def DbFetchP.execIO {P : Post α} (f : DbFetchP c r α P) (conn : Sqlite.Conn) (budget : Nat)
     (ps : ParamEnv c.params := by exact .nil)
     (_h : r ≤ Grade.nat budget := by
-      try simp only [Grade.ofNat_eq_nat, Grade.ofBound_fin, Grade.nat_add,
+      try simp only [Grade.ofNat_eq_nat, Grade.nat_add,
         Grade.nat_mul, Grade.nat_one_mul, Grade.mul_nat_one,
         Grade.nat_zero_add, Grade.add_nat_zero]
       first
@@ -225,7 +225,7 @@ def DbFetchP.execIO {P : Post α} (f : DbFetchP c r α P) (conn : Sqlite.Conn) (
   Sqlite.interp conn ps f
 
 /-- The unbounded door over the wire: no budget, obligation-free — the
-explicit opt-out for ⊤ programs, same as the in-memory `execAll`. -/
+explicit opt-out, same as the in-memory `execAll`. -/
 def DbFetchP.execIOAll {P : Post α} (f : DbFetchP c r α P) (conn : Sqlite.Conn)
     (ps : ParamEnv c.params := by exact .nil) : IO α :=
   Sqlite.interp conn ps f

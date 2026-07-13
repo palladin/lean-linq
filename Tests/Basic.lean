@@ -267,9 +267,10 @@ example (o : Row BasicCtx OrdersS.asNull) : SqlExpr BasicCtx ⟨.int, true⟩ :=
   |>.value "Id" ((SqlExpr.int 1).anyNull))
 -- under-budgeting a closed loop is caught the same way: grade 2 > 1
 #check_failure ((perRowAll [1, 2]).exec 1 demoEnv)
--- an *unbounded* fetch gives the loop no refinement to fuse with — no
--- `.val`, no bound, and the raw loop's grade would mention the fetched
--- value, which `bind` cannot type
+-- the `.val` spelling demands a refinement: a plain fetch has none, so
+-- the `.val` fusion cannot type — drop the `.val` and the plain loop is
+-- the legal, contract-priced spelling (`perRowFetched` above); keep it
+-- and the bound must come from `fetchLimit`
 #check_failure (fetch! {
   let parents ← Query.from' (ts := BasicCtx) customers |>.fetch
   let waves ← for p in parents.val do
@@ -307,8 +308,8 @@ clamps to month-end and preserves the time of day. -/
 #guard LeanLinq.dateAddDays "2023-06-10 14:30:00" 1 == "2023-06-11 14:30:00"
 
 /-! `bindD'` discharges its budget automatically for the documented
-shapes: closed facts by `decide`, ⊤ budgets by `le_top`, and
-`fetchLimit`-refined loops through the refinement itself. -/
+shapes: closed facts silently, and `fetchLimit`-refined loops through
+the refinement itself. -/
 example : DbFetch BasicCtx (1 + 2) (List (Values OrdersS)) :=
   DbFetchP.bindD' (.fetch (Query.from' (ts := BasicCtx) orders))
     (fun _ => DbFetchP.map id (.fetch (Query.from' (ts := BasicCtx) orders))) 2
@@ -320,55 +321,45 @@ example (n : Nat) : DbFetch BasicCtx (1 + 1 * n) (List (List (Values OrdersS))) 
       (fun _ => .fetch (Query.from' (ts := BasicCtx) orders)))
     (1 * n)
 
-example : DbFetch BasicCtx (1 + ⊤) (List (List (Values OrdersS))) :=
-  DbFetchP.bindD'
-    (.fetch (Query.from' (ts := BasicCtx) orders))
-    (fun rows => .forAll rows
-      (fun _ => .fetch (Query.from' (ts := BasicCtx) orders)))
-    ⊤
-
-/-! `Query.card` — the row-count bound is a fact of the query value,
-reducing definitionally on literal queries so `decide`/`rfl` consume it
-in types, exactly like round-trip grades. Table sources are ⊤; the
-bound concentrates at `limit`; joins multiply; unions add. -/
-example : (Query.from' (ts := BasicCtx) customers).card = ⊤ := rfl
-example : (Query.from' (ts := BasicCtx) customers
-  |>.where' (fun c => c["Age"] >=. 18)).card = ⊤ := rfl
-example : (Query.from' (ts := BasicCtx) customers |>.limit 5).card = .fin 5 := rfl
--- re-limiting wraps as a derived table — and the derived table's card
--- MULTIPLIES (5 × 1), so the inner limit survives: min (5·1) 10 = 5.
--- Provably sound: card prices the continuation at the evaluator's own
--- markers, so the theorem compares the same application on both sides
-example : (Query.from' (ts := BasicCtx) customers |>.limit 5 |>.limit 10).card
-    = .fin 5 := rfl
-example : (Query.from' (ts := BasicCtx) customers
+/-! `Query.gcard` — the row bound is a fact of the query value, symbolic
+in table sizes, reducing definitionally on literal queries so `rfl`
+consumes it in types. A source is its table's own symbol; the bound
+concentrates at `limit` (a real `min` when the inner bound is closed);
+joins multiply; unions add; `intersect` prefers a closed side. -/
+example : Query.gcard (Query.from' (ts := BasicCtx) customers)
+    = Grade.tbl "Customers" := by rfl
+example : Query.gcard (Query.from' (ts := BasicCtx) customers
+  |>.where' (fun c => c["Age"] >=. 18)) = Grade.tbl "Customers" := by rfl
+example : Query.gcard (Query.from' (ts := BasicCtx) customers |>.limit 5)
+    = 5 := rfl
+-- re-limiting: the inner bound is closed, so the limit arm takes a real
+-- min — `(q.limit 5).limit 10` prices as 5, not 10
+example : Query.gcard (Query.from' (ts := BasicCtx) customers |>.limit 5 |>.limit 10)
+    = 5 := rfl
+example : Query.gcard (Query.from' (ts := BasicCtx) customers
   |>.innerJoin orders (fun c o => c["Id"] ==. o["CustomerId"])
       (fun c o => ![c["Id"].as "Id", o["OrderId"].as "OId"])
-  |>.limit 7).card = .fin 7 := rfl
-example : ((Query.from' (ts := BasicCtx) customers |>.limit 5).union
-           (Query.from' (ts := BasicCtx) customers |>.limit 3)).card
-    = .fin 8 := rfl
-example : ((Query.from' (ts := BasicCtx) customers |>.limit 5).intersect
-           (Query.from' (ts := BasicCtx) customers |>.limit 3)).card
-    = .fin 5 := rfl
-example : (Query.from' (ts := BasicCtx) customers |>.limit 5).card ≤ .fin 9 := by decide
+  |>.limit 7) = 7 := rfl
+example : Query.gcard ((Query.from' (ts := BasicCtx) customers |>.limit 5).union
+           (Query.from' (ts := BasicCtx) customers |>.limit 3))
+    = 8 := rfl
+example : Query.gcard ((Query.from' (ts := BasicCtx) customers |>.limit 5).intersect
+           (Query.from' (ts := BasicCtx) customers |>.limit 3))
+    = 3 := rfl
+-- a symbolic ∩ a closed bound: the closed side wins
+example : Query.gcard ((Query.from' (ts := BasicCtx) customers).intersect
+           (Query.from' (ts := BasicCtx) customers |>.limit 3))
+    = 3 := rfl
+example : Query.gcard (Query.from' (ts := BasicCtx) customers |>.limit 5)
+    ≤ Grade.nat 9 := Grade.nat_le_nat (by omega)
 
-/-! `fetchBounded` — rows arrive refined by the query's *own* `card`;
-for literal queries the bound in the type is definitional, so the door
-subsumes `fetchLimit` wherever the query already carries its LIMIT, and
-`forRows` composes off the query's structure alone. -/
-example : DbFetch BasicCtx 1 {xs : List (Values CustomersS) // Bound.fin xs.length ≤ Bound.fin 3} :=
-  Query.from' (ts := BasicCtx) customers |>.limit 3 |>.fetchBounded
-
-example : DbFetch BasicCtx 1 {xs : List (Values CustomersS) // Bound.fin xs.length ≤ ⊤} :=
-  Query.from' (ts := BasicCtx) customers |>.fetchBounded
-
-/-- The N+1 idiom priced by the query's own shape: the LIMIT lives in the
-query, `fetchBounded` surfaces it as the refinement, and the loop's
-budget proof is the query's structure — no bound restated anywhere. -/
+/-- The N+1 idiom priced by the query's own shape: the LIMIT lives in
+the query and the loop's budget is the fetch's contract — the closed
+`gcard` of a limited query — no bound restated anywhere, no refinement
+either: plain rows, plain `for`. -/
 def perRowCard : DbFetch BasicCtx 4 (List Nat) := fetch! {
-  let parents ← Query.from' (ts := BasicCtx) customers |>.limit 3 |>.fetchBounded
-  let waves ← for p in parents.val do
+  let parents ← Query.from' (ts := BasicCtx) customers |>.limit 3 |>.fetch
+  let waves ← for p in parents do
     Query.from' (ts := BasicCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. p["Id"])
       |>.fetch

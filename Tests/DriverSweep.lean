@@ -160,30 +160,31 @@ def boundedFanOut : DbFetch TestCtx 4 (List Nat) := fetch! {
   return waves.map (·.length)
 }
 
-/-- The card-priced fan-out smoke: the LIMIT lives in the query,
-`fetchBounded` surfaces it as the refinement, and the loop's budget is
-the query's own structure — grade `1 + 1 * 3 = 4` with no bound
-restated. -/
+/-- The contract-priced fan-out smoke: the LIMIT lives in the query, and
+the loop's budget is the fetch's own contract — the closed `gcard` of a
+limited query. Plain rows, plain `for`, grade `1 + 1 * 3 = 4` with no
+bound restated. -/
 def cardFanOut : DbFetch TestCtx 4 (List Nat) := fetch! {
   let parents ← Query.from' (ts := TestCtx) customers
     |>.orderBy (fun c => [c["Id"].asc])
     |>.limit 3
-    |>.fetchBounded
-  let waves ← for p in parents.val do
+    |>.fetch
+  let waves ← for p in parents do
     Query.from' (ts := TestCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. p["Id"])
       |>.fetch
   return waves.map (·.length)
 }
 
-/-- The unbounded post-fetch loop smoke: `fetchLimit ⊤` (no LIMIT emitted)
-+ the same `for … .val` fusion — grade `1 + 1 * ⊤ = ⊤`, statically refused
-by every finite door and runnable only through the per-driver All doors. -/
-def unboundedFanOut : DbFetch TestCtx ⊤ (List Nat) := fetch! {
+/-- The whole-table fan-out smoke: no LIMIT anywhere, and the price is
+symbolic — `|customers| + 1`. No closed budget dominates a table symbol,
+so every budgeted door refuses it statically; the per-driver All doors
+run it unchecked. -/
+def wholeTableFanOut : DbFetch TestCtx (customers.size + 1) (List Nat) := fetch! {
   let parents ← Query.from' (ts := TestCtx) customers
     |>.orderBy (fun c => [c["Id"].asc])
-    |>.fetchLimit ⊤
-  let waves ← for p in parents.val do
+    |>.fetch
+  let waves ← for p in parents do
     Query.from' (ts := TestCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. p["Id"])
       |>.fetch
@@ -241,23 +242,23 @@ def checkBoundedFanOut (live : List Nat) : IO Bool := do
 def checkCardFanOut (live : List Nat) : IO Bool := do
   match cardFanOut.runWith ⟨seedEnv, seedParams, none⟩ with
   | .error e =>
-      IO.eprintln s!"EVAL ERROR cardFanOut (DbFetch fetchBounded): {repr e}"
+      IO.eprintln s!"EVAL ERROR cardFanOut (DbFetch contract-priced): {repr e}"
       pure false
   | .ok mem =>
       if live == mem then pure true
       else do
-        IO.eprintln s!"DRIVER MISMATCH cardFanOut (DbFetch fetchBounded): {live} vs {mem}"
+        IO.eprintln s!"DRIVER MISMATCH cardFanOut (DbFetch contract-priced): {live} vs {mem}"
         pure false
 
-def checkUnboundedFanOut (live : List Nat) : IO Bool := do
-  match unboundedFanOut.execAll seedEnv seedParams with
+def checkWholeTableFanOut (live : List Nat) : IO Bool := do
+  match wholeTableFanOut.execAll seedEnv seedParams with
   | .error e =>
-      IO.eprintln s!"EVAL ERROR unboundedFanOut (DbFetch ⊤): {repr e}"
+      IO.eprintln s!"EVAL ERROR wholeTableFanOut (DbFetch symbolic): {repr e}"
       pure false
   | .ok mem =>
       if live == mem then pure true
       else do
-        IO.eprintln s!"DRIVER MISMATCH unboundedFanOut (DbFetch ⊤): {live} vs {mem}"
+        IO.eprintln s!"DRIVER MISMATCH wholeTableFanOut (DbFetch symbolic): {live} vs {mem}"
         pure false
 
 end TQ

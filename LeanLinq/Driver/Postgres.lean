@@ -329,7 +329,7 @@ sufficient) round fuel. -/
 def DbFetchP.execPg {P : Post α} (f : DbFetchP c r α P) (conn : Pg.Conn) (budget : Nat)
     (ps : ParamEnv c.params := by exact .nil)
     (_h : r ≤ Grade.nat budget := by
-      try simp only [Grade.ofNat_eq_nat, Grade.ofBound_fin, Grade.nat_add,
+      try simp only [Grade.ofNat_eq_nat, Grade.nat_add,
         Grade.nat_mul, Grade.nat_one_mul, Grade.mul_nat_one,
         Grade.nat_zero_add, Grade.add_nat_zero]
       first
@@ -348,10 +348,10 @@ private def Pg.interp (conn : Pg.Conn) (ps : ParamEnv c.params) :
   | _, _, _, .forAll xs f => xs.mapM fun a => interp conn ps (f a)
   | _, _, _, .bindD x f _ _ => do interp conn ps (f (← interp conn ps x))
 
-/-- The unbounded door over the wire: no budget, obligation-free. This
+/-- The unchecked door over the wire: no budget, no obligation. This
 door interprets **sequentially** (one statement per round): the pipeline
-stage machine pre-allocates its rounds from a static bound, and a ⊤
-program declines to name one. Pipelining is what the finite door buys. -/
+stage machine pre-allocates its rounds from a static bound, which this
+door declines to name. Pipelining is what the budgeted door buys. -/
 def DbFetchP.execPgAll {P : Post α} (f : DbFetchP c r α P) (conn : Pg.Conn)
     (ps : ParamEnv c.params := by exact .nil) : IO α :=
   Pg.interp conn ps f

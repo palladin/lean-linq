@@ -1,14 +1,15 @@
-import LeanLinq.Core.Bound
-
 /-! # `Grade` — round budgets, symbolic in table sizes
 
-The round-trip currency of `DbFetch`, upgraded from ℕ∞ to **max-plus
-polynomials over table names**: a grade is ⊤ or the maximum of a
-canonical set of polynomials with `Nat` coefficients in symbols
-`|customers|`, `|orders|`, …. Closed grades (`2`, `5 + 3`) are the
-constant polynomials and compute exactly as `Bound` does; symbolic
-grades price programs in the database's own terms — `|customers| + 1`
-is "one round per customer, plus one".
+The round-trip currency of `DbFetch`: **max-plus polynomials over table
+names** — a grade is the maximum of a canonical set of polynomials with
+`Nat` coefficients in symbols `|customers|`, `|orders|`, …. Closed
+grades (`2`, `5 + 3`) are the constant polynomials; symbolic grades
+price programs in the database's own terms — `|customers| + 1` is "one
+round per customer, plus one".
+
+There is no ⊤ and no ℕ∞: the unknown is not "unbounded", it is *a
+symbol*, and evaluation at a size valuation `σ : String → Nat` returns
+a plain `Nat`. What ⊤ used to shrug at, a polynomial prices.
 
 **Canonical forms are the whole trick.** Every operation normalizes
 (insertion-sorted monomials and poly-sets, combined coefficients), so
@@ -20,14 +21,10 @@ insertion-based (structural recursion), so the kernel reduces it and
 `decide` stays available inside types.
 
 The order is **semantic**: `a ≤ b` iff `a` evaluates under `b` at every
-size valuation. Monotonicity lemmas are pointwise `Bound`/`Nat` facts —
-free — and the doors discharge closed obligations through
+size valuation — a pointwise `Nat` fact, so monotonicity lemmas are
+free and the doors discharge closed obligations through
 `Grade.nat_le_nat` + `omega`. A symbolic grade at a closed door simply
-fails to prove — the static refusal, exactly as ⊤ behaves.
-
-`Bound` remains the **row** lattice (closed, matchable — `fetchLimit`,
-`fetchBounded`, the refinements); `Grade` is the **round** lattice.
-`ofBound` embeds rows into rounds where loops are priced (`forRows`). -/
+has no proof — the static refusal. -/
 
 namespace LeanLinq
 
@@ -102,11 +99,10 @@ def eval (σ : String → Nat) (p : GPoly) : Nat :=
 
 end GPoly
 
-/-- A round grade: ⊤, or the **max** of a canonical set of polynomials
+/-- A round grade: the **max** of a canonical set of polynomials
 (max-plus semantics — `+`/`*` distribute over the set pairwise). -/
 inductive Grade where
   | polys (ps : List GPoly)
-  | top
   deriving DecidableEq, Repr
 
 namespace Grade
@@ -150,14 +146,14 @@ instance : OfNat Grade n := ⟨nat n⟩
 reads as before. -/
 instance : Coe Nat Grade := ⟨nat⟩
 
-/-- The row lattice embeds into the round lattice. -/
-@[reducible] def ofBound : Bound → Grade
-  | .fin n => nat n
-  | .top => .top
+/-- The closed reading, when there is one: a canonical closed grade is
+exactly a single constant polynomial. This is what lets `gcard`'s
+`limit` arm take a real `min` — min of closed grades is closed. -/
+@[reducible] def closed? : Grade → Option Nat
+  | .polys [⟨k, []⟩] => some k
+  | _ => none
 
 def add : Grade → Grade → Grade
-  | .top, _ => .top
-  | _, .top => .top
   -- closed grades fold structurally — variable constants included, so a
   -- recursive definition's index (`Grade.nat n + 1`) reduces definitionally
   | .polys [⟨a, []⟩], .polys [⟨b, []⟩] => .polys [⟨a + b, []⟩]
@@ -168,79 +164,47 @@ def add : Grade → Grade → Grade
       else .polys (mkPolys (ps.flatMap fun p => qs.map fun q => p.add q))
 
 def mul : Grade → Grade → Grade
-  | .top, _ => .top
-  | _, .top => .top
   | .polys ps, .polys qs =>
       if qs = [⟨1, []⟩] then .polys ps
       else if ps = [⟨1, []⟩] then .polys qs
       else .polys (mkPolys (ps.flatMap fun p => qs.map fun q => p.mul q))
 
 def gmax : Grade → Grade → Grade
-  | .top, _ => .top
-  | _, .top => .top
   | .polys ps, .polys qs => .polys (mkPolys (ps ++ qs))
 
-instance : HasTop Grade := ⟨.top⟩
 instance : Add Grade := ⟨add⟩
 instance : Mul Grade := ⟨mul⟩
 instance : Max Grade := ⟨gmax⟩
 
 /-- Collapse against known sizes — the reading the model interpreter
-has (`TableEnv.sizes`). -/
-def evalB (σ : String → Nat) : Grade → Bound
-  | .polys ps => .fin (ps.foldl (fun acc p => Nat.max acc (p.eval σ)) 0)
-  | .top => .top
-
-/-- Collapse against nothing: any symbol makes the grade ⊤ — recovering
-the conservative closed reading (`card`'s ⊤ for bare sources). -/
-def forget : Grade → Bound
-  | .top => .top
-  | .polys ps =>
-      if ps.all fun p => p.monos.isEmpty then
-        .fin (ps.foldl (fun acc p => Nat.max acc p.const) 0)
-      else .top
+has (`TableEnv.sizes`). A plain `Nat`: every grade is finite at every
+valuation. -/
+def eval (σ : String → Nat) : Grade → Nat
+  | .polys ps => ps.foldl (fun acc p => Nat.max acc (p.eval σ)) 0
 
 /-- The order is semantic: dominated at **every** size valuation. Closed
 comparisons discharge via `nat_le_nat` + `omega`; a symbolic grade at a
 closed budget simply has no proof — the static refusal. -/
-def Le (a b : Grade) : Prop := ∀ σ : String → Nat, a.evalB σ ≤ b.evalB σ
+def Le (a b : Grade) : Prop := ∀ σ : String → Nat, a.eval σ ≤ b.eval σ
 
 instance : LE Grade := ⟨Le⟩
 
-theorem le_refl (a : Grade) : a ≤ a := fun _ => Bound.le_refl _
+theorem le_refl (a : Grade) : a ≤ a := fun _ => Nat.le_refl _
 
 theorem le_trans {a b c : Grade} (h₁ : a ≤ b) (h₂ : b ≤ c) : a ≤ c :=
-  fun σ => Bound.le_trans (h₁ σ) (h₂ σ)
+  fun σ => Nat.le_trans (h₁ σ) (h₂ σ)
 
-theorem le_top (a : Grade) : a ≤ .top := fun _ => Bound.le_top _
-
-@[simp] theorem evalB_nat (σ : String → Nat) (n : Nat) :
-    (nat n).evalB σ = .fin n := by
-  simp [evalB, GPoly.eval, GPoly.sumEval, Nat.zero_max]
+@[simp] theorem eval_nat (σ : String → Nat) (n : Nat) :
+    (nat n).eval σ = n := by
+  simp [eval, GPoly.eval, GPoly.sumEval, Nat.zero_max]
 
 theorem nat_le_nat {a b : Nat} (h : a ≤ b) : nat a ≤ nat b := by
   intro σ
-  simpa [evalB_nat] using Bound.fin_le_fin h
-
-@[simp] theorem evalB_ofBound (σ : String → Nat) (b : Bound) :
-    (ofBound b).evalB σ = b := by
-  cases b <;> simp [ofBound, evalB, GPoly.eval, GPoly.sumEval, Nat.zero_max]
-
-/-- Row evidence transports into round evidence. -/
-theorem ofBound_le {a b : Bound} (h : a ≤ b) : ofBound a ≤ ofBound b := by
-  intro σ
-  simpa [evalB_ofBound] using h
-
-/-- `.fin`-flavored evidence transports directly (the `forRows` shape). -/
-theorem nat_le_ofBound {k : Nat} {b : Bound} (h : Bound.fin k ≤ b) :
-    nat k ≤ ofBound b := by
-  intro σ
-  simpa [evalB_nat, evalB_ofBound] using h
+  simpa [eval_nat] using h
 
 /-- `g + 0 = g` — the `▸`-cast fuel for `DbFetch.map`, by shape cases
 (the closed-fold arm splits the reduction paths). -/
 theorem add_zero : (g : Grade) → g + (0 : Grade) = g
-  | .top => rfl
   | .polys [] => rfl
   | .polys [⟨_, []⟩] => rfl
   | .polys [⟨_, _ :: _⟩] => rfl
@@ -248,7 +212,6 @@ theorem add_zero : (g : Grade) → g + (0 : Grade) = g
   | .polys (⟨_, _ :: _⟩ :: _ :: _) => rfl
 
 theorem zero_add : (g : Grade) → (0 : Grade) + g = g
-  | .top => rfl
   | .polys [] => rfl
   | .polys [⟨b, []⟩] => by
       show Grade.polys [⟨0 + b, []⟩] = _
@@ -261,12 +224,10 @@ theorem zero_add : (g : Grade) → (0 : Grade) + g = g
       simp [HAdd.hAdd, Add.add, Grade.add]
 
 theorem mul_one : (g : Grade) → g * (1 : Grade) = g
-  | .top => rfl
   | .polys _ => rfl
 
 theorem one_mul (g : Grade) : (1 : Grade) * g = g := by
   cases g with
-  | top => rfl
   | polys qs =>
       show Grade.mul (.polys [⟨1, []⟩]) (.polys qs) = .polys qs
       by_cases h : qs = [⟨1, []⟩] <;> simp [Grade.mul, h]
@@ -276,10 +237,6 @@ theorem nat_add (a b : Nat) : nat a + nat b = nat (a + b) := rfl
 
 @[simp] theorem ofNat_eq_nat (n : Nat) :
     (no_index (OfNat.ofNat n) : Grade) = nat n := rfl
-
-@[simp] theorem ofBound_fin (k : Nat) : ofBound (.fin k) = nat k := rfl
-
-@[simp] theorem ofBound_top : ofBound .top = .top := rfl
 
 /-- The unit laws, `nat`-spelled (what the goal looks like after
 `ofNat_eq_nat` normalizes literals) — delegating: the spellings are
@@ -291,14 +248,6 @@ theorem nat_one_mul (g : Grade) : nat 1 * g = g := one_mul g
 theorem add_nat_zero (g : Grade) : g + nat 0 = g := add_zero g
 
 theorem nat_zero_add (g : Grade) : nat 0 + g = g := zero_add g
-
-/-- Closed-plus-embedded commutation, by cases on the row bound — the
-`fetch!` ladder's bridge for `(n : Bound)`-parametric grades. -/
-theorem nat_add_ofBound (a : Nat) (n : Bound) :
-    nat a + ofBound n = ofBound n + nat a := by
-  cases n with
-  | top => rfl
-  | fin k => rw [ofBound, nat_add, nat_add, Nat.add_comm]
 
 theorem nat_mul (a b : Nat) : nat a * nat b = nat (a * b) := by
   show Grade.mul _ _ = _
@@ -316,11 +265,12 @@ theorem nat_mul (a b : Nat) : nat a * nat b = nat (a * b) := by
 
 /-! ## The evaluation homomorphism — `mul_le_mul_left`'s ledger
 
-`bindD` + subtype proofs is the composition story, and the loop's
-evidence transports through multiplication: `k * nat len ≤ k * ofBound n`
-from the refinement. Monotonicity of `*` under the semantic order needs
-evaluation to commute with the smart multiplication — through `normM`,
-`mkPolys`, and the pairwise max-set product. Proved bottom-up. -/
+`bindD` + σ-conditional evidence is the composition story, and the
+loop's evidence transports through multiplication:
+`k * nat len ≤ k * gcard` from `fetch`'s contract. Monotonicity of `*`
+under the semantic order needs evaluation to commute with the smart
+multiplication — through `normM`, `mkPolys`, and the pairwise max-set
+product. Proved bottom-up, all in `Nat`. -/
 
 section EvalHom
 
@@ -410,7 +360,7 @@ theorem sumEval_cross (ps qs : List (Nat × Mono)) :
       rw [List.flatMap_cons, sumEval_append, ih, sumEval_row, GPoly.sumEval,
         Nat.add_mul]
 
-theorem eval_mul (p q : GPoly) :
+theorem evalP_mul (p q : GPoly) :
     (p.mul q).eval σ = p.eval σ * q.eval σ := by
   rw [GPoly.mul, GPoly.eval, GPoly.eval, GPoly.eval]
   simp only
@@ -432,9 +382,9 @@ theorem foldl_maxE (ps : List GPoly) (i : Nat) :
       rw [List.foldl_cons, ih, maxE]
       exact Nat.max_assoc ..
 
-theorem evalB_polys (ps : List GPoly) :
-    (Grade.polys ps).evalB σ = .fin (maxE σ ps) := by
-  rw [evalB, foldl_maxE]
+theorem eval_polys (ps : List GPoly) :
+    (Grade.polys ps).eval σ = maxE σ ps := by
+  rw [eval, foldl_maxE]
   simp
 
 theorem maxE_insertPoly (p : GPoly) (l : List GPoly) :
@@ -483,7 +433,7 @@ theorem maxE_row (p : GPoly) (qs : List GPoly) :
   induction qs with
   | nil => simp [maxE]
   | cons q qs ih =>
-      rw [List.map_cons, maxE, ih, eval_mul, maxE, nat_mul_max]
+      rw [List.map_cons, maxE, ih, evalP_mul, maxE, nat_mul_max]
 
 theorem maxE_cross (ps qs : List GPoly) :
     maxE σ (ps.flatMap fun p => qs.map fun q => p.mul q) =
@@ -493,45 +443,38 @@ theorem maxE_cross (ps qs : List GPoly) :
   | cons p ps ih =>
       rw [List.flatMap_cons, maxE_append, ih, maxE_row, maxE, nat_max_mul]
 
-theorem evalB_mul_polys (ps qs : List GPoly) :
-    (Grade.mul (.polys ps) (.polys qs)).evalB σ =
-      .fin (maxE σ ps * maxE σ qs) := by
+theorem eval_mul_polys (ps qs : List GPoly) :
+    (Grade.mul (.polys ps) (.polys qs)).eval σ = maxE σ ps * maxE σ qs := by
   show (if qs = [⟨1, []⟩] then Grade.polys ps
     else if ps = [⟨1, []⟩] then Grade.polys qs
     else Grade.polys (mkPolys (ps.flatMap fun p =>
-      qs.map fun q => p.mul q))).evalB σ = _
+      qs.map fun q => p.mul q))).eval σ = _
   split
   · next h =>
       subst h
-      rw [evalB_polys]
+      rw [eval_polys]
       simp [maxE, GPoly.eval, GPoly.sumEval]
   · split
     · next hps =>
-        rw [hps, evalB_polys]
+        rw [hps, eval_polys]
         simp [maxE, GPoly.eval, GPoly.sumEval]
-    · rw [evalB_polys, maxE_mkPolys, maxE_cross]
+    · rw [eval_polys, maxE_mkPolys, maxE_cross]
 
 /-- Evaluation commutes with the smart multiplication. -/
-theorem evalB_mul : (a b : Grade) → (a * b).evalB σ = a.evalB σ * b.evalB σ
-  | .top, .top => rfl
-  | .top, .polys _ => rfl
-  | .polys ps, .top => by
-      show Grade.top.evalB σ = (Grade.polys ps).evalB σ * Bound.top
-      rw [evalB_polys]
-      rfl
-  | .polys ps, .polys qs => by
-      show (Grade.mul (.polys ps) (.polys qs)).evalB σ = _
-      rw [evalB_mul_polys, evalB_polys, evalB_polys]
-      rfl
+theorem eval_mul (a b : Grade) : (a * b).eval σ = a.eval σ * b.eval σ := by
+  obtain ⟨ps⟩ := a
+  obtain ⟨qs⟩ := b
+  show (Grade.mul (.polys ps) (.polys qs)).eval σ = _
+  rw [eval_mul_polys, eval_polys, eval_polys]
 
 /-- Multiplication is monotone under the semantic order — the transport
-`bindD`'s subtype evidence rides through (`k * nat len ≤ k * ofBound n`
-from the refinement's `fin len ≤ n`). -/
+`bindD`'s evidence rides through (`k * nat len ≤ k * gcard` from
+`fetch`'s contract). -/
 theorem mul_le_mul_left (k : Grade) {a b : Grade} (h : a ≤ b) :
     k * a ≤ k * b := by
   intro σ
-  rw [evalB_mul, evalB_mul]
-  exact Bound.mul_le_mul_left _ (h σ)
+  rw [eval_mul, eval_mul]
+  exact Nat.mul_le_mul_left _ (h σ)
 
 end EvalHom
 

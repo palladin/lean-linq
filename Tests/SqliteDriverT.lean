@@ -19,9 +19,10 @@ open LeanLinq LeanLinq.Sqlite TQ
 #guard (LeanLinq.Driver.parseDecimal? "-12.345") == some (-12345)
 #guard (LeanLinq.Driver.parseDecimal? "1,000") == none
 
--- ⊤ never fits a finite door — over the wire either: only execIOAll runs it
+-- a symbolic grade never fits a closed budget — over the wire either:
+-- no number dominates |customers| + 1; only execIOAll runs it
 #check_failure fun (conn : LeanLinq.Sqlite.Conn) =>
-  TQ.unboundedFanOut.execIO conn 1000 seedParams
+  TQ.wholeTableFanOut.execIO conn 1000 seedParams
 
 def main : IO UInt32 := do
   let path := "/tmp/leanlinq-driver.db"
@@ -48,7 +49,7 @@ def main : IO UInt32 := do
     failures := failures + 1
   unless ← checkCardFanOut (← cardFanOut.execIO conn 4 seedParams) do
     failures := failures + 1
-  unless ← checkUnboundedFanOut (← unboundedFanOut.execIOAll conn seedParams) do
+  unless ← checkWholeTableFanOut (← wholeTableFanOut.execIOAll conn seedParams) do
     failures := failures + 1
   conn.close
   if failures == 0 then

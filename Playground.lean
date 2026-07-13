@@ -185,8 +185,8 @@ bound can itself be a parameter: the grade is `n + 1` — one round for
 the parents, at most `n` for the fan-out — and `p["Id"]` embeds the
 fetched cell as a typed literal. N+1 written deliberately: the bounded
 query pays for the fan-out. -/
-def topSpendersDetail (n : Bound) :
-    DbFetch PlayCtx (Grade.ofBound n + 1) (List (String × Nat)) := fetch! {
+def topSpendersDetail (n : Nat) :
+    DbFetch PlayCtx (Grade.nat n + 1) (List (String × Nat)) := fetch! {
   let spenders ← adults.fetchLimit n
   let report ← for s in spenders.val do
     Query.from' (ts := PlayCtx) orders
@@ -202,7 +202,7 @@ def topSpendersDetail (n : Bound) :
 -- and under a *symbolic* budget the door takes a proof, for every n:
 example (n : Nat) : Except EvalError (List (String × Nat)) :=
   (topSpendersDetail n).exec (n + 1) demoEnv .nil none
-    (by simpa only [Grade.ofNat_eq_nat, Grade.ofBound_fin, Grade.nat_add]
+    (by simpa only [Grade.ofNat_eq_nat, Grade.nat_add]
       using Grade.le_refl (Grade.nat (n + 1)))
 
 /- The same report in **two rounds flat**, any number of spenders: the
@@ -223,12 +223,6 @@ def topSpendersDetail2 (n : Nat) :
 #eval (topSpendersDetail2 5).exec 2 demoEnv
 -- Except.ok [("Jane Smith", 1), ("John Doe", 1)] — grade 1 + 1, any n
 
--- and the SAME definition takes ⊤: no LIMIT emitted, grade 1 + 1 * ⊤ = ⊤,
--- runnable only through the unbounded door
-#eval (topSpendersDetail ⊤).execAll demoEnv
--- Except.ok [("Jane Smith", 1), ("John Doe", 1)]
-#check_failure (topSpendersDetail ⊤).exec 1000 demoEnv
-
 /- "All the records" is two phases: you cannot know the fan-out before
 asking, so ask first — the count becomes the loop's bound and the
 budget, and `omega` proves the door for every n. Between the two `exec`s
@@ -238,7 +232,7 @@ def allSpendersDetail : Except EvalError (List (String × Nat)) := do
   let cnt ← (adults.count).fetch.exec 1 demoEnv        -- round 1: how many?
   let n := (cnt.getD 0).toNat
   (topSpendersDetail n).exec (n + 1) demoEnv .nil none
-    (by simpa only [Grade.ofNat_eq_nat, Grade.ofBound_fin, Grade.nat_add]
+    (by simpa only [Grade.ofNat_eq_nat, Grade.nat_add]
       using Grade.le_refl (Grade.nat (n + 1)))
 
 #eval allSpendersDetail   -- Except.ok [("Jane Smith", 1), ("John Doe", 1)]
@@ -260,15 +254,14 @@ check. The checker below verifies this fails to elaborate. -/
 
 /-! ## Symbolic grades — round budgets in the database's own terms
 
-`topSpendersDetail n` needs its `n` because a closed bound can only say
-`fin k` or ⊤: to price the per-parent loop you must cap the parents.
-The `Grade` lattice removes the dilemma — grades are max-plus
-polynomials over table sizes, so the natural unlimited program carries
-the honest price **in its type**: `customers.size + 1` — one round for
-the parents, one per actual customer. `exec` still refuses it (no
-number dominates `|customers| + 1`); `execWithin` collapses the grade
-against the model's own sizes and checks there; `execAll` remains the
-free door. -/
+`topSpendersDetail n` needs its `n` because a closed bound must be a
+numeral: to price the per-parent loop you must cap the parents. Grades
+remove the dilemma — they are max-plus polynomials over table sizes,
+so the natural unlimited program carries the honest price **in its
+type**: `customers.size + 1` — one round for the parents, one per
+actual customer. `exec` still refuses it (no number dominates
+`|customers| + 1`); `execWithin` collapses the grade against the
+model's own sizes and checks there; `execAll` runs unchecked. -/
 
 /-- The unlimited report, priced symbolically — no budget argument, no
 LIMIT, the type says exactly what it costs: `for s in adults do` loops
@@ -287,7 +280,7 @@ def topSpendersDetailAll :
 -- the grade collapses against the model's sizes: demoEnv holds 3
 -- customers, so the price is 4 — an upper bound (guards only remove:
 -- just 2 of the 3 are adults, so the program performs 1 + 2 = 3 rounds)
-#guard (customers.size + 1).evalB (TableEnv.sizes demoEnv) == Bound.fin 4
+#guard (customers.size + 1).eval (TableEnv.sizes demoEnv) == 4
 #guard ((topSpendersDetailAll.runCount ⟨demoEnv, .nil, none⟩).toOption.map (·.2))
     == some 3
 -- the sized door checks the collapsed grade, then runs …
@@ -298,9 +291,6 @@ def topSpendersDetailAll :
 -- the closed door refuses the symbolic grade statically — no number
 -- bounds |customers| + 1:
 #check_failure (topSpendersDetailAll.exec 1000 demoEnv)
-
--- forgetting the symbols recovers the conservative closed reading:
-#guard ((customers.size + 1 : Grade)).forget == (⊤ : Bound)
 
 /-- The same program, spelled **fetch first, then loop over the rows**:
 `spenders` is a plain `List` — no subtype, no restated bound — and the
@@ -330,10 +320,11 @@ def topSpendersDetailAll' :
 carries in its *type* what used to need a run-hypothesis — the ten-slot
 page fits by projection, zero proof work, over every environment and
 every engine that survives the clamp. -/
-example {xs : List (Values [("Id", SqlType.long), ("Name", SqlType.string)])}
-    (hxs : Bound.fin xs.length ≤ (adults.limit 10).card) :
+example {σ : String → Nat}
+    {xs : List (Values [("Id", SqlType.long), ("Name", SqlType.string)])}
+    (hxs : xs.length ≤ (Query.gcard (adults.limit 10)).eval σ) :
     xs.length ≤ 10 :=
-  fetchPage_fits adults 10 ⟨xs, hxs⟩
+  fetchPage_fits adults 10 hxs
 
 /-! ## Statements -/
 

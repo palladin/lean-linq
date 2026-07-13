@@ -1,5 +1,5 @@
 import LeanLinq.Core.Schema
-import LeanLinq.Core.Bound
+import LeanLinq.Core.Grade
 
 namespace LeanLinq
 
@@ -70,58 +70,24 @@ def QueryP.asPlainSpine {ρ : Schema → Type} : QueryP ρ ts s → SpineQP ρ t
 
 /-! ## Cardinality: how many rows can a query return?
 
-`card` computes an upper bound on the result size from the query value
-itself, over the same `Bound` lattice that grades `DbFetch` round trips —
-one lattice, two currencies. Bare-table sources are statically unbounded
-(⊤ is the truth about them, until keys); **derived-table sources
-multiply** — `from x in (q.limit 3)` contributes at most 3 × the
-continuation's bound. The continuation is priced at the evaluator's own
-marker rows with the evaluator's own alias numbering (`n`, maintained
-equal to the scope length): the soundness proof then compares the same
-binder application on both sides, which is what makes the precision
-provable — no uniformity assumption about the continuation is needed. For literal queries `card` reduces definitionally, so `by
-decide` can consume it inside types. -/
+`gcard` computes an upper bound on the result size from the query value
+itself, as a `Grade` — **symbolic in table sizes**. A bare source is
+not "unbounded", it is *the table's own symbol*: `from c in customers`
+contributes `|customers|`, joins multiply, unions add, and a size
+valuation σ (the model's `TableEnv.sizes`, or the abstract σ a
+postcondition quantifies) collapses the polynomial to a number.
+**Derived-table sources multiply** — `from x in (q.limit 3)`
+contributes at most 3 × the continuation's bound. The continuation is
+priced at the evaluator's own marker rows with the evaluator's own
+alias numbering (`n`, maintained equal to the scope length), so the
+bound is the one that runs. For literal queries `gcard` reduces
+definitionally, so `by decide` can consume it inside types.
 
-mutual
-
-@[reducible] def SpineQP.cardAux : SpineQ ts g s → Nat → Bound
-  | .yield _, _ => .fin 1
-  | .groupYield .., _ => .fin 1
-  | .guard _ rest, n => rest.cardAux n
-  | .order _ rest, n => rest.cardAux n
-  -- a bare table's size is not a static fact — ⊤ is the honest bound
-  | .fromT (inst := _) _ _, _ => .top
-  | .joinT (inst := _) _ _ _, _ => .top
-  | .joinLeftT (inst := _) _ _ _, _ => .top
-  -- a derived table's size IS a static fact: its query's own card —
-  -- priced at the evaluator's marker, so the bound is the one that runs
-  | .fromQ q f, n =>
-      q.cardAux n * (f ⟨s!"a{n}"⟩).cardAux (n + 1)
-
-@[reducible] def QueryP.cardAux : QueryA ts s → Nat → Bound
-  | .spine sp, n => sp.cardAux n
-  | .distinctC q, n => q.cardAux n
-  | .limitC q lim? _, n =>
-      match lim? with
-      | some l => min (q.cardAux n) (.fin l)
-      | none => q.cardAux n
-  | .setOpC .union a b, n => a.cardAux n + b.cardAux n
-  | .setOpC .intersect a _, n => a.cardAux n
-  | .setOpC .except a _, n => a.cardAux n
-
-end
-
-@[reducible] def QueryP.card (q : QueryA ts s) : Bound := q.cardAux 0
-
-/-! ## Symbolic cardinality — the same walk, priced in table sizes
-
-`gcard` refines `card` in the round lattice: where `card` answers ⊤ for
-a bare source, `gcard` answers with the source's *name* — `|customers|`,
-`|customers| × |orders|` — a `Grade` the model collapses against real
-sizes (`Grade.evalB (TableEnv.sizes env)`) and anyone collapses
-conservatively (`Grade.forget`). `Grade` has no `min`, so `limit l`
-prices as the always-sound `l` and `intersect` takes its left operand —
-the closed `card` stays the tighter row bound where `min` matters. -/
+`Grade` has no general `min` (max-plus polynomials aren't closed under
+it), but min of **closed** grades is closed — so `limit l` takes the
+real `min` when the inner bound is already a numeral, and the
+always-sound `l` otherwise; `intersect` prefers a closed side (either
+operand bounds the intersection). -/
 
 mutual
 
@@ -141,10 +107,20 @@ mutual
   | .distinctC q, n => q.gcardAux n
   | .limitC q lim? _, n =>
       match lim? with
-      | some l => Grade.nat l
+      | some l =>
+          -- a closed inner bound meets the limit in a real min —
+          -- `(q.limit 3).limit 10` prices as 3, not 10
+          match (q.gcardAux n).closed? with
+          | some k => Grade.nat (Nat.min k l)
+          | none => Grade.nat l
       | none => q.gcardAux n
   | .setOpC .union a b, n => a.gcardAux n + b.gcardAux n
-  | .setOpC .intersect a _, n => a.gcardAux n
+  | .setOpC .intersect a b, n =>
+      -- the intersection fits under either operand; prefer a closed bound
+      match (a.gcardAux n).closed?, (b.gcardAux n).closed? with
+      | some ka, some kb => Grade.nat (Nat.min ka kb)
+      | none, some kb => Grade.nat kb
+      | _, none => a.gcardAux n
   | .setOpC .except a _, n => a.gcardAux n
 
 end
@@ -506,20 +482,13 @@ namespace Query
 export QueryB (from')
 end Query
 
-/-- The row-count bound of a bundle — read at the compiled view (the
-alignment theorem makes that the sound instantiation, permanently). -/
-@[reducible] def Query.card (q : Query ts s) : Bound := (q AliasOf).card
-
-/-- The bundle's symbolic row bound in the **round** lattice — what a
-per-row loop's grade spends. -/
+/-- The bundle's symbolic row bound — read at the compiled view (the
+alignment discipline makes that the sound instantiation): what a
+per-row loop's grade spends, and what `fetch`'s contract promises. -/
 @[reducible] def Query.gcard (q : Query ts s) : Grade := (q AliasOf).gcard
 
 namespace QueryB
 export Query (gcard)
-end QueryB
-
-namespace QueryB
-export Query (card)
 end QueryB
 
 end LeanLinq

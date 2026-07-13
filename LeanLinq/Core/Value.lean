@@ -241,7 +241,7 @@ def ParamEnv.toCells : {ps : List (String × SqlType)} → ParamEnv ps →
       (n, ⟨c.ty, SqlType.toNullable v⟩) :: rest.toCells
 
 /-- The sizes of the environment's tables, by name (first match; an
-unknown name is 0). The valuation `Grade.evalB` collapses symbolic
+unknown name is 0). The valuation `Grade.eval` collapses symbolic
 grades against. -/
 def TableEnv.sizes : {ts : List (String × Schema)} → TableEnv ts → String → Nat
   | [], .nil, _ => 0

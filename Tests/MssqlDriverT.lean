@@ -53,7 +53,7 @@ def main : IO UInt32 := do
     failures := failures + 1
   unless ← checkCardFanOut (← cardFanOut.execMs conn 4 seedParams) do
     failures := failures + 1
-  unless ← checkUnboundedFanOut (← unboundedFanOut.execMsAll conn seedParams) do
+  unless ← checkWholeTableFanOut (← wholeTableFanOut.execMsAll conn seedParams) do
     failures := failures + 1
   -- error routing: a server error must surface as an IO error carrying the
   -- server's message text (per-connection buffers in native/freetds_shim.c)

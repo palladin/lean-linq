@@ -42,7 +42,7 @@ def main : IO UInt32 := do
         failures := failures + 1
       unless ← checkCardFanOut (← cardFanOut.execPg conn 4 seedParams) do
         failures := failures + 1
-      unless ← checkUnboundedFanOut (← unboundedFanOut.execPgAll conn seedParams) do
+      unless ← checkWholeTableFanOut (← wholeTableFanOut.execPgAll conn seedParams) do
         failures := failures + 1
       -- pipeline recovery: a server error mid-round (division by zero
       -- evaluated by the engine) must not wedge the connection — the next
