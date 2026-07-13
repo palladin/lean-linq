@@ -249,9 +249,9 @@ private def awaitRef (ref : IO.Ref (Option δ)) : IO δ := do
 blocked stage; `bind` may continue within the round; `seq` batches. -/
 private def sendPhase (conn : Conn)
     (cells : List (String × ((t : SqlPrim) × Nullable t))) :
-    DbFetch c r α → (fuel : Nat) → SendM c (Stage c α fuel)
-  | .pure a, fuel => pure (stageDone a fuel)
-  | .fetch (s := s) q, fuel => do
+    {P : Post α} → DbFetchP c r α P → (fuel : Nat) → SendM c (Stage c α fuel)
+  | _, .pure a, fuel => pure (stageDone a fuel)
+  | _, .fetch (s := s) q, fuel => do
       let compiled := q.toSql .postgres
       let (oids, vals) ← wireParams compiled cells
       sendQueryParams conn (toWire compiled) oids vals
@@ -260,7 +260,7 @@ private def sendPhase (conn : Conn)
       match fuel with
       | 0 => throw (IO.userError "unreachable: fetch with zero round budget")
       | n + 1 => pure (.inr (do pure (stageDone (← awaitRef ref) n)))
-  | .fetchCell (t := t) sc, fuel => do
+  | _, .fetchCell (t := t) sc, fuel => do
       let compiled := sc.toSql .postgres
       let (oids, vals) ← wireParams compiled cells
       sendQueryParams conn (toWire compiled) oids vals
@@ -269,17 +269,14 @@ private def sendPhase (conn : Conn)
       match fuel with
       | 0 => throw (IO.userError "unreachable: fetch with zero round budget")
       | n + 1 => pure (.inr (do pure (stageDone (← awaitRef ref) n)))
-  | .seq f x, fuel => do
+  | _, .seq f x, fuel => do
       let sf ← sendPhase conn cells f fuel
       let sx ← sendPhase conn cells x fuel
       pure (parStage (fun g b => g b) fuel sf sx)
-  | .bind x k, fuel => do
-      let sx ← sendPhase conn cells x fuel
-      bindStage (fun fuel' a => sendPhase conn cells (k a) fuel') fuel sx
-  | .bindD x f _ _, fuel => do
+  | _, .bindD x f _ _, fuel => do
       let sx ← sendPhase conn cells x fuel
       bindStage (fun fuel' a => sendPhase conn cells (f a) fuel') fuel sx
-  | .forAll xs f, fuel => do
+  | _, .forAll xs f, fuel => do
       -- the loop's bodies are independent of one another, so they all
       -- send into the *current* round — the per-row loop batches, and the
       -- sequential grade `k * xs.length` stays a (generous) upper bound
@@ -329,27 +326,33 @@ end Pg
 budget discipline as everywhere: `by decide` for closed grades, a
 caller-supplied proof otherwise; the budget also serves as the (provably
 sufficient) round fuel. -/
-def DbFetch.execPg (f : DbFetch c r α) (conn : Pg.Conn) (budget : Nat)
+def DbFetchP.execPg {P : Post α} (f : DbFetchP c r α P) (conn : Pg.Conn) (budget : Nat)
     (ps : ParamEnv c.params := by exact .nil)
-    (_h : r ≤ .fin budget := by decide) : IO α := do
+    (_h : r ≤ Grade.nat budget := by
+      try simp only [Grade.ofNat_eq_nat, Grade.ofBound_fin, Grade.nat_add,
+        Grade.nat_mul, Grade.nat_one_mul, Grade.mul_nat_one,
+        Grade.nat_zero_add, Grade.add_nat_zero]
+      first
+        | exact Grade.le_refl _
+        | (apply Grade.nat_le_nat; omega)
+        | assumption) : IO α := do
   Pg.runStages conn budget
     (← Pg.runRound conn (Pg.sendPhase conn ps.toCells f budget))
 
 private def Pg.interp (conn : Pg.Conn) (ps : ParamEnv c.params) :
-    {r' : Bound} → {β : Type} → DbFetch c r' β → IO β
-  | _, _, .pure a => Pure.pure a
-  | _, _, .fetch q => conn.query q ps
-  | _, _, .fetchCell sc => conn.queryCell sc ps
-  | _, _, .seq g x => do Pure.pure ((← interp conn ps g) (← interp conn ps x))
-  | _, _, .bind x k => do interp conn ps (k (← interp conn ps x))
-  | _, _, .forAll xs f => xs.mapM fun a => interp conn ps (f a)
-  | _, _, .bindD x f _ _ => do interp conn ps (f (← interp conn ps x))
+    {r' : Grade} → {β : Type} → {P : Post β} → DbFetchP c r' β P → IO β
+  | _, _, _, .pure a => Pure.pure a
+  | _, _, _, .fetch q => conn.query q ps
+  | _, _, _, .fetchCell sc => conn.queryCell sc ps
+  | _, _, _, .seq g x => do Pure.pure ((← interp conn ps g) (← interp conn ps x))
+  | _, _, _, .forAll xs f => xs.mapM fun a => interp conn ps (f a)
+  | _, _, _, .bindD x f _ _ => do interp conn ps (f (← interp conn ps x))
 
 /-- The unbounded door over the wire: no budget, obligation-free. This
 door interprets **sequentially** (one statement per round): the pipeline
 stage machine pre-allocates its rounds from a static bound, and a ⊤
 program declines to name one. Pipelining is what the finite door buys. -/
-def DbFetch.execPgAll (f : DbFetch c r α) (conn : Pg.Conn)
+def DbFetchP.execPgAll {P : Post α} (f : DbFetchP c r α P) (conn : Pg.Conn)
     (ps : ParamEnv c.params := by exact .nil) : IO α :=
   Pg.interp conn ps f
 

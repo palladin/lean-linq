@@ -1,5 +1,6 @@
 import LeanLinq.Eval.Query
 import LeanLinq.Theorems
+import LeanLinq.Core.Grade
 
 /-! # `DbFetch` — database programs with a round-trip budget in the type
 
@@ -29,13 +30,19 @@ shape has its proof story, up a ladder of evidence —
   bounded — `fetchLimit q n` returns a length-refined list
   (`{xs // xs.length ≤ n}`; `LIMIT` really limits:
   `Query.run_limit_length_le`), and `for p in parents.val do body` fuses
-  into `DbFetch.forRows`, whose budget proof *is* the refinement. Bound
+  into `DbFetchP.forRows`, whose budget proof *is* the refinement. Bound
   `m + k * n`, closed, silent. N+1, written deliberately, priced by the
   bounded query;
 - loops priced by the query's own shape: `q.card` computes the row
   bound from the query value and `fetchBounded` surfaces it as the
   refinement, so the budget proof is the structure itself — soundness
   is a theorem (`Query.run_card_le`);
+- loops over plain just-fetched rows, priced *symbolically*: no
+  refinement, no restated bound — `let xs ← q.fetch` then
+  `for p in xs do body` fuses into `forFetched`, whose evidence is
+  `fetch`'s own contract (rows fit `q.gcard` at every σ). Grade
+  `m + k * q.gcard`, in the database's own terms; the sized door
+  (`execWithin`) collapses and checks it against live sizes;
 - loops with no bound at all: the same door at the top of the lattice
   ℕ∞ (`Bound`). `fetchLimit q ⊤` emits no `LIMIT` and its refinement
   is vacuously true, so the same `forRows` fuses — and the grade
@@ -46,10 +53,15 @@ shape has its proof story, up a ladder of evidence —
   grading surfaces it statically. `fetchFor` remains the bound-1
   batched door for any collection size.)
 
-Under the sugar sits the dependent bind, `DbFetch.bindD`: a continuation
+Under the sugar sits the dependent bind, `DbFetchP.bindD`: a continuation
 whose grade may mention the value, priced by a bound `B` plus evidence
-`∀ a, g a ≤ B` — supplied by refinements (`forRows`), or explicitly
-(`bindD'`) from domain invariants the user actually has.
+`∀ σ a, P a σ → (g a).evalB σ ≤ B.evalB σ` — conditional on the
+producer's *postcondition*, pointwise at every table-size valuation σ.
+`fetch`'s contract (rows fit `q.card`, and `q.gcard` at every σ) is
+such a postcondition, so the symbolic per-row loop `forQuery` is
+*derived*: its evidence consumes the contract and transports it through
+the `evalB` multiplication homomorphism. Refinements (`forRows`) and
+user invariants (`bindD'`) are the same door with simpler evidence.
 
 The reference interpreter here is the in-memory evaluator — the same
 denotational semantics the test suite differential-tests — and the native
@@ -65,50 +77,105 @@ declare_syntax_cat fetchClause
 namespace LeanLinq
 
 
-/-- A database program with result type `α` and at most `r` round trips. -/
-inductive DbFetch (c : Ctx) : Bound → Type → Type 1 where
-  | pure : {α : Type} → α → DbFetch c 0 α
-  | fetch : {s : Schema} → Query c s → DbFetch c 1 (List (Values s))
-  | fetchCell : {t : SqlPrim} → {n : Bool} → ScalarQuery c ⟨t, n⟩ → DbFetch c 1 (Nullable t)
+/-- A σ-indexed postcondition: what is true of a computation's result at
+the table sizes the run is performed under. Facts ride this index — the
+values stay plain. -/
+def Post (α : Type) := α → (String → Nat) → Prop
+
+/-- A database program with result type `α`, at most `r` round trips
+(`r : Grade` — possibly symbolic in table sizes), and postcondition `P`.
+
+Six constructors, one bind: three leaves (`pure`, `fetch`, `fetchCell`),
+two independence markers a batching driver exploits (`seq`, `forAll`),
+and `bindD` — the only sequencing, whose evidence is *conditional on the
+producer's postcondition, at σ*. Every loop is `bindD` plus a proof;
+nothing else is primitive. -/
+inductive DbFetchP (c : Ctx) : Grade → (α : Type) → Post α → Type 1 where
+  | pure : {α : Type} → α → DbFetchP c 0 α (fun _ _ => True)
+  -- the primitive fetch returns a PLAIN list; its facts are its
+  -- CONTRACT: rows fit the closed card (σ-free), and the symbolic gcard
+  -- at every σ the run answers to
+  | fetch : {s : Schema} → (q : Query c s) →
+      DbFetchP c 1 (List (Values s)) (fun xs σ =>
+        Bound.fin xs.length ≤ q.card ∧
+        Bound.fin xs.length ≤ (Query.gcard q).evalB σ)
+  | fetchCell : {t : SqlPrim} → {n : Bool} → ScalarQuery c ⟨t, n⟩ →
+      DbFetchP c 1 (Nullable t) (fun _ _ => True)
   -- independent computations: a batching driver shares their rounds
-  | seq : {m n : Bound} → {α β : Type} →
-      DbFetch c m (α → β) → DbFetch c n α → DbFetch c (max m n) β
-  -- a data dependency genuinely costs rounds
-  | bind : {m n : Bound} → {α β : Type} →
-      DbFetch c m α → (α → DbFetch c n β) → DbFetch c (m + n) β
-  -- the per-row loop, first class: one body per element of a collection
-  -- already in hand, with the *exact* data-dependent grade in the index —
-  -- `k * xs.length` names the round count precisely (an `∃ n` would hide
-  -- the number the budget check needs). Over just-fetched rows it cannot
-  -- appear: `bind`'s continuation grade cannot mention the fetched value.
-  | forAll : {α β : Type} → {k : Bound} →
-      (xs : List α) → (α → DbFetch c k β) → DbFetch c (k * .fin xs.length) (List β)
-  -- the dependent bind: the continuation's grade may mention the value, and
-  -- the composition carries its budget proof — a bound `B` with evidence
-  -- every value fits under it. Still finite by definition (`m + B : Nat`);
-  -- the evidence flows from refined fetches (`fetchLimit`), parameters, or
-  -- domain invariants the user actually has.
-  | bindD : {m : Bound} → {α β : Type} → {g : α → Bound} →
-      DbFetch c m α → ((a : α) → DbFetch c (g a) β) →
-      (B : Bound) → (∀ a, g a ≤ B) → DbFetch c (m + B) β
+  | seq : {m n : Grade} → {α β : Type} → {P : Post (α → β)} → {P' : Post α} →
+      DbFetchP c m (α → β) P → DbFetchP c n α P' →
+      DbFetchP c (max m n) β (fun _ _ => True)
+  -- the per-row loop over a collection in hand: exact grade. The body's
+  -- postcondition may depend on the element (a per-key `fetch`'s contract
+  -- mentions the per-key query) — the family `Q` absorbs that; the loop
+  -- itself promises nothing
+  | forAll : {α β : Type} → {k : Grade} → {Q : α → Post β} →
+      (xs : List α) → ((a : α) → DbFetchP c k β (Q a)) →
+      DbFetchP c (k * Grade.nat xs.length) (List β) (fun _ _ => True)
+  -- THE bind: value-dependent grade, capped by `B`, justified by
+  -- evidence that may assume the producer's postcondition — at σ
+  | bindD : {m : Grade} → {α β : Type} → {P : Post α} → {Q : Post β} →
+      {g : α → Grade} →
+      DbFetchP c m α P → ((a : α) → DbFetchP c (g a) β Q) →
+      (B : Grade) →
+      (∀ σ a, P a σ → (g a).evalB σ ≤ B.evalB σ) →
+      DbFetchP c (m + B) β Q
+
+/-- The plain spelling: a program with the trivial postcondition — what
+every composite program is, since results funnel through `pure`. -/
+abbrev DbFetch (c : Ctx) (r : Grade) (α : Type) : Type 1 :=
+  DbFetchP c r α (fun _ _ => True)
 
 namespace DbFetch
+export DbFetchP (pure fetch fetchCell seq forAll bindD)
+end DbFetch
 
-def map (f : α → β) (x : DbFetch c r α) : DbFetch c r β :=
-  Bound.add_zero r ▸ x.bind (fun a => .pure (f a))
+namespace DbFetchP
+
+/-- Constant-grade sequencing — `bindD` with constant `g` and reflexive
+evidence. -/
+def bind {P : Post α} {Q : Post β} (x : DbFetchP c m α P)
+    (k : α → DbFetchP c n β Q) : DbFetchP c (m + n) β Q :=
+  .bindD x k n (fun _ _ _ => Bound.le_refl _)
+
+def map {P : Post α} (f : α → β) (x : DbFetchP c r α P) : DbFetchP c r β (fun _ _ => True) :=
+  Grade.add_zero r ▸ bind x (fun a => .pure (f a))
 
 /-- Reference interpreter: the in-memory evaluator. Total — `DbFetch` is a
 reflexive inductive, so structural recursion covers the `bind`
 continuation applied to any value. -/
-def runWith (ee : EvalEnv c) : {r : Bound} → {α : Type} → DbFetch c r α →
-    Except EvalError α
-  | _, _, .pure a => Except.ok a
-  | _, _, .fetch q => q.evalRows ee
-  | _, _, .fetchCell sq => sq.evalCell ee
-  | _, _, .seq f x => do Except.ok ((← f.runWith ee) (← x.runWith ee))
-  | _, _, .bind x k => do (k (← x.runWith ee)).runWith ee
-  | _, _, .forAll xs f => xs.mapM fun a => (f a).runWith ee
-  | _, _, .bindD x f _ _ => do (f (← x.runWith ee)).runWith ee
+def runWith (ee : EvalEnv c) : {r : Grade} → {α : Type} → {P : Post α} →
+    DbFetchP c r α P → Except EvalError α
+  | _, _, _, .pure a => Except.ok a
+  | _, _, _, .fetch q => q.evalRows ee
+  | _, _, _, .fetchCell sq => sq.evalCell ee
+  | _, _, _, .seq f x => do
+      Except.ok ((← runWith ee f) (← runWith ee x))
+  | _, _, _, .forAll xs f => xs.mapM fun a => runWith ee (f a)
+  | _, _, _, .bindD x f _ _ => do runWith ee (f (← runWith ee x))
+
+/-- The model handler, *instrumented*: same semantics as `runWith`, plus
+the count of rounds actually performed (sequential model — `seq` sides
+and `forAll` bodies each pay). This is what a symbolic price certifies
+against: for a program of grade `r`, the pin is
+`(runCount ee prog).2 ≤ (r.evalB ee.tables.sizes)` — the price
+collapsed against the model's own sizes. -/
+def runCount (ee : EvalEnv c) : {r : Grade} → {α : Type} → {P : Post α} →
+    DbFetchP c r α P → Except EvalError (α × Nat)
+  | _, _, _, .pure a => Except.ok (a, 0)
+  | _, _, _, .fetch q => do Except.ok ((← q.evalRows ee), 1)
+  | _, _, _, .fetchCell sq => do Except.ok ((← sq.evalCell ee), 1)
+  | _, _, _, .seq f x => do
+      let (g, m) ← runCount ee f
+      let (a, n) ← runCount ee x
+      Except.ok (g a, m + n)
+  | _, _, _, .forAll xs f => do
+      let rs ← xs.mapM fun a => runCount ee (f a)
+      Except.ok (rs.map (·.1), (rs.map (·.2)).sum)
+  | _, _, _, .bindD x f _ _ => do
+      let (a, m) ← runCount ee x
+      let (b, n) ← runCount ee (f a)
+      Except.ok (b, m + n)
 
 /-- The execution door: declare a round budget, prove you fit in it. For
 closed grades (every batched program) the obligation discharges silently by
@@ -117,17 +184,37 @@ decidable at elaboration, so the caller supplies the proof — by bounding
 the collection or computing the budget from it. A grade over data that
 exists only inside the program (just-fetched rows) has no proof to
 give: that is N+1, rejected. -/
-def exec (f : DbFetch c r α) (budget : Nat) (env : TableEnv c.tables)
+def exec {P : Post α} (f : DbFetchP c r α P) (budget : Nat) (env : TableEnv c.tables)
     (ps : ParamEnv c.params := by exact .nil) (now : Option String := none)
-    (_h : r ≤ .fin budget := by decide) : Except EvalError α :=
-  f.runWith ⟨env, ps, now⟩
+    (_h : r ≤ Grade.nat budget := by
+      try simp only [Grade.ofNat_eq_nat, Grade.ofBound_fin, Grade.nat_add,
+        Grade.nat_mul, Grade.nat_one_mul, Grade.mul_nat_one,
+        Grade.nat_zero_add, Grade.add_nat_zero]
+      first
+        | exact Grade.le_refl _
+        | (apply Grade.nat_le_nat; omega)
+        | assumption) : Except EvalError α :=
+  runWith ⟨env, ps, now⟩ f
+
+/-- The **sized** door: a symbolic grade collapses against the model's
+own table sizes, and the budget check runs *there* — the door for
+programs priced in the database's terms (`customers.size + 1`). The
+check is at run time (the sizes are), but it is a check of the *price*,
+before interpretation begins. -/
+def execWithin {P : Post α} (f : DbFetchP c r α P) (budget : Nat) (env : TableEnv c.tables)
+    (ps : ParamEnv c.params := by exact .nil) (now : Option String := none) :
+    Except EvalError α :=
+  if r.evalB (TableEnv.sizes env) ≤ Bound.fin budget then
+    runWith ⟨env, ps, now⟩ f
+  else
+    .error (.internal s!"round budget exceeded: the program's grade exceeds {budget} at this database's sizes")
 
 /-- The unbounded door: no budget, obligation-free (`g ≤ ⊤` always). The
 explicit opt-out for ⊤ programs — visible at the call site. -/
-def execAll (f : DbFetch c r α) (env : TableEnv c.tables)
+def execAll {P : Post α} (f : DbFetchP c r α P) (env : TableEnv c.tables)
     (ps : ParamEnv c.params := by exact .nil) (now : Option String := none) :
     Except EvalError α :=
-  f.runWith ⟨env, ps, now⟩
+  runWith ⟨env, ps, now⟩ f
 
 /-- Restate a bound as a provably equal one — `1 * ids.length` as
 `ids.length`, and so on. The index a program *infers* is built
@@ -136,11 +223,17 @@ theorems, not reductions, so the elaborator will not rewrite them away.
 This is the bridge, and `fetch!` applies it automatically: with no
 constraint from the context, `rfl` pins the stated grade to the inferred
 one; against an annotation, `omega` proves them equal. -/
-def withBound (x : DbFetch c m α) {n : Bound}
+def withBound {P : Post α} (x : DbFetchP c m α P) {n : Grade}
     (h : m = n := by first
       | rfl
-      | (simp <;> ac_rfl)
-      | (apply congrArg Bound.fin; omega)) : DbFetch c n α :=
+      | decide
+      | ((simp only [Grade.ofNat_eq_nat, Grade.ofBound_fin, Grade.nat_add,
+            Grade.nat_mul, Grade.nat_one_mul, Grade.mul_nat_one,
+            Grade.nat_zero_add, Grade.add_nat_zero,
+            Grade.nat_add_ofBound]) <;>
+         first
+           | rfl
+           | (apply congrArg Grade.nat; omega))) : DbFetchP c n α P :=
   h ▸ x
 
 /-- `bindD` with its budget proof discharged automatically where possible:
@@ -148,18 +241,24 @@ def withBound (x : DbFetch c m α) {n : Bound}
 (`a.property`, bare or under the loop's `k *`) when the value is
 length-refined. Anything else needs an explicit proof — that is the door
 doing its job. -/
-def bindD' {α β : Type} {g : α → Bound} (x : DbFetch c m α)
-    (f : (a : α) → DbFetch c (g a) β) (B : Bound)
+def bindD' {α β : Type} {P : Post α} {Q : Post β} {g : α → Grade}
+    (x : DbFetchP c m α P)
+    (f : (a : α) → DbFetchP c (g a) β Q) (B : Grade)
     (h : ∀ a, g a ≤ B := by
       intro a
+      try simp only [_root_.LeanLinq.Grade.ofNat_eq_nat,
+        _root_.LeanLinq.Grade.ofBound_fin, _root_.LeanLinq.Grade.nat_add,
+        _root_.LeanLinq.Grade.nat_mul, _root_.LeanLinq.Grade.nat_one_mul,
+        _root_.LeanLinq.Grade.mul_nat_one, Nat.one_mul, Nat.mul_one]
       first
-        | decide
-        | exact _root_.LeanLinq.Bound.le_top _
+        | exact _root_.LeanLinq.Grade.le_refl _
+        | (apply _root_.LeanLinq.Grade.nat_le_nat; omega)
+        | exact _root_.LeanLinq.Grade.le_top _
         | exact a.property
-        | exact _root_.LeanLinq.Bound.mul_le_mul_left _ a.property
+        | exact _root_.LeanLinq.Grade.nat_le_ofBound a.property
         | fail "cannot bound the dependent continuation — fetch the collection through fetchLimit, or supply the proof") :
-    DbFetch c (m + B) β :=
-  .bindD x f B h
+    DbFetchP c (m + B) β Q :=
+  .bindD x f B (fun σ a _ => h a σ)
 
 /-- The post-fetch loop, fused: fetch a **length-refined** collection
 (`fetchLimit`), then run `f` per row. The subtype carries the budget
@@ -169,20 +268,71 @@ bounds are literals and nothing needs a tactic. This is the N+1 idiom
 made legal: bounded query in, priced fan-out out. `fetch!` produces it
 for `let x ← e` immediately followed by `for p in x.val do body`
 (see `forRows` below). -/
-def forRows {n : Bound} (x : DbFetch c m {xs : List α // .fin xs.length ≤ n})
-    (f : α → DbFetch c k β) : DbFetch c (m + k * n) (List β) :=
-  .bindD x (fun a => .forAll a.val f) (k * n)
-    (fun a => Bound.mul_le_mul_left k a.property)
+def forRows {n : Bound} {P : Post {xs : List α // Bound.fin xs.length ≤ n}}
+    {Q : α → Post β}
+    (x : DbFetchP c m {xs : List α // Bound.fin xs.length ≤ n} P)
+    (f : (a : α) → DbFetchP c k β (Q a)) :
+    DbFetch c (m + k * Grade.ofBound n) (List β) :=
+  .bindD x (fun a => .forAll a.val f) (k * Grade.ofBound n)
+    (fun σ a _ => Grade.mul_le_mul_left k (Grade.nat_le_ofBound a.property) σ)
 
-end DbFetch
+/-- The post-fetch loop over **plain** rows: the producer's
+postcondition is `fetch`'s contract — the rows fit `q.gcard` at every
+σ — and that *is* the budget evidence, transported through the
+multiplication homomorphism. `q` is implicit, recovered from the
+contract itself; the grade `m + k * q.gcard` prices the fan-out in the
+database's own terms with no bound restated. `fetch!` produces it for
+`let xs ← e` immediately followed by `for p in xs do body` (the plain
+sibling of the `.val` fusion — see `forRows`). -/
+def forFetched {q : Query c s} {Q : Values s → Post β}
+    (x : DbFetchP c m (List (Values s)) (fun xs σ =>
+      Bound.fin xs.length ≤ q.card ∧
+      Bound.fin xs.length ≤ (Query.gcard q).evalB σ))
+    (f : (v : Values s) → DbFetchP c k β (Q v)) :
+    DbFetch c (m + k * Query.gcard q) (List β) :=
+  .bindD x (fun xs => .forAll xs f) (k * Query.gcard q)
+    (fun σ xs hP => by
+      rw [Grade.evalB_mul, Grade.evalB_mul, Grade.evalB_nat]
+      exact Bound.mul_le_mul_left _ hP.2)
+
+/-- Fetch `q` and run `f` per row, the whole loop priced by the query's
+own symbolic card: grade `1 + k * q.gcard` — the N+1 in the database's
+own terms. **Derived, not primitive**: `forFetched` over the primitive
+`fetch`. -/
+def forQuery {Q : Values s → Post β} (q : Query c s)
+    (f : (v : Values s) → DbFetchP c k β (Q v)) :
+    DbFetch c (1 + k * Query.gcard q) (List β) :=
+  forFetched (.fetch q) f
+
+/-- Weakening: a program bounded by `m` is bounded by any `n ≥ m` —
+derived, not primitive (`bindD` over `pure ()` with the constant
+family). The door for value-dependent budgets: an inner loop whose
+exact grade mentions a fetched value restates to the uniform bound the
+enclosing combinator needs, paying with the inequality — which is
+where a refinement gets cashed. -/
+def weaken {P : Post α} (x : DbFetchP c m α P) (n : Grade)
+    (h : m ≤ n := by
+      try simp only [Grade.ofNat_eq_nat, Grade.ofBound_fin, Grade.nat_add,
+        Grade.nat_mul, Grade.nat_one_mul, Grade.mul_nat_one]
+      first
+        | exact Grade.le_refl _
+        | (apply Grade.nat_le_nat; omega)
+        | exact Grade.le_top _
+        | assumption) : DbFetchP c n α P :=
+  withBound
+    ((DbFetchP.pure ()).bindD (g := fun _ => m) (fun _ => x) n
+      (fun σ _ _ => h σ))
+    (Grade.zero_add n)
+
+end DbFetchP
 
 /-- The batched door: fetch for a whole runtime key set in **one** round —
 the keys become an `IN (…)` list inside a single statement, so a thousand
 parents still cost grade 1. This is how N+1 collapses to 1+1. -/
-def DbFetch.fetchFor [SqlLit t] (keys : List t.interp)
+def DbFetchP.fetchFor [SqlLit t] (keys : List t.interp)
     (mk : (∀ {ρ}, List (SqlExprP ρ c ⟨t, true⟩)) → Query c s) :
     DbFetch c 1 (List (Values s)) :=
-  .fetch (mk fun {ρ} => keys.map fun k => .widen (SqlLit.lit k))
+  DbFetchP.map id (DbFetchP.fetch (mk fun {ρ} => keys.map fun k => .widen (SqlLit.lit k)))
 
 /-- Fetch at most `n` rows, **with the bound in the type**: applies
 `LIMIT n` to the query and returns a length-refined list — the evidence
@@ -191,14 +341,15 @@ itself. The `LIMIT` is the engine's; the client only *checks* the
 length to realize the proof — the rows pass through untouched
 (provably so in the reference semantics: `Query.run_limit_length_le`),
 and the `take` clamp fires only against a disagreeing engine. -/
-def DbFetch.fetchLimit (q : Query c s) (n : Bound) :
+def DbFetchP.fetchLimit (q : Query c s) (n : Bound) :
     DbFetch c 1 {xs : List (Values s) // .fin xs.length ≤ n} :=
   match n with
   | .fin k =>
-      (fetch (q.limit k)).map fun xs =>
+      DbFetchP.map (fun xs =>
         if h : xs.length ≤ k then ⟨xs, Bound.fin_le_fin h⟩
-        else ⟨xs.take k, Bound.fin_le_fin (List.length_take_le k xs)⟩
-  | .top => (fetch q).map fun xs => ⟨xs, rfl⟩
+        else ⟨xs.take k, Bound.fin_le_fin (List.length_take_le k _)⟩)
+        (DbFetchP.fetch (q.limit k))
+  | .top => DbFetchP.map (fun xs => ⟨xs, rfl⟩) (DbFetchP.fetch q)
 
 /-- Fetch **with the query's own cardinality bound** in the type: rows
 refined by `.fin xs.length ≤ q.card`. For an unbounded query the
@@ -210,23 +361,54 @@ whatever shape it takes). Like `fetchLimit`, the engine's answer is only
 for an engine that disagrees with the query's own structure — the
 soundness theorem (`card` never underestimates the reference semantics)
 is what makes the check principled rather than defensive. -/
-def DbFetch.fetchBounded (q : Query c s) :
+def DbFetchP.fetchBounded (q : Query c s) :
     DbFetch c 1 {xs : List (Values s) // .fin xs.length ≤ q.card} :=
-  (fetch q).map fun xs =>
+  DbFetchP.map (fun xs =>
     match q.card with
     | .top => ⟨xs, Bound.le_top _⟩
     | .fin k =>
-        if hl : xs.length ≤ k then ⟨xs, Bound.fin_le_fin hl⟩
-        else ⟨xs.take k, Bound.fin_le_fin (List.length_take_le k xs)⟩
+        if h : xs.length ≤ k then ⟨xs, Bound.fin_le_fin h⟩
+        else ⟨xs.take k, Bound.fin_le_fin (List.length_take_le k _)⟩)
+    (DbFetchP.fetch q)
 
 /-! Pipeline-flowing spellings: a query ends in `|>.fetch` /
 `|>.fetchLimit n` instead of being wrapped in a prefix call — same
 constructors, dot-notation on the query. -/
 
-/-- `q.fetch` — the query as a one-round program:
-`Query.from' … |>.where' … |>.fetch`. -/
-def Query.fetch (q : Query c s) : DbFetch c 1 (List (Values s)) :=
+/-- `q.fetch` — the query as a one-round program. The rows are a plain
+list; the facts (rows fit `card`, and `gcard` at every σ) ride the
+postcondition, where `bindD`'s evidence consumes them. -/
+def Query.fetch (q : Query c s) :
+    DbFetchP c 1 (List (Values s)) (fun xs σ =>
+      Bound.fin xs.length ≤ q.card ∧
+      Bound.fin xs.length ≤ (Query.gcard q).evalB σ) :=
   .fetch q
+
+/-- `q.forQuery f` — the per-row loop priced by the query's own card. -/
+def Query.forQuery {Q : Values s → Post β} (q : Query c s)
+    (f : (v : Values s) → DbFetchP c k β (Q v)) :
+    DbFetch c (1 + k * Query.gcard q) (List β) :=
+  DbFetchP.forQuery q f
+
+/-! `fetch!`'s loop target, overloaded by the iteree: a plain list loops
+by `forAll` (grade `k * |xs|`), a query by `forQuery` (grade
+`1 + k * q.gcard` — the symbolic price). Two exports of one name; the
+elaborator keeps the alternative that typechecks. -/
+
+def LoopList.forLoop {Q : α → Post β} (xs : List α)
+    (f : (a : α) → DbFetchP c k β (Q a)) :
+    DbFetch c (k * Grade.nat xs.length) (List β) :=
+  .forAll xs f
+
+def LoopQuery.forLoop {Q : Values s → Post β} (q : Query c s)
+    (f : (v : Values s) → DbFetchP c k β (Q v)) :
+    DbFetch c (1 + k * Query.gcard q) (List β) :=
+  DbFetchP.forQuery q f
+
+namespace DbFetch
+export LeanLinq.LoopList (forLoop)
+export LeanLinq.LoopQuery (forLoop)
+end DbFetch
 
 /-- `sc.fetch` — a scalar query as a one-round program. -/
 def ScalarQuery.fetch (sc : ScalarQuery c ⟨t, n⟩) : DbFetch c 1 (Nullable t) :=
@@ -236,23 +418,13 @@ def ScalarQuery.fetch (sc : ScalarQuery c ⟨t, n⟩) : DbFetch c 1 (Nullable t)
 `Query.from' … |>.orderBy … |>.fetchLimit 5`. -/
 def Query.fetchLimit (q : Query c s) (n : Bound) :
     DbFetch c 1 {xs : List (Values s) // .fin xs.length ≤ n} :=
-  DbFetch.fetchLimit q n
+  DbFetchP.fetchLimit q n
 
 /-- `q.fetchBounded` — the fetch refined by the query's own `card`,
 flowing: `Query.from' … |>.limit 5 |>.fetchBounded`. -/
 def Query.fetchBounded (q : Query c s) :
     DbFetch c 1 {xs : List (Values s) // .fin xs.length ≤ q.card} :=
-  DbFetch.fetchBounded q
-
-/-- Weakening: a program bounded by `m` is bounded by any `n ≥ m` —
-derived, not primitive (`bindD` over `pure ()` with the constant
-family). The door for value-dependent budgets: an inner loop whose
-exact grade mentions a fetched value restates to the uniform bound the
-enclosing combinator needs, paying with the inequality — which is
-where a refinement gets cashed. -/
-def DbFetch.weaken (x : DbFetch c m α) (n : Bound)
-    (h : m ≤ n := by decide) : DbFetch c n α :=
-  ((DbFetch.pure ()).bindD (g := fun _ => m) (fun _ => x) n (fun _ => h)).withBound
+  DbFetchP.fetchBounded q
 
 /-! ## `fetch!` — do-notation for the graded monad
 
@@ -301,12 +473,15 @@ def resolveClause (c : Syntax) : Syntax :=
   else c
 
 open Lean in
-/-- Fuse `let x ← e` immediately followed by `for p in x.val do body` into
-`DbFetch.forRows e (fun p => body)` — the post-fetch loop with the budget
-proof carried by `e`'s length-refined result (`fetchLimit`). The `.val`
-spelling is the syntactic marker; `x`'s binder disappears, so any other
-use of `x` is an unknown-identifier error (fetch it separately if you
-need the rows too). -/
+/-- Fuse `let x ← e` immediately followed by a loop over `x` into the
+post-fetch loop whose budget proof is carried by `e`'s result:
+`for p in x.val do body` (length-refined rows — `fetchLimit`) becomes
+`DbFetchP.forRows e (fun p => body)`, and `for p in x do body` (plain
+rows — the refinement-free spelling) becomes `DbFetchP.forFetched`,
+priced by the fetch's own contract (`k * q.gcard`). The binder spelling
+is the syntactic marker; `x`'s binder disappears, so any other use of
+`x` is an unknown-identifier error (fetch it separately if you need the
+rows too). -/
 private partial def fuseBoundedLoops : List Syntax → MacroM (List Syntax)
   | [] => return []
   | [c] => return [c]
@@ -316,7 +491,11 @@ private partial def fuseBoundedLoops : List Syntax → MacroM (List Syntax)
       let src := c2[6]
       if x.isIdent && src.isIdent && src.getId == x.getId.str "val" then
         let fused ← `(fetchClause| let $(⟨c2[1]⟩):ident ←
-          LeanLinq.DbFetch.forRows $(⟨c1[3]⟩) (fun $(⟨c2[4]⟩):ident => $(⟨c2[8]⟩)))
+          LeanLinq.DbFetchP.forRows $(⟨c1[3]⟩) (fun $(⟨c2[4]⟩):ident => $(⟨c2[8]⟩)))
+        return ← fuseBoundedLoops (fused :: rest)
+      if x.isIdent && src.isIdent && src.getId == x.getId then
+        let fused ← `(fetchClause| let $(⟨c2[1]⟩):ident ←
+          LeanLinq.DbFetchP.forFetched $(⟨c1[3]⟩) (fun $(⟨c2[4]⟩):ident => $(⟨c2[8]⟩)))
         return ← fuseBoundedLoops (fused :: rest)
     return c1 :: (← fuseBoundedLoops (c2 :: rest))
 
@@ -334,29 +513,30 @@ open Lean in
       match revRest with
       | prev :: rest =>
         if prev.isOfKind ``fetchBind then
-          pure (← `(LeanLinq.DbFetch.map (fun $(⟨prev[1]⟩) => $(⟨last[1]⟩)) $(⟨prev[3]⟩)), rest)
+          pure (← `(LeanLinq.DbFetchP.map (fun $(⟨prev[1]⟩) => $(⟨last[1]⟩)) $(⟨prev[3]⟩)), rest)
         else if prev.isOfKind ``fetchForAll then
-          pure (← `(LeanLinq.DbFetch.map (fun $(⟨prev[1]⟩) => $(⟨last[1]⟩))
-            (LeanLinq.DbFetch.forAll $(⟨prev[6]⟩) (fun $(⟨prev[4]⟩) => $(⟨prev[8]⟩)))), rest)
+          pure (← `(LeanLinq.DbFetchP.map (fun $(⟨prev[1]⟩) => $(⟨last[1]⟩))
+            (LeanLinq.DbFetch.forLoop $(⟨prev[6]⟩) (fun $(⟨prev[4]⟩) => $(⟨prev[8]⟩)))), rest)
         else
-          pure (← `(LeanLinq.DbFetch.pure $(⟨last[1]⟩)), revRest)
-      | [] => pure (← `(LeanLinq.DbFetch.pure $(⟨last[1]⟩)), revRest)
+          pure (← `(LeanLinq.DbFetchP.pure $(⟨last[1]⟩)), revRest)
+      | [] => pure (← `(LeanLinq.DbFetchP.pure $(⟨last[1]⟩)), revRest)
     let folded ← revRest.foldlM (init := init) fun (acc : TSyntax `term) c => do
       if c.isOfKind ``fetchBind then
-        `(LeanLinq.DbFetch.bind $(⟨c[3]⟩) (fun $(⟨c[1]⟩) => $acc))
+        `(LeanLinq.DbFetchP.bind $(⟨c[3]⟩) (fun $(⟨c[1]⟩) => $acc))
       else if c.isOfKind ``fetchForAll then
-        -- let y ← for x in xs do body — exact grade k * xs.length
-        `(LeanLinq.DbFetch.bind
-            (LeanLinq.DbFetch.forAll $(⟨c[6]⟩) (fun $(⟨c[4]⟩) => $(⟨c[8]⟩)))
+        -- let y ← for x in xs do body — a list loops at its exact grade
+        -- k * xs.length, a query at its symbolic price 1 + k * gcard
+        `(LeanLinq.DbFetchP.bind
+            (LeanLinq.DbFetch.forLoop $(⟨c[6]⟩) (fun $(⟨c[4]⟩) => $(⟨c[8]⟩)))
             (fun $(⟨c[1]⟩) => $acc))
       else if c.isOfKind ``fetchLet then
         `(let $(⟨c[1]⟩) := $(⟨c[3]⟩); $acc)
       else
         Macro.throwErrorAt c "expected `let x ← e`, `let x := e`, `let ys ← for x in xs do e`, or a final `return e`"
-    `(LeanLinq.DbFetch.withBound $folded)
+    `(LeanLinq.DbFetchP.withBound $folded)
 
 namespace QueryB
-export Query (fetch fetchLimit fetchBounded)
+export Query (fetch fetchLimit fetchBounded forQuery)
 end QueryB
 
 namespace ScalarB
@@ -370,13 +550,26 @@ spec proved against it — quantified over **every** environment — is a
 fact about the *program*, established once; the same tree then meets a
 live engine at an IO door. -/
 
-/-- The spec of the *program*, fully abstract: any query, any limit,
-over **every** database — the fetched page fits. -/
+/-- A limited query's card sits under its limit — whatever else the
+query is. -/
+theorem card_limit_le {ts : Ctx} {s : Schema} (q : Query ts s) (n : Nat) :
+    (q.limit n).card ≤ Bound.fin n := by
+  show (QueryP.limit (q AliasOf) n).card ≤ _
+  unfold QueryP.limit
+  split
+  · exact Bound.min_le_right ..
+  · unfold QueryP.limitOffset
+    split
+    · exact Bound.min_le_right ..
+    · exact Bound.min_le_right ..
+
+/-- The spec of the *program*, fully abstract: any query, any limit —
+and no run-hypothesis at all anymore: the refined `fetch` carries in its
+*type* what this used to prove about the semantics. The page fits by
+projection. -/
 theorem fetchPage_fits {ts : Ctx} {s : Schema} (q : Query ts s) (n : Nat)
-    (ee : EvalEnv ts) {xs}
-    (h : DbFetch.runWith ee (q.limit n).fetch = .ok xs) :
-    xs.length ≤ n := by
-  simp only [DbFetch.runWith, Query.fetch] at h
-  exact Query.run_limit_length_le q n ee.tables ee.params ee.now h
+    (xs : {xs : List (Values s) // Bound.fin xs.length ≤ (q.limit n).card}) :
+    xs.val.length ≤ n :=
+  of_decide_eq_true (Bound.le_trans xs.property (card_limit_le q n))
 
 end LeanLinq

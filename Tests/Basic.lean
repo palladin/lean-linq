@@ -155,13 +155,13 @@ def sampleRounds : (n : Nat) → DbFetch BasicCtx n (List Nat)
 so `omega` discharges it for *every* `n` — the door demands proof, not
 literals. Contrast N+1's `ids.length ≤ 8`, which is simply not provable. -/
 example (n : Nat) : Except EvalError (List Nat) :=
-  (sampleRounds n).exec (2 * n + 1) demoEnv .nil none (Bound.fin_le_fin (by omega))
+  (sampleRounds n).exec (2 * n + 1) demoEnv .nil none (Grade.nat_le_nat (by omega))
 
 /-- Bounded fan-out is allowed — proof-carrying: `take 3` makes
 `(ids.take 3).length ≤ 8` provable, and the caller supplies the proof. -/
 example (ids : List Int) : Except EvalError (List (List (Values OrdersS))) :=
   (perRow (ids.take 3)).exec 8 demoEnv .nil none
-    (Bound.fin_le_fin (by rw [List.length_take]; omega))
+    (Grade.nat_le_nat (by rw [List.length_take]; omega))
 
 /-- `for x in xs do` is that idiom as sugar — the per-row loop with the
 exact grade `1 * ks.length` in the type: closed lists close it
@@ -179,7 +179,8 @@ def perRowAll (ks : List Int) := fetch! {
 every `ks` — the rounds are visible, priced, and proved, not hidden. -/
 example (ks : List Int) : Except EvalError (List Nat) :=
   (perRowAll ks).exec ks.length demoEnv .nil none
-    (Bound.fin_le_fin (a := 1 * ks.length) (by omega))
+    (by simp only [Grade.ofNat_eq_nat, Grade.nat_one_mul]
+        exact Grade.le_refl _)
 
 /-- The bounded post-fetch loop: `fetchLimit` puts the row bound in the
 type (`{xs // xs.length ≤ 3}` — `LIMIT` really limits, by
@@ -197,6 +198,26 @@ def perRowBounded : DbFetch BasicCtx 4 (List Nat) := fetch! {
 }
 
 #guard (perRowBounded.exec 4 demoEnv |>.toOption) == some [0, 0]
+
+/-- The refinement-free sibling: fetch plain, then loop over the rows —
+no `.val`, no restated bound. Legal because the loop is priced by the
+fetch's own *contract* (`forFetched`, fused from the adjacent bind +
+`for`): grade `1 + 1 * gcard customers`, symbolic in the table size,
+collapsed and checked by the sized door. -/
+def perRowFetched := fetch! {
+  let parents ← Query.from' (ts := BasicCtx) customers |>.fetch
+  let waves ← for p in parents do
+    Query.from' (ts := BasicCtx) orders
+      |>.where' (fun o => o["CustomerId"] ==. p["Id"])
+      |>.fetch
+  return waves.map (·.length)
+}
+
+-- demoEnv holds 2 customers: the collapsed price is 1 + 2 = 3
+#guard ((perRowFetched.execWithin 3 demoEnv).toOption) == some [0, 0]
+#guard ((perRowFetched.execWithin 2 demoEnv).toOption) == none
+-- no closed budget dominates the symbolic grade — the finite door refuses
+#check_failure (perRowFetched.exec 1000 demoEnv)
 
 /-! ## Nullability in the universe: honest cells, lifted joins. -/
 
@@ -259,9 +280,12 @@ example (o : Row BasicCtx OrdersS.asNull) : SqlExpr BasicCtx ⟨.int, true⟩ :=
 } : DbFetch BasicCtx 4 (List Nat))
 -- under-budgeting the bounded fan-out: grade 4 > 3
 #check_failure (perRowBounded.exec 3 demoEnv)
--- and `for … do` cannot follow a fetch inside one program:
--- the loop's grade would mention the fetched rows, which `bind` cannot
--- type — the N+1 rejection is structural, not a lint
+-- and `for … do` over a collection *derived* from fetched rows is still
+-- rejected: the contract does not transport through `filterMap`, so the
+-- loop's grade mentions `ids`, which `bind` cannot type. Looping over
+-- the fetched rows themselves is the legal, contract-priced spelling
+-- (`perRowFetched` above) — the N+1 rejection is about laundered
+-- provenance, and it is structural, not a lint
 #check_failure (fetch! {
   let cs ← .fetch (Query.from' (ts := BasicCtx) customers)
   let ids := cs.filterMap fun v => (v.get? "Id" .int).bind id
@@ -286,18 +310,18 @@ clamps to month-end and preserves the time of day. -/
 shapes: closed facts by `decide`, ⊤ budgets by `le_top`, and
 `fetchLimit`-refined loops through the refinement itself. -/
 example : DbFetch BasicCtx (1 + 2) (List (Values OrdersS)) :=
-  DbFetch.bindD' (.fetch (Query.from' (ts := BasicCtx) orders))
-    (fun _ => .fetch (Query.from' (ts := BasicCtx) orders)) 2
+  DbFetchP.bindD' (.fetch (Query.from' (ts := BasicCtx) orders))
+    (fun _ => DbFetchP.map id (.fetch (Query.from' (ts := BasicCtx) orders))) 2
 
 example (n : Nat) : DbFetch BasicCtx (1 + 1 * n) (List (List (Values OrdersS))) :=
-  DbFetch.bindD'
-    (DbFetch.fetchLimit (Query.from' (ts := BasicCtx) orders) n)
+  DbFetchP.bindD'
+    (DbFetchP.fetchLimit (Query.from' (ts := BasicCtx) orders) n)
     (fun a => .forAll a.val
       (fun _ => .fetch (Query.from' (ts := BasicCtx) orders)))
     (1 * n)
 
 example : DbFetch BasicCtx (1 + ⊤) (List (List (Values OrdersS))) :=
-  DbFetch.bindD'
+  DbFetchP.bindD'
     (.fetch (Query.from' (ts := BasicCtx) orders))
     (fun rows => .forAll rows
       (fun _ => .fetch (Query.from' (ts := BasicCtx) orders)))

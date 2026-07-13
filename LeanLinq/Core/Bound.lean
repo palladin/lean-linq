@@ -195,8 +195,14 @@ theorem mul_le_mul_left (k : Bound) : {a b : Bound} → a ≤ b → k * a ≤ k 
       | fin kk => exact decide_eq_true (Nat.mul_le_mul_left kk (of_decide_eq_true h))
 end Bound
 
-/-- ⊤ — the unbounded `Bound`. -/
-scoped notation "⊤" => Bound.top
+/-- The ⊤ spelling, shared by every bound lattice in the library
+(`Bound` for rows, `Grade` for rounds) — resolution by expected type. -/
+class HasTop (α : Type) where
+  top : α
+
+instance : HasTop Bound := ⟨.top⟩
+
+scoped notation "⊤" => HasTop.top
 
 /-- Nat expressions embed as finite bounds — `DbFetch c (n + 1) α` reads
 as before. -/

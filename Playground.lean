@@ -163,7 +163,7 @@ carries the *exact* dynamic round count in the type, and the door takes
 a proof — `by decide` once the list is a literal, `by omega` for a
 computed budget. -/
 def ordersFor (ids : List Int) :
-    DbFetch PlayCtx ids.length (List Nat) := fetch! {
+    DbFetch PlayCtx (Grade.nat ids.length) (List Nat) := fetch! {
   let waves ← for k in ids do
     Query.from' (ts := PlayCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. SqlExpr.long k)
@@ -186,7 +186,7 @@ the parents, at most `n` for the fan-out — and `p["Id"]` embeds the
 fetched cell as a typed literal. N+1 written deliberately: the bounded
 query pays for the fan-out. -/
 def topSpendersDetail (n : Bound) :
-    DbFetch PlayCtx (n + 1) (List (String × Nat)) := fetch! {
+    DbFetch PlayCtx (Grade.ofBound n + 1) (List (String × Nat)) := fetch! {
   let spenders ← adults.fetchLimit n
   let report ← for s in spenders.val do
     Query.from' (ts := PlayCtx) orders
@@ -202,7 +202,8 @@ def topSpendersDetail (n : Bound) :
 -- and under a *symbolic* budget the door takes a proof, for every n:
 example (n : Nat) : Except EvalError (List (String × Nat)) :=
   (topSpendersDetail n).exec (n + 1) demoEnv .nil none
-    (Bound.le_refl _)
+    (by simpa only [Grade.ofNat_eq_nat, Grade.ofBound_fin, Grade.nat_add]
+      using Grade.le_refl (Grade.nat (n + 1)))
 
 /- The same report in **two rounds flat**, any number of spenders: the
 batched door replaces the per-row loop — every order arrives in one
@@ -237,7 +238,8 @@ def allSpendersDetail : Except EvalError (List (String × Nat)) := do
   let cnt ← (adults.count).fetch.exec 1 demoEnv        -- round 1: how many?
   let n := (cnt.getD 0).toNat
   (topSpendersDetail n).exec (n + 1) demoEnv .nil none
-    (Bound.le_refl _)
+    (by simpa only [Grade.ofNat_eq_nat, Grade.ofBound_fin, Grade.nat_add]
+      using Grade.le_refl (Grade.nat (n + 1)))
 
 #eval allSpendersDetail   -- Except.ok [("Jane Smith", 1), ("John Doe", 1)]
 
@@ -256,13 +258,82 @@ check. The checker below verifies this fails to elaborate. -/
   return (parents.length, children.length)
 }
 
-/-- Program-level reasoning: `fetchPage_fits` is proved once against the
-model handler (`runWith`, over every environment) — the ten-slot page is
-an instance, zero proof work. -/
-example (ee : EvalEnv PlayCtx) {xs}
-    (h : DbFetch.runWith ee (adults.limit 10).fetch = .ok xs) :
+/-! ## Symbolic grades — round budgets in the database's own terms
+
+`topSpendersDetail n` needs its `n` because a closed bound can only say
+`fin k` or ⊤: to price the per-parent loop you must cap the parents.
+The `Grade` lattice removes the dilemma — grades are max-plus
+polynomials over table sizes, so the natural unlimited program carries
+the honest price **in its type**: `customers.size + 1` — one round for
+the parents, one per actual customer. `exec` still refuses it (no
+number dominates `|customers| + 1`); `execWithin` collapses the grade
+against the model's own sizes and checks there; `execAll` remains the
+free door. -/
+
+/-- The unlimited report, priced symbolically — no budget argument, no
+LIMIT, the type says exactly what it costs: `for s in adults do` loops
+over the *query*, and the loop's grade is the query's own symbolic
+card. -/
+def topSpendersDetailAll :
+    DbFetch PlayCtx (customers.size + 1) (List (String × Nat)) := fetch! {
+  let report ← for s in adults do
+    Query.from' (ts := PlayCtx) orders
+      |>.where' (fun o => o["CustomerId"] ==. s["Id"])
+      |>.fetch
+      |>.map (fun orders => (s["Name"], orders.length))
+  return report
+}
+
+-- the grade collapses against the model's sizes: demoEnv holds 3
+-- customers, so the price is 4 — an upper bound (guards only remove:
+-- just 2 of the 3 are adults, so the program performs 1 + 2 = 3 rounds)
+#guard (customers.size + 1).evalB (TableEnv.sizes demoEnv) == Bound.fin 4
+#guard ((topSpendersDetailAll.runCount ⟨demoEnv, .nil, none⟩).toOption.map (·.2))
+    == some 3
+-- the sized door checks the collapsed grade, then runs …
+#guard (topSpendersDetailAll.execWithin 4 demoEnv).toOption
+    == some [("Jane Smith", 1), ("John Doe", 1)]
+-- … and refuses an insufficient budget at this database's sizes
+#guard (topSpendersDetailAll.execWithin 3 demoEnv).toOption == none
+-- the closed door refuses the symbolic grade statically — no number
+-- bounds |customers| + 1:
+#check_failure (topSpendersDetailAll.exec 1000 demoEnv)
+
+-- forgetting the symbols recovers the conservative closed reading:
+#guard ((customers.size + 1 : Grade)).forget == (⊤ : Bound)
+
+/-- The same program, spelled **fetch first, then loop over the rows**:
+`spenders` is a plain `List` — no subtype, no restated bound — and the
+loop is still priced, because `fetch`'s postcondition (rows fit
+`adults.gcard` at every σ) rides into the loop's budget evidence
+(`forFetched`, fused from the adjacent bind + `for`). The two spellings
+carry the same type: the price is the program's, not the sugar's. -/
+def topSpendersDetailAll' :
+    DbFetch PlayCtx (customers.size + 1) (List (String × Nat)) := fetch! {
+  let spenders ← adults.fetch
+  let report ← for s in spenders do
+    Query.from' (ts := PlayCtx) orders
+      |>.where' (fun o => o["CustomerId"] ==. s["Id"])
+      |>.fetch
+      |>.map (fun orders => (s["Name"], orders.length))
+  return report
+}
+
+-- same rounds, same rows, same doors as the loop-over-query spelling:
+#guard ((topSpendersDetailAll'.runCount ⟨demoEnv, .nil, none⟩).toOption.map (·.2))
+    == some 3
+#guard (topSpendersDetailAll'.execWithin 4 demoEnv).toOption
+    == some [("Jane Smith", 1), ("John Doe", 1)]
+#check_failure (topSpendersDetailAll'.exec 1000 demoEnv)
+
+/-- Program-level reasoning, absorbed into the door: the refined `fetch`
+carries in its *type* what used to need a run-hypothesis — the ten-slot
+page fits by projection, zero proof work, over every environment and
+every engine that survives the clamp. -/
+example {xs : List (Values [("Id", SqlType.long), ("Name", SqlType.string)])}
+    (hxs : Bound.fin xs.length ≤ (adults.limit 10).card) :
     xs.length ≤ 10 :=
-  fetchPage_fits adults 10 ee h
+  fetchPage_fits adults 10 ⟨xs, hxs⟩
 
 /-! ## Statements -/
 

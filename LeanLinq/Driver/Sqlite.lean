@@ -204,23 +204,29 @@ executes sequentially here: SQLite is in-process, so a "round" costs a
 statement, not a network wait — the `max` grade is the contract for future
 networked drivers, which batch `seq`'s sides into shared rounds. -/
 private def Sqlite.interp (conn : Sqlite.Conn) (ps : ParamEnv c.params) :
-    {r' : Bound} → {β : Type} → DbFetch c r' β → IO β
-  | _, _, .pure a => Pure.pure a
-  | _, _, .fetch q => conn.query q ps
-  | _, _, .fetchCell sc => conn.queryCell sc ps
-  | _, _, .seq g x => do Pure.pure ((← interp conn ps g) (← interp conn ps x))
-  | _, _, .bind x k => do interp conn ps (k (← interp conn ps x))
-  | _, _, .forAll xs f => xs.mapM fun a => interp conn ps (f a)
-  | _, _, .bindD x f _ _ => do interp conn ps (f (← interp conn ps x))
+    {r' : Grade} → {β : Type} → {P : Post β} → DbFetchP c r' β P → IO β
+  | _, _, _, .pure a => Pure.pure a
+  | _, _, _, .fetch q => conn.query q ps
+  | _, _, _, .fetchCell sc => conn.queryCell sc ps
+  | _, _, _, .seq g x => do Pure.pure ((← interp conn ps g) (← interp conn ps x))
+  | _, _, _, .forAll xs f => xs.mapM fun a => interp conn ps (f a)
+  | _, _, _, .bindD x f _ _ => do interp conn ps (f (← interp conn ps x))
 
-def DbFetch.execIO (f : DbFetch c r α) (conn : Sqlite.Conn) (budget : Nat)
+def DbFetchP.execIO {P : Post α} (f : DbFetchP c r α P) (conn : Sqlite.Conn) (budget : Nat)
     (ps : ParamEnv c.params := by exact .nil)
-    (_h : r ≤ .fin budget := by decide) : IO α :=
+    (_h : r ≤ Grade.nat budget := by
+      try simp only [Grade.ofNat_eq_nat, Grade.ofBound_fin, Grade.nat_add,
+        Grade.nat_mul, Grade.nat_one_mul, Grade.mul_nat_one,
+        Grade.nat_zero_add, Grade.add_nat_zero]
+      first
+        | exact Grade.le_refl _
+        | (apply Grade.nat_le_nat; omega)
+        | assumption) : IO α :=
   Sqlite.interp conn ps f
 
 /-- The unbounded door over the wire: no budget, obligation-free — the
 explicit opt-out for ⊤ programs, same as the in-memory `execAll`. -/
-def DbFetch.execIOAll (f : DbFetch c r α) (conn : Sqlite.Conn)
+def DbFetchP.execIOAll {P : Post α} (f : DbFetchP c r α P) (conn : Sqlite.Conn)
     (ps : ParamEnv c.params := by exact .nil) : IO α :=
   Sqlite.interp conn ps f
 

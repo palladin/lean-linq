@@ -240,6 +240,13 @@ def ParamEnv.toCells : {ps : List (String × SqlType)} → ParamEnv ps →
   | _, .cons (n := n) (c := c) v rest =>
       (n, ⟨c.ty, SqlType.toNullable v⟩) :: rest.toCells
 
+/-- The sizes of the environment's tables, by name (first match; an
+unknown name is 0). The valuation `Grade.evalB` collapses symbolic
+grades against. -/
+def TableEnv.sizes : {ts : List (String × Schema)} → TableEnv ts → String → Nat
+  | [], .nil, _ => 0
+  | (n, _) :: _, .cons rs env, q => if q = n then rs.length else env.sizes q
+
 /-- Everything evaluation reads besides the query itself: the typed tables,
 the typed parameter bindings, and the (optional) current timestamp. -/
 structure EvalEnv (c : Ctx) where

@@ -113,6 +113,44 @@ end
 
 @[reducible] def QueryP.card (q : QueryA ts s) : Bound := q.cardAux 0
 
+/-! ## Symbolic cardinality — the same walk, priced in table sizes
+
+`gcard` refines `card` in the round lattice: where `card` answers ⊤ for
+a bare source, `gcard` answers with the source's *name* — `|customers|`,
+`|customers| × |orders|` — a `Grade` the model collapses against real
+sizes (`Grade.evalB (TableEnv.sizes env)`) and anyone collapses
+conservatively (`Grade.forget`). `Grade` has no `min`, so `limit l`
+prices as the always-sound `l` and `intersect` takes its left operand —
+the closed `card` stays the tighter row bound where `min` matters. -/
+
+mutual
+
+@[reducible] def SpineQP.gcardAux : SpineQ ts g s → Nat → Grade
+  | .yield _, _ => 1
+  | .groupYield .., _ => 1
+  | .guard _ rest, n => rest.gcardAux n
+  | .order _ rest, n => rest.gcardAux n
+  | .fromT (n := nm) (inst := _) _ f, n => .tbl nm * (f ⟨s!"a{n}"⟩).gcardAux (n + 1)
+  | .joinT (n := nm) (inst := _) _ _ f, n => .tbl nm * (f ⟨s!"a{n}"⟩).gcardAux (n + 1)
+  | .joinLeftT (n := nm) (inst := _) _ _ f, n =>
+      (.tbl nm + 1) * (f ⟨s!"a{n}"⟩).gcardAux (n + 1)
+  | .fromQ q f, n => q.gcardAux n * (f ⟨s!"a{n}"⟩).gcardAux (n + 1)
+
+@[reducible] def QueryP.gcardAux : QueryA ts s → Nat → Grade
+  | .spine sp, n => sp.gcardAux n
+  | .distinctC q, n => q.gcardAux n
+  | .limitC q lim? _, n =>
+      match lim? with
+      | some l => Grade.nat l
+      | none => q.gcardAux n
+  | .setOpC .union a b, n => a.gcardAux n + b.gcardAux n
+  | .setOpC .intersect a _, n => a.gcardAux n
+  | .setOpC .except a _, n => a.gcardAux n
+
+end
+
+@[reducible] def QueryP.gcard (q : QueryA ts s) : Grade := q.gcardAux 0
+
 namespace QueryP
 
 variable {ρ : Schema → Type}
@@ -471,6 +509,14 @@ end Query
 /-- The row-count bound of a bundle — read at the compiled view (the
 alignment theorem makes that the sound instantiation, permanently). -/
 @[reducible] def Query.card (q : Query ts s) : Bound := (q AliasOf).card
+
+/-- The bundle's symbolic row bound in the **round** lattice — what a
+per-row loop's grade spends. -/
+@[reducible] def Query.gcard (q : Query ts s) : Grade := (q AliasOf).gcard
+
+namespace QueryB
+export Query (gcard)
+end QueryB
 
 namespace QueryB
 export Query (card)

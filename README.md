@@ -268,8 +268,9 @@ def demo : IO Unit := do
 `DbFetch` prices round trips in the type (`fetch` = 1, independent `seq` = `max`,
 data-dependent `bind` = `+`, per-row `for` = body grade × collection length), and
 execution demands a budget plus a proof — the philosophy being that everything is
-representable and the *proof* is the gate. Bounds live in the lattice ℕ∞ (`Bound`:
-numerals, Nat expressions, `⊤`). That gives N+1 four doors, none accidental:
+representable and the *proof* is the gate. Row bounds live in the lattice ℕ∞
+(`Bound`: numerals, Nat expressions, `⊤`); round grades in `Grade`, which embeds
+it and adds table-size symbols. That gives N+1 four doors, none accidental:
 `fetchFor` batches a whole key set into one `IN (…)` round (grade 1);
 `let ys ← for x in xs do body` loops per row with the **exact dynamic grade**
 `k * xs.length` — for collections already in hand, proved at the door (`by decide`
@@ -277,7 +278,7 @@ for literals, `omega` for computed budgets); and over *just-fetched* rows the lo
 is legal exactly when the fetch is bounded — `fetchLimit q n` returns a
 length-refined list (`{xs // xs.length ≤ n}`, backed by the first theorem about the
 executable semantics: `Query.run_limit_length_le`, `LIMIT` really limits), and
-looping over its `.val` fuses into `DbFetch.forRows`, whose budget proof *is* the
+looping over its `.val` fuses into `DbFetchP.forRows`, whose budget proof *is* the
 refinement — grade `m + k * n`, closed, silent. The bound is in fact a property of
 the query itself: `q.card : Bound` computes an upper bound on the result size from
 the query value (table sources are ⊤, `limit` caps, joins multiply, unions add) and
@@ -292,6 +293,19 @@ N+1 when you mean it — priced by a bounded query, or declared unbounded at the
 site — and you cannot write it by accident. (Loops are
 first-class constructors with independent bodies, so the pipelining PostgreSQL
 driver batches them into shared rounds — the declared grade is an upper bound.)
+
+The price can also be *symbolic in the database itself*: grades are canonical
+max-plus polynomials over table-size symbols, so `customers.size + 1` is a type,
+and `q.gcard` prices a query's rows in those symbols (sources contribute their
+table's symbol, joins multiply, `limit` caps). A per-row loop over a plain fetch
+then types at `1 + k * q.gcard` with **no bound restated**: `fetch` carries as its
+postcondition that the rows fit `q.card` and — at every size valuation σ —
+`q.gcard`, and the dependent bind (`bindD`) takes evidence *conditional on that
+postcondition*, so the loop's budget proof consumes the contract and transports it
+through the evaluation homomorphism. Canonical grades make the arithmetic
+definitional (`1 + 1*X = X + 1` is `rfl`), and the sized door `execWithin` collapses
+the polynomial against the live database's own sizes before interpreting a single
+round.
 
 All of it in one definition, written in `fetch!` do-sugar:
 
@@ -460,7 +474,7 @@ return `Bool`/`Prop`, so SQL needs its own).
 
 Core, full query surface (joins, grouping, aggregates, set ops, subqueries),
 statements, the three dialects, native drivers for all three engines, and the
-round-budgeted `DbFetch` layer are implemented, with a 358-case × 3-dialect
+round-budgeted `DbFetch` layer are implemented, with a 402-case × 3-dialect
 golden suite (both surfaces), an executable in-memory oracle, per-driver
 corpus sweeps, and live 3-engine integration tests.
 

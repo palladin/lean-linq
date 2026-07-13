@@ -1,4 +1,5 @@
 import LeanLinq.Core.Monad
+import LeanLinq.Core.Grade
 
 namespace LeanLinq
 
@@ -14,6 +15,12 @@ The schema stays in literal form during elaboration (column lookup,
 projection typing), and the name is what `HasTable` resolves against the
 ambient context. -/
 structure Table (n : String) (s : Schema)
+
+/-- The table's size as a symbolic **grade**: `customers.size : Grade`
+is `|customers|` — the name comes from the type, so the symbol is
+well-formed by construction, and it prices `DbFetch` programs directly
+(`DbFetch c (customers.size + 1) α`). -/
+def Table.size (_ : Table n s) : Grade := .tbl n
 
 /-- Membership of a table in the ambient context, by instance search over
 the literal context list — the `HasTable` analogue of `HasCol`. The evidence

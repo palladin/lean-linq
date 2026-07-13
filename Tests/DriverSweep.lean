@@ -133,7 +133,7 @@ def spenders : DbFetch TestCtx 2 (Nat × List (Values OrdersS)) := fetch! {
 /-- The shared `seq` smoke: two *independent* fetches, grade `max 1 1 = 1` —
 on a pipelining driver this is one round carrying two statements. -/
 def bothTables : DbFetch TestCtx 1 (List (Values CustomersS) × List (Values OrdersS)) :=
-  .seq (.map Prod.mk (.fetch (Query.from' (ts := TestCtx) customers)))
+  .seq (DbFetchP.map Prod.mk (.fetch (Query.from' (ts := TestCtx) customers)))
        (.fetch (Query.from' (ts := TestCtx) orders))
 
 /-- The shared `for … do` smoke: the per-row loop over an in-hand key
