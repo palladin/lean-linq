@@ -325,7 +325,7 @@ example (n : Nat) : DbFetch BasicCtx (1 + 1 * n) (List (List (Values OrdersS))) 
 in table sizes, reducing definitionally on literal queries so `rfl`
 consumes it in types. A source is its table's own symbol; the bound
 concentrates at `limit` (a real `min` when the inner bound is closed);
-joins multiply; unions add; `intersect` prefers a closed side. -/
+joins multiply; unions add; `intersect` takes its left operand. -/
 example : Query.gcard (Query.from' (ts := BasicCtx) customers)
     = Grade.tbl "Customers" := by rfl
 example : Query.gcard (Query.from' (ts := BasicCtx) customers
@@ -343,13 +343,21 @@ example : Query.gcard (Query.from' (ts := BasicCtx) customers
 example : Query.gcard ((Query.from' (ts := BasicCtx) customers |>.limit 5).union
            (Query.from' (ts := BasicCtx) customers |>.limit 3))
     = 8 := rfl
+-- intersect prices by its left operand (the right would also bound it,
+-- but that fact is unprovable against float cells' opaque equality)
 example : Query.gcard ((Query.from' (ts := BasicCtx) customers |>.limit 5).intersect
            (Query.from' (ts := BasicCtx) customers |>.limit 3))
-    = 3 := rfl
--- a symbolic ∩ a closed bound: the closed side wins
-example : Query.gcard ((Query.from' (ts := BasicCtx) customers).intersect
-           (Query.from' (ts := BasicCtx) customers |>.limit 3))
-    = 3 := rfl
+    = 5 := rfl
+
+/-- `gcard` is a *theorem* about the executable semantics, not a
+convention: whatever a run returns fits the symbolic bound collapsed at
+that run's own sizes — here `|Customers| = 2`, with no `LIMIT` anywhere
+in the query. -/
+example {xs : List (Values CustomersS)}
+    (h : (Query.from' (ts := BasicCtx) customers
+      |>.where' (fun c => 18 <. c["Age"])).run demoEnv = .ok xs) :
+    xs.length ≤ 2 :=
+  Query.run_gcard _ demoEnv .nil none h
 example : Query.gcard (Query.from' (ts := BasicCtx) customers |>.limit 5)
     ≤ Grade.nat 9 := Grade.nat_le_nat (by omega)
 

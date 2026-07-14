@@ -86,8 +86,9 @@ definitionally, so `by decide` can consume it inside types.
 `Grade` has no general `min` (max-plus polynomials aren't closed under
 it), but min of **closed** grades is closed — so `limit l` takes the
 real `min` when the inner bound is already a numeral, and the
-always-sound `l` otherwise; `intersect` prefers a closed side (either
-operand bounds the intersection). -/
+always-sound `l` otherwise; `intersect` takes its left operand. Every
+arm is backed by `run_gcard`: evaluation never returns more rows than
+the collapsed bound. -/
 
 mutual
 
@@ -115,12 +116,11 @@ mutual
           | none => Grade.nat l
       | none => q.gcardAux n
   | .setOpC .union a b, n => a.gcardAux n + b.gcardAux n
-  | .setOpC .intersect a b, n =>
-      -- the intersection fits under either operand; prefer a closed bound
-      match (a.gcardAux n).closed?, (b.gcardAux n).closed? with
-      | some ka, some kb => Grade.nat (Nat.min ka kb)
-      | none, some kb => Grade.nat kb
-      | _, none => a.gcardAux n
+  -- intersect prices by its LEFT operand only. The right side would also
+  -- bound it, but proving that against the evaluator needs `Values.beq`
+  -- transitivity — false-by-opacity for float cells — so the sound,
+  -- provable choice is left
+  | .setOpC .intersect a _, n => a.gcardAux n
   | .setOpC .except a _, n => a.gcardAux n
 
 end

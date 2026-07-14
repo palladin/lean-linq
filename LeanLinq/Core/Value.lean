@@ -240,12 +240,16 @@ def ParamEnv.toCells : {ps : List (String × SqlType)} → ParamEnv ps →
   | _, .cons (n := n) (c := c) v rest =>
       (n, ⟨c.ty, SqlType.toNullable v⟩) :: rest.toCells
 
-/-- The sizes of the environment's tables, by name (first match; an
-unknown name is 0). The valuation `Grade.eval` collapses symbolic
-grades against. -/
+/-- The sizes of the environment's tables, by name (an unknown name is
+0). The valuation `Grade.eval` collapses symbolic grades against. Under
+the max, a duplicated table name prices as the *largest* same-named
+table — on real contexts (distinct names) this is just the table's own
+size, and it is what makes `HasTable.rows_sizes` provable for every
+instance with no disequality side conditions (`run_gcard`). -/
 def TableEnv.sizes : {ts : List (String × Schema)} → TableEnv ts → String → Nat
   | [], .nil, _ => 0
-  | (n, _) :: _, .cons rs env, q => if q = n then rs.length else env.sizes q
+  | (n, _) :: _, .cons rs env, q =>
+      if q = n then Nat.max rs.length (env.sizes q) else env.sizes q
 
 /-- Everything evaluation reads besides the query itself: the typed tables,
 the typed parameter bindings, and the (optional) current timestamp. -/

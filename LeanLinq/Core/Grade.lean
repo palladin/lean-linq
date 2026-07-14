@@ -476,6 +476,178 @@ theorem mul_le_mul_left (k : Grade) {a b : Grade} (h : a ≤ b) :
   rw [eval_mul, eval_mul]
   exact Nat.mul_le_mul_left _ (h σ)
 
+/-! The pieces `run_gcard`'s induction cashes: the symbol's value, the
+closed reading, and the additive half of the homomorphism. Addition
+only *super*-distributes in general — `polys []` is max-plus −∞, which
+`Nat` truncates to 0 — so the additive lemma carries nonemptiness,
+which every `gcard` satisfies (`gcardAux_ne`). -/
+
+@[simp] theorem eval_tbl (x : String) :
+    (tbl x).eval σ = σ x := by
+  simp [eval, GPoly.eval, GPoly.sumEval, GPoly.monoEval]
+
+/-- A closed grade reads back its constant at every σ. -/
+theorem eval_of_closed? : {g : Grade} → g.closed? = some k →
+    g.eval σ = k
+  | .polys [⟨_, []⟩], h => by
+      cases h
+      simp [eval, GPoly.eval, GPoly.sumEval]
+
+/-- Nonemptiness of the poly set — every grade the smart constructors
+build from `nat`/`tbl` has it; only the max-plus −∞ (`polys []`) lacks
+it, and no `gcard` is −∞. -/
+def NE : Grade → Prop
+  | .polys ps => ps ≠ []
+
+theorem ne_nat (n : Nat) : (nat n).NE := by simp [NE, nat]
+
+theorem ne_tbl (x : String) : (tbl x).NE := by simp [NE, tbl]
+
+theorem insertPoly_ne (p : GPoly) (l : List GPoly) :
+    insertPoly p l ≠ [] := by
+  cases l with
+  | nil => simp [insertPoly]
+  | cons q qs =>
+      rw [insertPoly]
+      split
+      · simp
+      · split <;> simp
+
+theorem mkPolys_ne {l : List GPoly} (h : l ≠ []) : mkPolys l ≠ [] := by
+  cases l with
+  | nil => cases h rfl
+  | cons p ps => exact insertPoly_ne p (mkPolys ps)
+
+theorem flatMap_map_ne (f : GPoly → GPoly → GPoly) {ps qs : List GPoly}
+    (hp : ps ≠ []) (hq : qs ≠ []) :
+    (ps.flatMap fun p => qs.map fun q => f p q) ≠ [] := by
+  obtain ⟨p, hpm⟩ := List.exists_mem_of_ne_nil ps hp
+  obtain ⟨q, hqm⟩ := List.exists_mem_of_ne_nil qs hq
+  exact List.ne_nil_of_mem (List.mem_flatMap.mpr
+    ⟨p, hpm, List.mem_map.mpr ⟨q, hqm, rfl⟩⟩)
+
+/-- The general (non-fold) arm of the smart add, behavior-agnostically:
+the caller certifies by `rfl` that its shapes reduce `add` to the
+if-expression, and the conclusion follows for any such shapes. -/
+private theorem ne_add_general {ps qs : List GPoly}
+    (ha : ps ≠ []) (hb : qs ≠ [])
+    (h : Grade.add (.polys ps) (.polys qs) =
+      if qs = [⟨0, []⟩] then .polys ps
+      else if ps = [⟨0, []⟩] then .polys qs
+      else .polys (mkPolys (ps.flatMap fun p => qs.map fun q => p.add q))) :
+    (Grade.add (.polys ps) (.polys qs)).NE := by
+  rw [h]
+  split
+  · exact ha
+  · split
+    · exact hb
+    · exact mkPolys_ne (flatMap_map_ne GPoly.add ha hb)
+
+theorem ne_add : {a b : Grade} → a.NE → b.NE → (a + b).NE
+  | .polys [], _, ha, _ => absurd rfl ha
+  | .polys (_ :: _), .polys [], _, hb => absurd rfl hb
+  | .polys [⟨a, []⟩], .polys [⟨b, []⟩], _, _ => ne_nat (a + b)
+  | .polys [⟨_, []⟩], .polys [⟨_, _ :: _⟩], ha, hb => ne_add_general ha hb rfl
+  | .polys [⟨_, []⟩], .polys (⟨_, []⟩ :: _ :: _), ha, hb => ne_add_general ha hb rfl
+  | .polys [⟨_, []⟩], .polys (⟨_, _ :: _⟩ :: _ :: _), ha, hb => ne_add_general ha hb rfl
+  | .polys [⟨_, _ :: _⟩], .polys (_ :: _), ha, hb => ne_add_general ha hb rfl
+  | .polys (⟨_, []⟩ :: _ :: _), .polys (_ :: _), ha, hb => ne_add_general ha hb rfl
+  | .polys (⟨_, _ :: _⟩ :: _ :: _), .polys (_ :: _), ha, hb => ne_add_general ha hb rfl
+
+theorem ne_mul : {a b : Grade} → a.NE → b.NE → (a * b).NE
+  | .polys ps, .polys qs, ha, hb => by
+    show Grade.NE (if qs = [⟨1, []⟩] then Grade.polys ps
+      else if ps = [⟨1, []⟩] then Grade.polys qs
+      else Grade.polys (mkPolys (ps.flatMap fun p => qs.map fun q => p.mul q)))
+    split
+    · exact ha
+    · split
+      · exact hb
+      · exact mkPolys_ne (flatMap_map_ne GPoly.mul ha hb)
+
+/-- A member's value sits under the set's max. -/
+theorem le_maxE_of_mem {p : GPoly} : {l : List GPoly} → p ∈ l →
+    p.eval σ ≤ maxE σ l
+  | q :: qs, h => by
+      rw [maxE]
+      cases h with
+      | head => exact Nat.le_max_left ..
+      | tail _ h => exact Nat.le_trans (le_maxE_of_mem h) (Nat.le_max_right ..)
+
+/-- A nonempty set's max is achieved at a member. -/
+theorem exists_maxE : (l : List GPoly) → l ≠ [] →
+    ∃ p ∈ l, maxE σ l = p.eval σ
+  | [p], _ => ⟨p, by simp, by simp [maxE]⟩
+  | p :: q :: qs, _ => by
+      obtain ⟨r, hrm, hre⟩ := exists_maxE (q :: qs) (by simp)
+      rw [maxE]
+      rcases Nat.le_total (p.eval σ) (maxE σ (q :: qs)) with h | h
+      · exact ⟨r, List.mem_cons_of_mem _ hrm, by
+          rw [hre] at h ⊢; exact Nat.max_eq_right h⟩
+      · exact ⟨p, List.mem_cons_self .., by exact Nat.max_eq_left h⟩
+
+/-- `GPoly.add` is the exact additive homomorphism. -/
+theorem evalP_add (p q : GPoly) : (p.add q).eval σ = p.eval σ + q.eval σ := by
+  rw [GPoly.add, GPoly.eval, GPoly.eval, GPoly.eval]
+  simp only
+  rw [sumEval_normM, sumEval_append]
+  omega
+
+/-- The general (non-fold) arm of the smart add, for evaluation: same
+`rfl`-certified reduction as `ne_add_general`. -/
+private theorem le_eval_add_general {ps qs : List GPoly}
+    (ha : ps ≠ []) (hb : qs ≠ [])
+    (h : Grade.add (.polys ps) (.polys qs) =
+      if qs = [⟨0, []⟩] then .polys ps
+      else if ps = [⟨0, []⟩] then .polys qs
+      else .polys (mkPolys (ps.flatMap fun p => qs.map fun q => p.add q))) :
+    (Grade.polys ps).eval σ + (Grade.polys qs).eval σ ≤
+      (Grade.add (.polys ps) (.polys qs)).eval σ := by
+  rw [h]
+  split
+  · next hq0 =>
+      subst hq0
+      simp only [eval_polys, maxE, GPoly.eval, GPoly.sumEval, Nat.add_zero,
+        Nat.max_self]
+      omega
+  · split
+    · next hp0 =>
+        subst hp0
+        simp only [eval_polys, maxE, GPoly.eval, GPoly.sumEval, Nat.add_zero,
+          Nat.max_self]
+        omega
+    · rw [eval_polys, eval_polys, eval_polys, maxE_mkPolys]
+      obtain ⟨p, hpm, hpe⟩ := exists_maxE σ ps ha
+      obtain ⟨q, hqm, hqe⟩ := exists_maxE σ qs hb
+      rw [hpe, hqe, ← evalP_add σ p q]
+      exact le_maxE_of_mem σ (List.mem_flatMap.mpr
+        ⟨p, hpm, List.mem_map.mpr ⟨q, hqm, rfl⟩⟩)
+
+/-- The additive half of the evaluation homomorphism, `≥` direction —
+what the `union` arm of `run_gcard` needs: the sum of two prices fits
+under the price of the sum. Nonemptiness excludes the max-plus −∞. -/
+theorem le_eval_add {a b : Grade} (ha : a.NE) (hb : b.NE) :
+    a.eval σ + b.eval σ ≤ (a + b).eval σ :=
+  match a, b, ha, hb with
+  | .polys [], _, ha, _ => absurd rfl ha
+  | .polys (_ :: _), .polys [], _, hb => absurd rfl hb
+  | .polys [⟨a, []⟩], .polys [⟨b, []⟩], _, _ => by
+      show (Grade.nat a).eval σ + (Grade.nat b).eval σ ≤
+        (Grade.nat (a + b)).eval σ
+      simp
+  | .polys [⟨_, []⟩], .polys [⟨_, _ :: _⟩], ha, hb =>
+      le_eval_add_general σ ha hb rfl
+  | .polys [⟨_, []⟩], .polys (⟨_, []⟩ :: _ :: _), ha, hb =>
+      le_eval_add_general σ ha hb rfl
+  | .polys [⟨_, []⟩], .polys (⟨_, _ :: _⟩ :: _ :: _), ha, hb =>
+      le_eval_add_general σ ha hb rfl
+  | .polys [⟨_, _ :: _⟩], .polys (_ :: _), ha, hb =>
+      le_eval_add_general σ ha hb rfl
+  | .polys (⟨_, []⟩ :: _ :: _), .polys (_ :: _), ha, hb =>
+      le_eval_add_general σ ha hb rfl
+  | .polys (⟨_, _ :: _⟩ :: _ :: _), .polys (_ :: _), ha, hb =>
+      le_eval_add_general σ ha hb rfl
+
 end EvalHom
 
 end Grade
