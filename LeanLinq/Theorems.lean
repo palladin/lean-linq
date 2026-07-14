@@ -489,4 +489,12 @@ theorem Query.run_gcard {ts : Ctx} {s : Schema}
     xs.length ≤ (Query.gcard q).eval (TableEnv.sizes env) :=
   QueryP.evalRowsIn_gcard_le (q AliasOf) h
 
+/-- The `EvalEnv`-shaped spelling — what the verified interpreter's
+`fetch` arm constructs its postcondition with (`DbFetchP.runWithP`). -/
+theorem Query.evalRows_gcard_le {ts : Ctx} {s : Schema}
+    (q : Query ts s) {ee : EvalEnv ts} {xs : List (Values s)}
+    (h : q.evalRows ee = .ok xs) :
+    xs.length ≤ (Query.gcard q).eval (TableEnv.sizes ee.tables) :=
+  QueryP.evalRowsIn_gcard_le (q AliasOf) h
+
 end LeanLinq

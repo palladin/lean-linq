@@ -326,6 +326,20 @@ example {σ : String → Nat}
     xs.length ≤ 10 :=
   fetchPage_fits adults 10 hxs
 
+/- And the hypothesis is *handed over* by the verified model door:
+`runWithP` runs the same tree `runWith` runs, but its `fetch` arm
+constructs the contract via `run_gcard` instead of promising it — the
+result arrives as `{xs // xs fits gcard at this run's sizes}`, and the
+page bound is a theorem of the run, no check anywhere. -/
+#guard ((((adults.limit 10).fetch).runWithP ⟨demoEnv, .nil, none⟩).toOption.map
+    (·.val.length)) == some 2
+
+example {res : {xs : List (Values [("Id", SqlType.long), ("Name", SqlType.string)]) //
+      xs.length ≤ (Query.gcard (adults.limit 10)).eval (TableEnv.sizes demoEnv)}}
+    (_h : ((adults.limit 10).fetch).runWithP ⟨demoEnv, .nil, none⟩ = .ok res) :
+    res.val.length ≤ 10 :=
+  fetchPage_fits adults 10 res.property
+
 /-! ## Statements -/
 
 #eval (customers.insert (ts := PlayCtx)

@@ -145,6 +145,33 @@ def runWith (ee : EvalEnv c) : {r : Grade} → {α : Type} → {P : Post α} →
   | _, _, _, .forAll xs f => xs.mapM fun a => runWith ee (f a)
   | _, _, _, .bindD x f _ _ => do runWith ee (f (← runWith ee x))
 
+/-- The **verified** model door: same semantics as `runWith`, but the
+result carries its postcondition *proved at the run's own sizes*. The
+`fetch` arm is the point — it does not check its contract, it
+**constructs** it: `run_gcard` (as `evalRows_gcard_le`) says the
+evaluator's rows always fit the query's symbolic bound, so the fact the
+type promises at every σ arrives as a theorem about *this* result at
+*this* database. `bindD` threads the continuation's post through; the
+trivial posts (`pure`, `seq`, `forAll`) cost nothing. -/
+def runWithP (ee : EvalEnv c) : {r : Grade} → {α : Type} → {P : Post α} →
+    DbFetchP c r α P →
+    Except EvalError {a : α // P a (TableEnv.sizes ee.tables)}
+  | _, _, _, .pure a => .ok ⟨a, trivial⟩
+  | _, _, _, .fetch q =>
+      match hev : q.evalRows ee with
+      | .ok xs => .ok ⟨xs, Query.evalRows_gcard_le q hev⟩
+      | .error e => .error e
+  | _, _, _, .fetchCell sq => do .ok ⟨← sq.evalCell ee, trivial⟩
+  | _, _, _, .seq f x => do
+      .ok ⟨(← runWithP ee f).val (← runWithP ee x).val, trivial⟩
+  | _, _, _, .forAll xs f => do
+      -- the body's post family varies with the element, so the subtype
+      -- is projected per element; the loop itself promises `True`
+      let rs ← xs.mapM fun a => (runWithP ee (f a)).map Subtype.val
+      .ok ⟨rs, trivial⟩
+  | _, _, _, .bindD x f _ _ => do
+      runWithP ee (f (← runWithP ee x).val)
+
 /-- The model handler, *instrumented*: same semantics as `runWith`, plus
 the count of rounds actually performed (sequential model — `seq` sides
 and `forAll` bodies each pay). This is what a symbolic price certifies
