@@ -32,6 +32,7 @@ inductive DatabaseType where
   | sqlite
   | sqlServer
   | postgres
+  | mysql
   deriving DecidableEq, Repr
 
 /-- A column type: the SQL type plus its **nullability** — and the default

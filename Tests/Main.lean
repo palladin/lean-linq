@@ -15,6 +15,7 @@ def dbName : DatabaseType → String
   | .sqlite => "sqlite"
   | .sqlServer => "sqlserver"
   | .postgres => "postgres"
+  | .mysql => "mysql"
 
 def renderValue : SqlValue → String
   | .int i => s!"int {i}"
@@ -38,7 +39,7 @@ def main (args : List String) : IO UInt32 := do
   let update := args.contains "--update"
   let mut failures := 0
   let mut total := 0
-  for db in [DatabaseType.sqlite, DatabaseType.sqlServer, DatabaseType.postgres] do
+  for db in [DatabaseType.sqlite, DatabaseType.sqlServer, DatabaseType.postgres, DatabaseType.mysql] do
     let path := s!"Tests/golden/{dbName db}.golden"
     let lines := allCases.map fun (n, f) => renderLine n (f db)
     if update then
@@ -60,7 +61,7 @@ def main (args : List String) : IO UInt32 := do
   if update then
     return 0
   else if failures == 0 then
-    IO.println s!"all {total} golden checks passed ({allCases.length} cases × 3 dialects)"
+    IO.println s!"all {total} golden checks passed ({allCases.length} cases × 4 dialects)"
     return 0
   else
     IO.eprintln s!"{failures} golden checks FAILED"

@@ -46,6 +46,13 @@ CREATE TABLE [products] ([Id] INT PRIMARY KEY, [ProductName] NVARCHAR(255), [Pri
 CREATE TABLE [orders] ([Id] INT PRIMARY KEY, [CustomerId] INT, [ProductId] INT, [Amount] INT);
 CREATE TABLE [measurements] ([Id] INT PRIMARY KEY, [Value] FLOAT, [Factor] FLOAT);
 " ++ seedCustomers (fun b => if b then "1" else "0") ++ seedProducts ++ seedOrders ++ seedMeasurements
+  | .mysql =>
+      "DROP TABLE IF EXISTS measurements; DROP TABLE IF EXISTS orders; DROP TABLE IF EXISTS products; DROP TABLE IF EXISTS customers;
+CREATE TABLE customers (`Id` INT PRIMARY KEY, `Age` INT, `Name` VARCHAR(255), `IsActive` TINYINT(1));
+CREATE TABLE products (`Id` INT PRIMARY KEY, `ProductName` VARCHAR(255), `Price` DECIMAL(18,2), `CreatedDate` DATETIME, `UniqueId` CHAR(36));
+CREATE TABLE orders (`Id` INT PRIMARY KEY, `CustomerId` INT, `ProductId` INT, `Amount` INT);
+CREATE TABLE measurements (`Id` INT PRIMARY KEY, `Value` DOUBLE, `Factor` DOUBLE);
+" ++ seedCustomers (fun b => if b then "1" else "0") ++ seedProducts ++ seedOrders ++ seedMeasurements
 
 /-- Cases whose output depends on the current time: execute-only. -/
 def skipResults : List String :=

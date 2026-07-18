@@ -25,6 +25,7 @@ def DatabaseType.paramPrefix : DatabaseType → String
 def DatabaseType.quoteIdent (db : DatabaseType) (s : String) : String :=
   match db with
   | .sqlServer => s!"[{s}]"
+  | .mysql => s!"`{s}`"
   | _ => s!"\"{s}\""
 
 def quote (s : String) : CompileM String := fun db => pure (db.quoteIdent s)

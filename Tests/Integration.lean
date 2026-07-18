@@ -76,6 +76,11 @@ def execSql (db : DatabaseType) (sqliteFile : String) (sql : String)
                      "-U", "sa", "-P", mssqlPassword, "-d", database,
                      "-h", "-1", "-s", "\t", "-W", "-b",
                      "-Q", s!"SET NOCOUNT ON; {sql}"])
+    | .mysql =>
+        ("docker", #["compose", "exec", "-T", "mysql",
+                     "mysql", "-uroot", "-ptestpass", "-D", database,
+                     "--init-command=SET SESSION sql_mode='ANSI_QUOTES'",
+                     "--batch", "--skip-column-names", "-e", sql])
   let out ← IO.Process.output { cmd, args }
   pure (out.exitCode == 0, if out.exitCode == 0 then out.stdout else out.stdout ++ out.stderr)
 
@@ -93,6 +98,9 @@ def probe (db : DatabaseType) (sqliteFile : String) : IO Bool := do
           "IF DB_ID('testdb') IS NULL CREATE DATABASE testdb" (database := "master")
         pure ok
     | .postgres =>
+        let (ok, _) ← execSql db sqliteFile "SELECT 1"
+        pure ok
+    | .mysql =>
         let (ok, _) ← execSql db sqliteFile "SELECT 1"
         pure ok
   catch _ => pure false
@@ -190,7 +198,7 @@ def runCase (db : DatabaseType) (sqliteFile : String) (isStmt : Bool)
   return { name, result := normalizeOutput sqlForOrder out, isError := false }
 
 def dialects : List (String × DatabaseType) :=
-  [("sqlite", .sqlite), ("postgres", .postgres), ("mssql", .sqlServer)]
+  [("sqlite", .sqlite), ("postgres", .postgres), ("mssql", .sqlServer), ("mysql", .mysql)]
 
 def goldenPath (dn : String) : String := s!"Tests/golden/results-{dn}.golden"
 

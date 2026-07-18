@@ -115,8 +115,16 @@ def SqlExprP.compile : SqlExpr ts c → CompileM String
   | .field _ row name => do
       if row.alias.isEmpty then quote name
       else return s!"{← quote row.alias}.{← quote name}"
-  | .arith op a b  => return s!"({← a.compile} {op.token} {← b.compile})"
+  | .arith (c := c₀) op a b  => do
+      -- MySQL: `/` on integers yields DECIMAL; integer division is DIV
+      let tok := if (← read) == .mysql && op == .div
+          && (c₀.ty == .int || c₀.ty == .long)
+        then "DIV" else op.token
+      return s!"({← a.compile} {tok} {← b.compile})"
   | .concat a b    => do
+      -- MySQL: || is logical OR — string concatenation is CONCAT
+      if (← read) == .mysql then
+        return s!"CONCAT({← a.compile}, {← b.compile})"
       let tok := if (← read) == .sqlServer then "+" else "||"
       return s!"({← a.compile} {tok} {← b.compile})"
   | .cmp (t := t₀) op a b => do
@@ -165,19 +173,25 @@ def SqlExprP.compile : SqlExpr ts c → CompileM String
   | .lower e       => return s!"LOWER({← e.compile})"
   | .trim e        => return s!"TRIM({← e.compile})"
   | .length e      => do
-      let name := if (← read) == .sqlServer then "LEN" else "LENGTH"
+      -- MySQL LENGTH is bytes; CHAR_LENGTH is characters (the semantics)
+      let name := match (← read) with
+        | .sqlServer => "LEN"
+        | .mysql => "CHAR_LENGTH"
+        | _ => "LENGTH"
       return s!"{name}({← e.compile})"
   | .now           =>
       return match (← read) with
         | .sqlServer => "GETDATE()"
         | .sqlite => "datetime('now')"
         | .postgres => "NOW()"
+        | .mysql => "NOW()"
   | .datePart u e  => do
       let x ← e.compile
       return match (← read) with
         | .sqlServer => s!"{u.upperName}({x})"
         | .sqlite => s!"CAST(strftime('{u.strftimeFmt}', {x}) AS INTEGER)"
         | .postgres => s!"EXTRACT({u.upperName} FROM {x})"
+        | .mysql => s!"EXTRACT({u.upperName} FROM {x})"
   | .dateAdd u e n => do
       let x ← e.compile
       match (← read) with
@@ -189,6 +203,8 @@ def SqlExprP.compile : SqlExpr ts c → CompileM String
           return s!"datetime({x}, '{amount} {u.token}')"
       | .postgres =>
           return s!"({x} + INTERVAL '{n} {u.token}')"
+      | .mysql =>
+          return s!"DATE_ADD({x}, INTERVAL {n} {u.token.toUpper})"
   | .dateDiff u a b => do
       let x ← a.compile
       let y ← b.compile
@@ -204,6 +220,13 @@ def SqlExprP.compile : SqlExpr ts c → CompileM String
           | .day => s!"EXTRACT(DAY FROM ({y} - {x}))"
           | .month => s!"(EXTRACT(YEAR FROM {y}) - EXTRACT(YEAR FROM {x})) * 12 + (EXTRACT(MONTH FROM {y}) - EXTRACT(MONTH FROM {x}))"
           | .year => s!"(EXTRACT(YEAR FROM {y}) - EXTRACT(YEAR FROM {x}))"
+        | .mysql =>
+          -- calendar-component convention (the evaluator's), not
+          -- TIMESTAMPDIFF's anniversary counting
+          match u with
+          | .day => s!"DATEDIFF({y}, {x})"
+          | .month => s!"((YEAR({y}) - YEAR({x})) * 12 + (MONTH({y}) - MONTH({x})))"
+          | .year => s!"(YEAR({y}) - YEAR({x}))"
 
 def SqlExprP.compileList :
     List ((p : SqlType) × SqlExpr ts p) → CompileM (List String)
@@ -270,6 +293,13 @@ def QueryP.compileStmt : QueryA ts s → CompileM String
             | some l, some o => s!"{inner} LIMIT {l} OFFSET {o}"
             | some l, none => s!"{inner} LIMIT {l}"
             | none, some o => s!"{inner} OFFSET {o}"
+            | none, none => inner
+      | .mysql =>
+          -- MySQL has no bare OFFSET: the documented idiom is a huge LIMIT
+          return match lim?, off? with
+            | some l, some o => s!"{inner} LIMIT {l} OFFSET {o}"
+            | some l, none => s!"{inner} LIMIT {l}"
+            | none, some o => s!"{inner} LIMIT 18446744073709551615 OFFSET {o}"
             | none, none => inner
   | .setOpC (s := s₀) op a b => do
       -- operands need structural parenthesization: PostgreSQL/SQL Server
@@ -393,6 +423,7 @@ def Query.toSql (q : Query ts s) (db : DatabaseType := .sqlite) : CompiledSql :=
 
 def Query.toSqlite (q : Query ts s) : CompiledSql := q.toSql .sqlite
 def Query.toSqlServer (q : Query ts s) : CompiledSql := q.toSql .sqlServer
+def Query.toMysql (q : Query ts s) : CompiledSql := q.toSql .mysql
 
 def Query.toPostgres (q : Query ts s) : CompiledSql := q.toSql .postgres
 
