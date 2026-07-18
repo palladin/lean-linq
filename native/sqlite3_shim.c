@@ -110,6 +110,12 @@ LEAN_EXPORT lean_obj_res ll_sqlite3_close(b_lean_obj_arg conn, lean_obj_arg w) {
 }
 
 /* execRaw : Conn → String → IO Unit (DDL / seed / BEGIN / ROLLBACK batches) */
+LEAN_EXPORT lean_obj_res ll_sqlite3_changes(b_lean_obj_arg conn, lean_obj_arg w) {
+    (void)w;
+    sqlite3 *db = conn_of(conn)->db;
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)sqlite3_changes(db)));
+}
+
 LEAN_EXPORT lean_obj_res ll_sqlite3_exec_raw(b_lean_obj_arg conn, b_lean_obj_arg sql,
                                              lean_obj_arg w) {
     (void)w;

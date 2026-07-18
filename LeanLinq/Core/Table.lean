@@ -49,9 +49,13 @@ class HasTable (ts : List (String × Schema)) (n : String) (s : outParam Schema)
   /-- …shrinking it never grows one… -/
   sizes_set_anti : ∀ (env : TableEnv ts) (rs : List (Values s)) (m : String),
     rs.length ≤ (rows env).length → TableEnv.sizes (set env rs) m ≤ env.sizes m
-  /-- …and the new size is capped by the write and what was there. -/
+  /-- …and the new size is capped by the write and what was there… -/
   sizes_set_le : ∀ (env : TableEnv ts) (rs : List (Values s)) (m : String),
     TableEnv.sizes (set env rs) m ≤ Nat.max rs.length (env.sizes m)
+  /-- …while a shrinking write drops a size by at most the rows removed —
+  what ties DELETE's affected count to the world it leaves. -/
+  sizes_set_drop : ∀ (env : TableEnv ts) (rs : List (Values s)) (m : String),
+    env.sizes m ≤ TableEnv.sizes (set env rs) m + ((rows env).length - rs.length)
 
 private theorem le_sizes_head {n : String} {s : Schema} {ts : List (String × Schema)}
     (rs : List (Values s)) (env : TableEnv ts) :
@@ -108,6 +112,16 @@ instance (priority := high) : HasTable ((n, s) :: ts) n s where
         · exact Nat.max_le.mpr ⟨Nat.le_max_left ..,
             Nat.le_trans (Nat.le_max_right ..) (Nat.le_max_right ..)⟩
         · exact Nat.le_max_right ..
+  sizes_set_drop
+    | .cons rs env, rs', m => by
+        simp only []
+        rw [sizes_cons, sizes_cons]
+        split
+        · refine Nat.max_le.mpr ⟨?_, ?_⟩
+          · have h1 : rs.length ≤ rs'.length + (rs.length - rs'.length) := by omega
+            exact Nat.le_trans h1 (Nat.add_le_add_right (Nat.le_max_left ..) _)
+          · exact Nat.le_trans (Nat.le_max_right ..) (Nat.le_add_right ..)
+        · exact Nat.le_add_right ..
 
 instance [h : HasTable ts n s] : HasTable ((n', s') :: ts) n s where
   rows | .cons _ env => h.rows env
@@ -145,6 +159,16 @@ instance [h : HasTable ts n s] : HasTable ((n', s') :: ts) n s where
               (Nat.le_max_right ..),
             Nat.le_trans this (Nat.max_le.mpr ⟨Nat.le_max_left ..,
               Nat.le_trans (Nat.le_max_right ..) (Nat.le_max_right ..)⟩)⟩
+        · exact this
+  sizes_set_drop
+    | .cons rs env, rs', m => by
+        simp only []
+        rw [sizes_cons, sizes_cons]
+        have := h.sizes_set_drop env rs' m
+        split
+        · refine Nat.max_le.mpr ⟨?_, ?_⟩
+          · exact Nat.le_trans (Nat.le_max_left ..) (Nat.le_add_right ..)
+          · exact Nat.le_trans this (Nat.add_le_add_right (Nat.le_max_right ..) _)
         · exact this
 
 end LeanLinq

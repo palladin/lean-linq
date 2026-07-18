@@ -44,37 +44,55 @@ private def buildInsertRow (ee : EvalEnv ts)
         | none => SqlType.ofNullable nm c none
       pure (.cons cell (← buildInsertRow ee vs rest))
 
-def InsertStmt.apply (i : InsertStmt ts n s) [inst : HasTable ts.tables n s]
+/-- Apply with the affected-row count — what SQL statements report.
+INSERT of a `VALUES` row affects exactly 1. -/
+def InsertStmt.applyCount (i : InsertStmt ts n s) [inst : HasTable ts.tables n s]
     (env : TableEnv ts.tables) (ps : ParamEnv ts.params := by exact .nil)
-    (now : Option String := none) : Except EvalError (TableEnv ts.tables) := do
+    (now : Option String := none) :
+    Except EvalError (TableEnv ts.tables × Nat) := do
   if i.values.isEmpty then
     throw (.invalidStatement "INSERT with no columns")
   let ee : EvalEnv ts := ⟨env, ps, now⟩
-  pure (inst.set env (inst.rows env ++ [← buildInsertRow ee i.values s]))
+  pure (inst.set env (inst.rows env ++ [← buildInsertRow ee i.values s]), 1)
 
-def UpdateStmt.apply (u : UpdateStmt ts n s) [inst : HasTable ts.tables n s]
+def InsertStmt.apply (i : InsertStmt ts n s) [inst : HasTable ts.tables n s]
     (env : TableEnv ts.tables) (ps : ParamEnv ts.params := by exact .nil)
-    (now : Option String := none) : Except EvalError (TableEnv ts.tables) := do
+    (now : Option String := none) : Except EvalError (TableEnv ts.tables) :=
+  (i.applyCount env ps now).map (·.1)
+
+/-- Apply with the affected-row count: UPDATE reports its WHERE hits. -/
+def UpdateStmt.applyCount (u : UpdateStmt ts n s) [inst : HasTable ts.tables n s]
+    (env : TableEnv ts.tables) (ps : ParamEnv ts.params := by exact .nil)
+    (now : Option String := none) :
+    Except EvalError (TableEnv ts.tables × Nat) := do
   if u.sets.isEmpty then
     throw (.invalidStatement "UPDATE with no assignments")
   let ee : EvalEnv ts := ⟨env, ps, now⟩
   let marker := Row.ofAlias "" s
-  let rows ← (inst.rows env).mapM fun v => do
+  let rcs ← (inst.rows env).mapM fun v => do
     let sc : Scope := [("", ⟨s, v⟩)]
     let hit ← match u.where? with
       | none => pure true
       | some p => do pure ((← (p marker).evalG ee [sc]) == some true)
     if hit then
       -- every SET expression sees the pre-update row (SQL semantics)
-      u.sets.foldlM (init := v) fun acc (nm, f) =>
+      let v' ← u.sets.foldlM (init := v) fun acc (nm, f) =>
         match f marker with
         | ⟨⟨t', _⟩, e⟩ => do acc.setCol nm t' (← e.evalG ee [sc])
-    else pure v
-  pure (inst.set env rows)
+      pure (v', true)
+    else pure (v, false)
+  pure (inst.set env (rcs.map (·.1)), rcs.countP (·.2))
 
-def DeleteStmt.apply (d : DeleteStmt ts n s) [inst : HasTable ts.tables n s]
+def UpdateStmt.apply (u : UpdateStmt ts n s) [inst : HasTable ts.tables n s]
     (env : TableEnv ts.tables) (ps : ParamEnv ts.params := by exact .nil)
-    (now : Option String := none) : Except EvalError (TableEnv ts.tables) := do
+    (now : Option String := none) : Except EvalError (TableEnv ts.tables) :=
+  (u.applyCount env ps now).map (·.1)
+
+/-- Apply with the affected-row count: DELETE reports the rows removed. -/
+def DeleteStmt.applyCount (d : DeleteStmt ts n s) [inst : HasTable ts.tables n s]
+    (env : TableEnv ts.tables) (ps : ParamEnv ts.params := by exact .nil)
+    (now : Option String := none) :
+    Except EvalError (TableEnv ts.tables × Nat) := do
   let ee : EvalEnv ts := ⟨env, ps, now⟩
   let marker := Row.ofAlias "" s
   let rows ← (inst.rows env).filterM fun v => do
@@ -83,6 +101,11 @@ def DeleteStmt.apply (d : DeleteStmt ts n s) [inst : HasTable ts.tables n s]
     | some p =>
         let sc : Scope := [("", ⟨s, v⟩)]
         pure ((← (p marker).evalG ee [sc]) != some true)
-  pure (inst.set env rows)
+  pure (inst.set env rows, (inst.rows env).length - rows.length)
+
+def DeleteStmt.apply (d : DeleteStmt ts n s) [inst : HasTable ts.tables n s]
+    (env : TableEnv ts.tables) (ps : ParamEnv ts.params := by exact .nil)
+    (now : Option String := none) : Except EvalError (TableEnv ts.tables) :=
+  (d.applyCount env ps now).map (·.1)
 
 end LeanLinq

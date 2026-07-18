@@ -311,6 +311,14 @@ LEAN_EXPORT lean_obj_res ll_tds_rpc_param_text(b_lean_obj_arg conn, b_lean_obj_a
 }
 
 /* rpcSend : MsConn → IO Unit */
+LEAN_EXPORT lean_obj_res ll_tds_count(b_lean_obj_arg conn, lean_obj_arg w) {
+    (void)w;
+    DBPROCESS *dbproc = tdsconn_of(conn)->dbproc;
+    DBINT n = DBCOUNT(dbproc);
+    if (n < 0) n = 0;
+    return lean_io_result_mk_ok(lean_box_uint32((uint32_t)n));
+}
+
 LEAN_EXPORT lean_obj_res ll_tds_rpc_send(b_lean_obj_arg conn, lean_obj_arg w) {
     (void)w;
     ll_tdsconn *c = tdsconn_of(conn);

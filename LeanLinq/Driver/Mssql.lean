@@ -210,21 +210,27 @@ def Conn.queryCell (conn : Conn) (sc : ScalarQuery c ⟨t, n⟩)
       drain conn
       pure cell
 
+@[extern "ll_tds_count"]
+private opaque countRaw (conn : @&Conn) : IO UInt32
+
+/-- Execute a statement and report the affected-row count (`DBCOUNT`,
+read after the results are drained). -/
 private def execStmt (conn : Conn) (compiled : CompiledSql)
-    (cells : List (String × ((t : SqlPrim) × Nullable t))) : IO Unit := do
+    (cells : List (String × ((t : SqlPrim) × Nullable t))) : IO Nat := do
   execRpc conn compiled cells
   drain conn
+  return (← countRaw conn).toNat
 
 def Conn.execInsert (conn : Conn) (i : InsertStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Unit :=
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
   execStmt conn (i.toSql .sqlServer) ps.toCells
 
 def Conn.execUpdate (conn : Conn) (u : UpdateStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Unit :=
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
   execStmt conn (u.toSql .sqlServer) ps.toCells
 
 def Conn.execDelete (conn : Conn) (d : DeleteStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Unit :=
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
   execStmt conn (d.toSql .sqlServer) ps.toCells
 
 end Ms

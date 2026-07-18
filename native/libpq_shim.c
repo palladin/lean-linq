@@ -150,6 +150,13 @@ static int marshal_params(b_lean_obj_arg oids, b_lean_obj_arg vals,
 }
 
 /* execParams : PgConn → String → Array UInt32 → Array (Option String) → IO PgResult */
+LEAN_EXPORT lean_obj_res ll_pq_cmd_tuples(b_lean_obj_arg res, lean_obj_arg w) {
+    (void)w;
+    PGresult *r = pgres_of(res)->res;
+    const char *t = PQcmdTuples(r);
+    return lean_io_result_mk_ok(lean_mk_string(t ? t : ""));
+}
+
 LEAN_EXPORT lean_obj_res ll_pq_exec_params(b_lean_obj_arg conn, b_lean_obj_arg sql,
                                            b_lean_obj_arg oids, b_lean_obj_arg vals,
                                            lean_obj_arg w) {

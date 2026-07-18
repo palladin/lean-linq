@@ -168,21 +168,27 @@ def Conn.queryCell (conn : Conn) (sc : ScalarQuery c ⟨t, n⟩)
   if (← ntuples res) == 0 then pure none
   else readCell res 0 0 t
 
+@[extern "ll_pq_cmd_tuples"]
+private opaque cmdTuplesRaw (res : @&PgResult) : IO String
+
+/-- Execute a statement and report the engine's affected-row count
+(`PQcmdTuples`; empty for non-DML). -/
 private def execCompiled (conn : Conn) (compiled : CompiledSql)
-    (cells : List (String × ((t : SqlPrim) × Nullable t))) : IO Unit := do
+    (cells : List (String × ((t : SqlPrim) × Nullable t))) : IO Nat := do
   let (oids, vals) ← wireParams compiled cells
-  let _ ← execParamsRaw conn (toWire compiled) oids vals
+  let res ← execParamsRaw conn (toWire compiled) oids vals
+  return ((← cmdTuplesRaw res).toNat?).getD 0
 
 def Conn.execInsert (conn : Conn) (i : InsertStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Unit :=
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
   execCompiled conn (i.toSql .postgres) ps.toCells
 
 def Conn.execUpdate (conn : Conn) (u : UpdateStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Unit :=
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
   execCompiled conn (u.toSql .postgres) ps.toCells
 
 def Conn.execDelete (conn : Conn) (d : DeleteStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Unit :=
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
   execCompiled conn (d.toSql .postgres) ps.toCells
 
 /-! ## `Db` interpretation

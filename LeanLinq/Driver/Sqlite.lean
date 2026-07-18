@@ -177,22 +177,27 @@ def Conn.queryCell (conn : Conn) (sc : ScalarQuery c ⟨t, n⟩)
   if (← step st) == 101 then pure none
   else readCell st 0 t
 
+@[extern "ll_sqlite3_changes"]
+private opaque changesRaw (conn : @&Conn) : IO UInt32
+
+/-- Execute a statement and report the engine's affected-row count. -/
 private def execCompiled (conn : Conn) (compiled : CompiledSql)
-    (cells : List (String × ((t : SqlPrim) × Nullable t))) : IO Unit := do
+    (cells : List (String × ((t : SqlPrim) × Nullable t))) : IO Nat := do
   let st ← prepareRaw conn compiled.sql
   bindParams st compiled cells
   let _ ← step st   -- statements step straight to DONE
+  return (← changesRaw conn).toNat
 
 def Conn.execInsert (conn : Conn) (i : InsertStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Unit :=
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
   execCompiled conn (i.toSql .sqlite) ps.toCells
 
 def Conn.execUpdate (conn : Conn) (u : UpdateStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Unit :=
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
   execCompiled conn (u.toSql .sqlite) ps.toCells
 
 def Conn.execDelete (conn : Conn) (d : DeleteStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Unit :=
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
   execCompiled conn (d.toSql .sqlite) ps.toCells
 
 end Sqlite

@@ -387,6 +387,13 @@ def growThenCount : Db PlayCtx 2 Nat := db! {
 
 #guard (growThenCount.exec 2 demoEnv).toOption == some 4  -- 3 seeded + 1
 
+-- writes report their affected counts — engine-truthful over the wire
+-- (sqlite3_changes / PQcmdTuples / DBCOUNT), exact in the model:
+#guard ((db! {
+  let k ← .delete (customers.delete (ts := PlayCtx))
+  return k
+}).exec 1 demoEnv).toOption == some 3   -- unconditional DELETE clears all 3
+
 /-- And the write's spec *pays*: through insert's interval spec composed
 with the count's bound (the state-wp threading them), the count comes
 back **provably ≤ old size + 1** — a theorem of this run, before

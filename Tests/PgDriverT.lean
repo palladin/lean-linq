@@ -25,9 +25,9 @@ def main : IO UInt32 := do
       let ops : DriverOps := {
         query := fun q => conn.query q seedParams
         queryCell := fun sc => conn.queryCell sc seedParams
-        execIns := fun i => conn.execInsert i seedParams
-        execUpd := fun u => conn.execUpdate u seedParams
-        execDel := fun d => conn.execDelete d seedParams
+        execIns := fun i => discard (conn.execInsert i seedParams)
+        execUpd := fun u => discard (conn.execUpdate u seedParams)
+        execDel := fun d => discard (conn.execDelete d seedParams)
         execRaw := conn.execRaw }
       let (passed, failures, skipped) ← runSweep ops
       let mut failures := failures
