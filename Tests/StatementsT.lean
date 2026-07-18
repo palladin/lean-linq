@@ -78,6 +78,30 @@ def sd (d : DeleteStmt TestCtx n s) [inst : HasTable TestCtx.tables n s] : Case 
     ordered := true
     payload := .del d }
 
+def sis (st : InsertSelectStmt TestCtx n s) [inst : HasTable TestCtx.tables n s] : Case :=
+  { compile := fun db => st.toSql db
+    expected := fun env =>
+      match st.apply env seedParams with
+      | .ok env' => renderTableRows (inst.rows env')
+      | .error e => evalFailure e
+    ordered := true
+    payload := .insSel st }
+
+/-- `INSERT … SELECT`, PK-safe: the projection shifts the Ids. -/
+def InsertSelectAdults := customers.insertFrom (ts := TestCtx)
+  (Query.from' (ts := TestCtx) customers
+    |>.where' (fun c => c["Age"] >=. SqlExpr.param "minAge")
+    |>.select (fun c => ![(c["Id"] + 1000).as "Id", c["Age"].as "Age",
+      c["Name"].as "Name", c["IsActive"].as "IsActive"]))
+
+/-- Cross-table shape: order amounts summarized into measurements. -/
+def InsertSelectLimited := customers.insertFrom (ts := TestCtx)
+  (Query.from' (ts := TestCtx) customers
+    |>.orderBy (fun c => [c["Id"].asc])
+    |>.limit 2
+    |>.select (fun c => ![(c["Id"] + 2000).as "Id", c["Age"].as "Age",
+      c["Name"].as "Name", c["IsActive"].as "IsActive"]))
+
 def MeasurementsInsert := measurements.insert (ts := TestCtx)
   |>.value "Id" 200 |>.value "Value" 12.5 |>.value "Factor" 0.25
 def MeasurementsUpdate := measurements.update (ts := TestCtx)
@@ -98,7 +122,9 @@ def statementCases : List (String × Case) := [
   ("InsertWithNewColumnsNull", si InsertWithNewColumnsNull),
   ("UpdateSetNewColumnsNull", su UpdateSetNewColumnsNull),
   ("MeasurementsInsert", si MeasurementsInsert),
-  ("MeasurementsUpdate", su MeasurementsUpdate)
+  ("MeasurementsUpdate", su MeasurementsUpdate),
+  ("InsertSelectAdults", sis InsertSelectAdults),
+  ("InsertSelectLimited", sis InsertSelectLimited)
 ]
 
 end TQ

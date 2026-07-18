@@ -24,6 +24,7 @@ structure DriverOps where
   execIns : {n : String} → {s : Schema} → InsertStmt TestCtx n s → IO Unit
   execUpd : {n : String} → {s : Schema} → UpdateStmt TestCtx n s → IO Unit
   execDel : {n : String} → {s : Schema} → DeleteStmt TestCtx n s → IO Unit
+  execInsSel : {n : String} → {s : Schema} → InsertSelectStmt TestCtx n s → IO Unit
   execRaw : String → IO Unit
   /-- Transaction bracket for statement cases; T-SQL spells these
   `BEGIN TRAN`/`ROLLBACK TRAN`. -/
@@ -103,6 +104,14 @@ def runCase (ops : DriverOps) (name : String) (c : Case) : IO Bool := do
       try
         ops.execDel d
         let ok ← checkTable ops name inst (d.apply (inst := inst) seedEnv seedParams)
+        pure ok
+      finally
+        ops.execRaw ops.rollback
+  | .insSel (inst := inst) st => do
+      ops.execRaw ops.begin
+      try
+        ops.execInsSel st
+        let ok ← checkTable ops name inst (st.apply (inst := inst) seedEnv seedParams)
         pure ok
       finally
         ops.execRaw ops.rollback

@@ -400,3 +400,5 @@ InsertWithNewColumnsNull	1,Laptop,999.99,2023-01-15 00:00:00,11111111-1111-1111-
 UpdateSetNewColumnsNull	1,Laptop,999.99,2023-01-15 00:00:00,11111111-1111-1111-1111-111111111111|2,Mouse,25.5,2023-06-10 00:00:00,22222222-2222-2222-2222-222222222222|3,Discontinued,NULL,NULL,NULL
 MeasurementsInsert	1,0.5,2|2,2.25,NULL|3,-1.5,0.5|4,100,-2|200,12.5,0.25
 MeasurementsUpdate	1,1,2|2,2.25,NULL|3,-1.5,0.5|4,100,-2
+InsertSelectAdults	1,25,John Doe,1|2,30,Jane Smith,1|3,16,Minor User,0|4,65,Senior User,1|1001,25,John Doe,1|1002,30,Jane Smith,1|1004,65,Senior User,1
+InsertSelectLimited	1,25,John Doe,1|2,30,Jane Smith,1|3,16,Minor User,0|4,65,Senior User,1|2001,25,John Doe,1|2002,30,Jane Smith,1

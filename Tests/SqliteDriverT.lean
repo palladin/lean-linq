@@ -35,6 +35,7 @@ def main : IO UInt32 := do
     execIns := fun i => discard (conn.execInsert i seedParams)
     execUpd := fun u => discard (conn.execUpdate u seedParams)
     execDel := fun d => discard (conn.execDelete d seedParams)
+    execInsSel := fun st => discard (conn.execInsertSelect st seedParams)
     execRaw := conn.execRaw }
   let (passed, failures, skipped) ← runSweep ops
   let mut failures := failures

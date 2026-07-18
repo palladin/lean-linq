@@ -400,3 +400,5 @@ InsertWithNewColumnsNull	INSERT INTO "products" ("Id", "ProductName", "Price", "
 UpdateSetNewColumnsNull	UPDATE "products" SET "Price" = NULL, "CreatedDate" = NULL, "UniqueId" = NULL WHERE ("Id" = :p0)	:p0=long 101
 MeasurementsInsert	INSERT INTO "measurements" ("Id", "Value", "Factor") VALUES (:p0, :p1, :p2)	:p0=long 200; :p1=double 12.500000; :p2=double 0.250000
 MeasurementsUpdate	UPDATE "measurements" SET "Value" = ("Value" * :p0) WHERE ("Id" = :p1)	:p0=double 2.000000; :p1=long 1
+InsertSelectAdults	INSERT INTO "customers" ("Id", "Age", "Name", "IsActive") SELECT ("a0"."Id" + :p1) AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Age" >= :minAge)	:minAge=null; :p1=long 1000
+InsertSelectLimited	INSERT INTO "customers" ("Id", "Age", "Name", "IsActive") SELECT ("a1"."Id" + :p0) AS "Id", "a1"."Age" AS "Age", "a1"."Name" AS "Name", "a1"."IsActive" AS "IsActive" FROM (SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" ORDER BY "a0"."Id" ASC NULLS FIRST LIMIT 2) "a1"	:p0=long 2000
