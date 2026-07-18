@@ -417,6 +417,23 @@ def duplicateAll : Db PlayCtx (customers.size + 1) Nat := db! {
 #guard (duplicateAll.execWithin 4 demoEnv).toOption == some 3
 #check_failure (duplicateAll.exec 1000 demoEnv)
 
+/-- **The collapse**: the same copy as ONE operation — the engine moves
+the rows. `INSERT … SELECT` is the write-side `fetchFor`: grade 1 for
+any table size, affected = the source's row count, and the spec bounds
+both the count and the growth by the source query's own symbolic card
+(`run_gcard` at the door). `duplicateAll` above: `customers.size + 1`.
+This: 1. -/
+def duplicateAllFast : Db PlayCtx 1 Nat := db! {
+  let k ← customers.insertFrom (Query.from' (ts := PlayCtx) customers)
+    |>.execInsertSelect
+  return k
+}
+
+#guard (duplicateAllFast.exec 1 demoEnv).toOption == some 3
+#eval (customers.insertFrom (Query.from' (ts := PlayCtx) customers)
+  |>.toSql .postgres).sql
+-- "INSERT INTO \"customers\" (\"Id\", \"Age\", \"Name\", \"IsActive\") SELECT …"
+
 /-- And the write's spec *pays*: through insert's interval spec composed
 with the count's bound (the state-wp threading them), the count comes
 back **provably ≤ old size + 1** — a theorem of this run, before

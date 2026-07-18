@@ -102,4 +102,26 @@ def DeleteStmt.toSql (d : DeleteStmt ts n s) (db : DatabaseType := .sqlite) : Co
   let (sql, st) := Id.run ((d.compile.run db).run {})
   { sql, params := st.params }
 
+/-- `INSERT INTO t (cols) SELECT …` — the batched write: the engine
+moves the rows, one statement, grade 1. The source query's schema must
+match the target's — enforced by the type. -/
+structure InsertSelectStmt (ts : Ctx) (n : String) (s : Schema) where
+  source : Query ts s
+
+/-- `t.insertFrom q` — flowing: build the source query, aim it at the
+table. -/
+def Table.insertFrom (_ : Table n s) (q : Query ts s) :
+    InsertSelectStmt ts n s :=
+  ⟨q⟩
+
+def InsertSelectStmt.compile (st : InsertSelectStmt ts n s) : CompileM String := do
+  let cols ← s.mapM fun (nm, _) => quote nm
+  let sub ← (st.source AliasOf).compileStmt
+  return s!"INSERT INTO {← quote n} ({String.intercalate ", " cols}) {sub}"
+
+def InsertSelectStmt.toSql (st : InsertSelectStmt ts n s)
+    (db : DatabaseType := .sqlite) : CompiledSql :=
+  let (sql, stt) := Id.run ((st.compile.run db).run {})
+  { sql, params := stt.params }
+
 end LeanLinq

@@ -200,6 +200,10 @@ def Conn.execDelete (conn : Conn) (d : DeleteStmt c n s)
     (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
   execCompiled conn (d.toSql .sqlite) ps.toCells
 
+def Conn.execInsertSelect (conn : Conn) (st : InsertSelectStmt c n s)
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
+  execCompiled conn (st.toSql .sqlite) ps.toCells
+
 end Sqlite
 
 /-- Interpret a `Db` program against a live connection — the same tree
@@ -217,6 +221,7 @@ private def Sqlite.interp (conn : Sqlite.Conn) (ps : ParamEnv c.params) :
   | _, _, _, .insert (inst := _) i => conn.execInsert i ps
   | _, _, _, .update (inst := _) u => conn.execUpdate u ps
   | _, _, _, .delete (inst := _) d => conn.execDelete d ps
+  | _, _, _, .insertSelect (inst := _) st => conn.execInsertSelect st ps
   | _, _, _, .bindD x f _ _ => do interp conn ps (f (← interp conn ps x))
 
 def DbP.execIO {w : Wp α} (f : DbP c r α w) (conn : Sqlite.Conn) (budget : Nat)

@@ -233,6 +233,10 @@ def Conn.execDelete (conn : Conn) (d : DeleteStmt c n s)
     (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
   execStmt conn (d.toSql .sqlServer) ps.toCells
 
+def Conn.execInsertSelect (conn : Conn) (st : InsertSelectStmt c n s)
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
+  execStmt conn (st.toSql .sqlServer) ps.toCells
+
 end Ms
 
 /-- Interpret a `Db` program against live SQL Server. TDS permits one
@@ -248,6 +252,7 @@ private def Ms.interp (conn : Ms.Conn) (ps : ParamEnv c.params) :
   | _, _, _, .insert (inst := _) i => conn.execInsert i ps
   | _, _, _, .update (inst := _) u => conn.execUpdate u ps
   | _, _, _, .delete (inst := _) d => conn.execDelete d ps
+  | _, _, _, .insertSelect (inst := _) st => conn.execInsertSelect st ps
   | _, _, _, .bindD x f _ _ => do interp conn ps (f (← interp conn ps x))
 
 def DbP.execMs {w : Wp α} (f : DbP c r α w) (conn : Ms.Conn) (budget : Nat)

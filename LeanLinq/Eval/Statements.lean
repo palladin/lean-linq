@@ -108,4 +108,20 @@ def DeleteStmt.apply (d : DeleteStmt ts n s) [inst : HasTable ts.tables n s]
     (now : Option String := none) : Except EvalError (TableEnv ts.tables) :=
   (d.applyCount env ps now).map (·.1)
 
+/-- Apply with the affected-row count: the source's rows, appended —
+affected = however many the query yields. -/
+def InsertSelectStmt.applyCount (st : InsertSelectStmt ts n s)
+    [inst : HasTable ts.tables n s]
+    (env : TableEnv ts.tables) (ps : ParamEnv ts.params := by exact .nil)
+    (now : Option String := none) :
+    Except EvalError (TableEnv ts.tables × Nat) := do
+  let rows ← st.source.evalRows ⟨env, ps, now⟩
+  pure (inst.set env (inst.rows env ++ rows), rows.length)
+
+def InsertSelectStmt.apply (st : InsertSelectStmt ts n s)
+    [inst : HasTable ts.tables n s]
+    (env : TableEnv ts.tables) (ps : ParamEnv ts.params := by exact .nil)
+    (now : Option String := none) : Except EvalError (TableEnv ts.tables) :=
+  (st.applyCount env ps now).map (·.1)
+
 end LeanLinq

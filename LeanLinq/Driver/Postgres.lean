@@ -191,6 +191,10 @@ def Conn.execDelete (conn : Conn) (d : DeleteStmt c n s)
     (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
   execCompiled conn (d.toSql .postgres) ps.toCells
 
+def Conn.execInsertSelect (conn : Conn) (st : InsertSelectStmt c n s)
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
+  execCompiled conn (st.toSql .postgres) ps.toCells
+
 /-! ## `Db` interpretation
 
 The monad is sequential by design — dependence is monadic structure,
@@ -208,6 +212,7 @@ private def interp (conn : Pg.Conn) (ps : ParamEnv c.params) :
   | _, _, _, .insert (inst := _) i => conn.execInsert i ps
   | _, _, _, .update (inst := _) u => conn.execUpdate u ps
   | _, _, _, .delete (inst := _) d => conn.execDelete d ps
+  | _, _, _, .insertSelect (inst := _) st => conn.execInsertSelect st ps
   | _, _, _, .bindD x f _ _ => do interp conn ps (f (← interp conn ps x))
   | _, _, _, .weakenP _ x => interp conn ps x
 
