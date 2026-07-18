@@ -34,7 +34,7 @@ def main : IO UInt32 := do
       -- DbFetch smokes: over the wire (pipelined) == in memory
       unless ← checkSpenders (← spenders.execPg conn 2 seedParams) do
         failures := failures + 1
-      unless ← checkBothTables (← bothTables.execPg conn 1 seedParams) do
+      unless ← checkBothTables (← bothTables.execPg conn 2 seedParams) do
         failures := failures + 1
       unless ← checkPerRowLoop (← perRowLoop.execPg conn 3 seedParams) do
         failures := failures + 1

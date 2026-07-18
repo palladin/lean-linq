@@ -204,15 +204,14 @@ executes sequentially here: SQLite is in-process, so a "round" costs a
 statement, not a network wait — the `max` grade is the contract for future
 networked drivers, which batch `seq`'s sides into shared rounds. -/
 private def Sqlite.interp (conn : Sqlite.Conn) (ps : ParamEnv c.params) :
-    {r' : Grade} → {β : Type} → {P : Post β} → DbFetchP c r' β P → IO β
+    {r' : Grade} → {β : Type} → {w : Wp β} → DbFetchP c r' β w → IO β
   | _, _, _, .pure a => Pure.pure a
   | _, _, _, .fetch q => conn.query q ps
   | _, _, _, .fetchCell sc => conn.queryCell sc ps
-  | _, _, _, .seq g x => do Pure.pure ((← interp conn ps g) (← interp conn ps x))
-  | _, _, _, .forAll xs f => xs.mapM fun a => interp conn ps (f a)
+  | _, _, _, .weakenP _ x => interp conn ps x
   | _, _, _, .bindD x f _ _ => do interp conn ps (f (← interp conn ps x))
 
-def DbFetchP.execIO {P : Post α} (f : DbFetchP c r α P) (conn : Sqlite.Conn) (budget : Nat)
+def DbFetchP.execIO {w : Wp α} (f : DbFetchP c r α w) (conn : Sqlite.Conn) (budget : Nat)
     (ps : ParamEnv c.params := by exact .nil)
     (_h : r ≤ Grade.nat budget := by
       try simp only [Grade.ofNat_eq_nat, Grade.nat_add,
@@ -226,7 +225,7 @@ def DbFetchP.execIO {P : Post α} (f : DbFetchP c r α P) (conn : Sqlite.Conn) (
 
 /-- The unbounded door over the wire: no budget, obligation-free — the
 explicit opt-out, same as the in-memory `execAll`. -/
-def DbFetchP.execIOAll {P : Post α} (f : DbFetchP c r α P) (conn : Sqlite.Conn)
+def DbFetchP.execIOAll {w : Wp α} (f : DbFetchP c r α w) (conn : Sqlite.Conn)
     (ps : ParamEnv c.params := by exact .nil) : IO α :=
   Sqlite.interp conn ps f
 

@@ -623,6 +623,60 @@ private theorem le_eval_add_general {ps qs : List GPoly}
       exact le_maxE_of_mem σ (List.mem_flatMap.mpr
         ⟨p, hpm, List.mem_map.mpr ⟨q, hqm, rfl⟩⟩)
 
+/-- Bound the set-max by a uniform bound on members. -/
+theorem maxE_le {K : Nat} : (l : List GPoly) → (∀ p ∈ l, p.eval σ ≤ K) →
+    maxE σ l ≤ K
+  | [], _ => Nat.zero_le K
+  | p :: ps, h => by
+      rw [maxE]
+      exact Nat.max_le.mpr ⟨h p (List.mem_cons_self ..),
+        maxE_le ps (fun q hq => h q (List.mem_cons_of_mem _ hq))⟩
+
+private theorem eval_add_le_general {ps qs : List GPoly}
+    (h : Grade.add (.polys ps) (.polys qs) =
+      if qs = [⟨0, []⟩] then .polys ps
+      else if ps = [⟨0, []⟩] then .polys qs
+      else .polys (mkPolys (ps.flatMap fun p => qs.map fun q => p.add q))) :
+    (Grade.add (.polys ps) (.polys qs)).eval σ ≤
+      (Grade.polys ps).eval σ + (Grade.polys qs).eval σ := by
+  rw [h]
+  split
+  · next hq0 =>
+      subst hq0
+      simp only [eval_polys]
+      omega
+  · split
+    · next hp0 =>
+        subst hp0
+        simp only [eval_polys, maxE, GPoly.eval, GPoly.sumEval, Nat.add_zero,
+          Nat.max_self]
+        omega
+    · rw [eval_polys, eval_polys, eval_polys, maxE_mkPolys]
+      refine maxE_le σ _ ?_
+      intro p hp
+      obtain ⟨p₁, hp₁, hmem⟩ := List.mem_flatMap.mp hp
+      obtain ⟨q₁, hq₁, rfl⟩ := List.mem_map.mp hmem
+      rw [evalP_add]
+      exact Nat.add_le_add (le_maxE_of_mem σ hp₁) (le_maxE_of_mem σ hq₁)
+
+/-- The `≤` half of the additive homomorphism — no nonemptiness needed:
+the empty set only shrinks a max. What the derived loop's semantic
+grade-weakening rides on. -/
+theorem eval_add_le (a b : Grade) :
+    (a + b).eval σ ≤ a.eval σ + b.eval σ :=
+  match a, b with
+  | .polys [], .polys _ => eval_add_le_general σ rfl
+  | .polys [⟨_, []⟩], .polys [] => eval_add_le_general σ rfl
+  | .polys [⟨a, []⟩], .polys [⟨b, []⟩] => by
+      show (Grade.nat (a + b)).eval σ ≤ (Grade.nat a).eval σ + (Grade.nat b).eval σ
+      simp
+  | .polys [⟨_, []⟩], .polys [⟨_, _ :: _⟩] => eval_add_le_general σ rfl
+  | .polys [⟨_, []⟩], .polys (⟨_, []⟩ :: _ :: _) => eval_add_le_general σ rfl
+  | .polys [⟨_, []⟩], .polys (⟨_, _ :: _⟩ :: _ :: _) => eval_add_le_general σ rfl
+  | .polys [⟨_, _ :: _⟩], .polys _ => eval_add_le_general σ rfl
+  | .polys (⟨_, []⟩ :: _ :: _), .polys _ => eval_add_le_general σ rfl
+  | .polys (⟨_, _ :: _⟩ :: _ :: _), .polys _ => eval_add_le_general σ rfl
+
 /-- The additive half of the evaluation homomorphism, `≥` direction —
 what the `union` arm of `run_gcard` needs: the sum of two prices fits
 under the price of the sum. Nonemptiness excludes the max-plus −∞. -/

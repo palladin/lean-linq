@@ -130,7 +130,7 @@ def ordersOf (k : Int) := Query.from' (ts := BasicCtx) orders
   |>.where' (fun o => o["CustomerId"] ==. SqlExpr.int k)
 
 def perRow : (ks : List Int) → DbFetch BasicCtx ks.length (List (List (Values OrdersS)))
-  | [] => .pure []
+  | [] => .relax (.pure [])
   | k :: ks => (perRow ks).bind fun acc =>
       (DbFetch.fetch (ordersOf k)).map (· :: acc)
 
@@ -146,7 +146,7 @@ def batched : DbFetch BasicCtx 2 (Nat × Nat) := fetch! {
 
 /-- A program whose grade is itself a parameter: `n` sampling rounds. -/
 def sampleRounds : (n : Nat) → DbFetch BasicCtx n (List Nat)
-  | 0 => .pure []
+  | 0 => .relax (.pure [])
   | n + 1 => (sampleRounds n).bind fun acc =>
       (DbFetch.fetch (Query.from' (ts := BasicCtx) customers)).map
         fun cs => cs.length :: acc

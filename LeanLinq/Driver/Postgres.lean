@@ -14,11 +14,10 @@ Typed queries in, typed rows out, over the wire protocol (via
 - **Types**: every parameter carries an explicit OID, which solves
   `EXTRACT(YEAR FROM $1)`-style inference properly (the CLI harness had to
   paper over it with `TIMESTAMP '…'` literals). Text format both ways.
-- **`DbFetch.execIO` batches for real**: independent (`seq`) fetches are
-  sent in one libpq *pipeline* round — the `max` grade finally buys shared
-  round trips. The interpreter is level-synchronous with the budget as
-  fuel: the grade bounds the number of rounds, so the type-level bill
-  doubles as the termination argument. -/
+- **`DbFetch` interprets sequentially** (one statement per round):
+  independence is applicative structure, retired with the `seq`
+  constructor; libpq pipeline batching returns with the free-applicative
+  layer over the monad. -/
 
 namespace LeanLinq.Pg
 
@@ -186,147 +185,29 @@ def Conn.execDelete (conn : Conn) (d : DeleteStmt c n s)
     (ps : ParamEnv c.params := by exact .nil) : IO Unit :=
   execCompiled conn (d.toSql .postgres) ps.toCells
 
-/-! ## Level-synchronous `DbFetch` interpretation
+/-! ## `DbFetch` interpretation
 
-Independent (`seq`) fetches share pipeline rounds. The interpreter is a
-fuel-indexed *stage* machine, all in `Type 0` (a residual-tree encoding
-would live in `Type 1`, which `IO` cannot carry):
+The monad is sequential by design — dependence is monadic structure,
+and `bindD` cannot know what to ask until the previous answer arrives —
+so the interpreter is one statement per round. Pipelining (independent
+fetches sharing rounds via libpq pipeline mode) is *applicative*
+structure, retired with the `seq` constructor; it returns with the
+free-applicative layer over this monad. -/
 
-    Stage c α 0     = α                              -- no rounds left ⇒ done
-    Stage c α (n+1) = α ⊕ (read this round's refs, send next round's
-                           fetches, yield a Stage at n)
-
-`sendPhase` walks the graded tree: each ready fetch is *sent* into the
-pipeline (walk order = send order = read order) and becomes a blocked
-stage reading its ref; `bind` continues in the same round when its left
-side is already done (Haxl semantics); `seq` merges both sides' next-round
-actions into one `StateT` batch — that is the batching. The budget is the
-fuel: rounds ≤ grade ≤ budget by construction, so exhaustion is
-unreachable. -/
-
-/-- A pipelined request together with the ref its result will fill. -/
-private inductive Req (c : Ctx) : Type where
-  | q : (s : Schema) → IO.Ref (Option (List (Values s))) → Req c
-  | sc : (t : SqlPrim) → IO.Ref (Option (Nullable t)) → Req c
-
-private abbrev SendM (c : Ctx) := StateT (Array (Req c)) IO
-
-/-- A program that has run for some rounds: done, or blocked on the round
-in flight with an action that reads its results and stages the next. -/
-private def Stage (c : Ctx) (α : Type) : Nat → Type
-  | 0 => α
-  | n + 1 => α ⊕ SendM c (Stage c α n)
-
-private def stageDone (a : α) : (n : Nat) → Stage c α n
-  | 0 => a
-  | _ + 1 => .inl a
-
-/-- Sequential composition; when the left side is already done, the
-continuation sends into the *current* round. -/
-private def bindStage
-    (k : (fuel : Nat) → β → SendM c (Stage c α fuel)) :
-    (n : Nat) → Stage c β n → SendM c (Stage c α n)
-  | 0, b => k 0 b
-  | _ + 1, .inl b => k _ b
-  | n + 1, .inr m => pure (.inr (do bindStage k n (← m)))
-
-/-- Parallel composition: both sides' next-round actions run in the same
-`SendM` batch — shared rounds, the `max` grade made real. -/
-private def parStage (f : β → γ → α) :
-    (n : Nat) → Stage c β n → Stage c γ n → Stage c α n
-  | 0, b, g => f b g
-  | _ + 1, .inl b, .inl g => .inl (f b g)
-  | n + 1, .inl b, .inr mg => .inr (do pure (parStage f n (stageDone b n) (← mg)))
-  | n + 1, .inr mb, .inl g => .inr (do pure (parStage f n (← mb) (stageDone g n)))
-  | n + 1, .inr mb, .inr mg => .inr (do pure (parStage f n (← mb) (← mg)))
-
-private def awaitRef (ref : IO.Ref (Option δ)) : IO δ := do
-  match ← ref.get with
-  | some v => pure v
-  | none => throw (IO.userError "libpq pipeline: unfilled ref")
-
-/-- Walk the tree for one round: send every ready fetch, produce its
-blocked stage; `bind` may continue within the round; `seq` batches. -/
-private def sendPhase (conn : Conn)
-    (cells : List (String × ((t : SqlPrim) × Nullable t))) :
-    {P : Post α} → DbFetchP c r α P → (fuel : Nat) → SendM c (Stage c α fuel)
-  | _, .pure a, fuel => pure (stageDone a fuel)
-  | _, .fetch (s := s) q, fuel => do
-      let compiled := q.toSql .postgres
-      let (oids, vals) ← wireParams compiled cells
-      sendQueryParams conn (toWire compiled) oids vals
-      let ref ← IO.mkRef (none : Option (List (Values s)))
-      modify (·.push (.q s ref))
-      match fuel with
-      | 0 => throw (IO.userError "unreachable: fetch with zero round budget")
-      | n + 1 => pure (.inr (do pure (stageDone (← awaitRef ref) n)))
-  | _, .fetchCell (t := t) sc, fuel => do
-      let compiled := sc.toSql .postgres
-      let (oids, vals) ← wireParams compiled cells
-      sendQueryParams conn (toWire compiled) oids vals
-      let ref ← IO.mkRef (none : Option (Nullable t))
-      modify (·.push (.sc t ref))
-      match fuel with
-      | 0 => throw (IO.userError "unreachable: fetch with zero round budget")
-      | n + 1 => pure (.inr (do pure (stageDone (← awaitRef ref) n)))
-  | _, .seq f x, fuel => do
-      let sf ← sendPhase conn cells f fuel
-      let sx ← sendPhase conn cells x fuel
-      pure (parStage (fun g b => g b) fuel sf sx)
-  | _, .bindD x f _ _, fuel => do
-      let sx ← sendPhase conn cells x fuel
-      bindStage (fun fuel' a => sendPhase conn cells (f a) fuel') fuel sx
-  | _, .forAll xs f, fuel => do
-      -- the loop's bodies are independent of one another, so they all
-      -- send into the *current* round — the per-row loop batches, and the
-      -- sequential grade `k * xs.length` stays a (generous) upper bound
-      let stages ← xs.mapM fun x => sendPhase conn cells (f x) fuel
-      pure (stages.foldr (fun sx acc => parStage (· :: ·) fuel sx acc)
-        (stageDone [] fuel))
-
-/-- Read this round's results in send order and fill the refs. -/
-private def fill (conn : Conn) (reqs : Array (Req c)) : IO Unit := do
-  for req in reqs do
-    match req with
-    | .q s ref =>
-        let res ← pipelineReadResult conn
-        ref.set (some (← readRows res s))
-    | .sc t ref =>
-        let res ← pipelineReadResult conn
-        if (← ntuples res) == 0 then ref.set (some none)
-        else ref.set (some (← readCell res 0 0 t))
-
-/-- Execute one pipeline round: run the send action, sync, fill. A throw
-anywhere inside (a missing named parameter, a server error, a strict-NULL
-decode) would otherwise leave the connection wedged in pipeline mode with
-undrained results — poisoning every later use — so the round recovers
-before re-raising: drain to a fresh sync point and exit pipeline mode. -/
-private def runRound (conn : Conn) (act : SendM c σ) : IO σ := do
-  enterPipeline conn
-  try
-    let (stage, reqs) ← act.run #[]
-    pipelineSync conn
-    fill conn reqs
-    pipelineConsumeSync conn
-    exitPipeline conn
-    pure stage
-  catch e =>
-    pipelineAbort conn
-    throw e
-
-private def runStages (conn : Conn) : (n : Nat) → Stage c α n → IO α
-  | 0, a => pure a
-  | _ + 1, .inl a => pure a
-  | n + 1, .inr next => do runStages conn n (← runRound conn next)
+private def interp (conn : Pg.Conn) (ps : ParamEnv c.params) :
+    {r' : Grade} → {β : Type} → {w : Wp β} → DbFetchP c r' β w → IO β
+  | _, _, _, .pure a => Pure.pure a
+  | _, _, _, .fetch q => conn.query q ps
+  | _, _, _, .fetchCell sc => conn.queryCell sc ps
+  | _, _, _, .bindD x f _ _ => do interp conn ps (f (← interp conn ps x))
+  | _, _, _, .weakenP _ x => interp conn ps x
 
 end Pg
 
-/-- Interpret a `DbFetch` program against live PostgreSQL. Independent
-(`seq`) fetches share pipeline rounds — the `max` grade is real here. Same
-budget discipline as everywhere: `by decide` for closed grades, a
-caller-supplied proof otherwise; the budget also serves as the (provably
-sufficient) round fuel. -/
-def DbFetchP.execPg {P : Post α} (f : DbFetchP c r α P) (conn : Pg.Conn) (budget : Nat)
+/-- Interpret a `DbFetch` program against live PostgreSQL, one statement
+per round, gated by the usual budget obligation: `by decide` for closed
+grades, a caller-supplied proof otherwise. -/
+def DbFetchP.execPg {w : Wp α} (f : DbFetchP c r α w) (conn : Pg.Conn) (budget : Nat)
     (ps : ParamEnv c.params := by exact .nil)
     (_h : r ≤ Grade.nat budget := by
       try simp only [Grade.ofNat_eq_nat, Grade.nat_add,
@@ -335,24 +216,12 @@ def DbFetchP.execPg {P : Post α} (f : DbFetchP c r α P) (conn : Pg.Conn) (budg
       first
         | exact Grade.le_refl _
         | (apply Grade.nat_le_nat; omega)
-        | assumption) : IO α := do
-  Pg.runStages conn budget
-    (← Pg.runRound conn (Pg.sendPhase conn ps.toCells f budget))
+        | assumption) : IO α :=
+  Pg.interp conn ps f
 
-private def Pg.interp (conn : Pg.Conn) (ps : ParamEnv c.params) :
-    {r' : Grade} → {β : Type} → {P : Post β} → DbFetchP c r' β P → IO β
-  | _, _, _, .pure a => Pure.pure a
-  | _, _, _, .fetch q => conn.query q ps
-  | _, _, _, .fetchCell sc => conn.queryCell sc ps
-  | _, _, _, .seq g x => do Pure.pure ((← interp conn ps g) (← interp conn ps x))
-  | _, _, _, .forAll xs f => xs.mapM fun a => interp conn ps (f a)
-  | _, _, _, .bindD x f _ _ => do interp conn ps (f (← interp conn ps x))
-
-/-- The unchecked door over the wire: no budget, no obligation. This
-door interprets **sequentially** (one statement per round): the pipeline
-stage machine pre-allocates its rounds from a static bound, which this
-door declines to name. Pipelining is what the budgeted door buys. -/
-def DbFetchP.execPgAll {P : Post α} (f : DbFetchP c r α P) (conn : Pg.Conn)
+/-- The unchecked door over the wire: no budget, no obligation — the
+explicit opt-out, same as the in-memory `execAll`. -/
+def DbFetchP.execPgAll {w : Wp α} (f : DbFetchP c r α w) (conn : Pg.Conn)
     (ps : ParamEnv c.params := by exact .nil) : IO α :=
   Pg.interp conn ps f
 

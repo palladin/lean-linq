@@ -329,16 +329,19 @@ example {σ : String → Nat}
 /- And the hypothesis is *handed over* by the verified model door:
 `runWithP` runs the same tree `runWith` runs, but its `fetch` arm
 constructs the contract via `run_gcard` instead of promising it — the
-result arrives as `{xs // xs fits gcard at this run's sizes}`, and the
-page bound is a theorem of the run, no check anywhere. -/
+result arrives with the spec's strongest-post reading (`Wp.sp`) at this
+run's sizes, `sp_fetch` turns it back into the pointwise contract, and
+the page bound is a theorem of the run, no check anywhere. -/
 #guard ((((adults.limit 10).fetch).runWithP ⟨demoEnv, .nil, none⟩).toOption.map
     (·.val.length)) == some 2
 
 example {res : {xs : List (Values [("Id", SqlType.long), ("Name", SqlType.string)]) //
-      xs.length ≤ (Query.gcard (adults.limit 10)).eval (TableEnv.sizes demoEnv)}}
+      Wp.sp (fun post σ =>
+        ∀ ys, ys.length ≤ (Query.gcard (adults.limit 10)).eval σ → post ys)
+        xs (TableEnv.sizes demoEnv)}}
     (_h : ((adults.limit 10).fetch).runWithP ⟨demoEnv, .nil, none⟩ = .ok res) :
     res.val.length ≤ 10 :=
-  fetchPage_fits adults 10 res.property
+  fetchPage_fits adults 10 ((DbFetchP.sp_fetch _ _ _).mp res.property)
 
 /-! ## Statements -/
 

@@ -69,8 +69,7 @@ error it is.
 
 **Scope**: lean-linq compiles queries to `CompiledSql` (SQL text + parameter bindings) for
 any driver to execute, and ships **native drivers for all three engines** — SQLite
-(C FFI over the system sqlite3), PostgreSQL (libpq, with pipeline-batched fetch
-rounds), and SQL Server (FreeTDS, `sp_executesql` RPC): typed queries in, typed rows
+(C FFI over the system sqlite3), PostgreSQL (libpq), and SQL Server (FreeTDS, `sp_executesql` RPC): typed queries in, typed rows
 out, parameters bound natively — see "Executing for real" below.
 
 ## Building
@@ -265,8 +264,8 @@ def demo : IO Unit := do
 - **`DbFetch` programs run over the wire**: `f.execIO conn budget` interprets the same
   round-budgeted tree `runWith` interprets in memory, with the same proof discipline.
 
-`DbFetch` prices round trips in the type (`fetch` = 1, independent `seq` = `max`,
-data-dependent `bind` = `+`, per-row `for` = body grade × collection length), and
+`DbFetch` prices round trips in the type (`fetch` = 1, data-dependent `bind` =
+`+`, per-row `for` = body grade × collection length — a derived bind-chain), and
 execution demands a budget plus a proof — the philosophy being that everything is
 priced and the *proof* is the gate. Grades are canonical **max-plus polynomials
 over table-size symbols** — there is no ⊤ and no ℕ∞ anywhere: the unknown is not
@@ -297,9 +296,9 @@ a single round; `execAll` runs unchecked, visibly. You can write N+1 when you
 mean it — priced by a bounded query or by the database itself — and you cannot
 write it by accident: a loop over a collection *derived* from fetched rows
 (`filterMap` ids and the like) has no contract to consume, and no proof exists.
-(Loops are first-class constructors with independent bodies, so the pipelining
-PostgreSQL driver batches them into shared rounds — the declared grade is an
-upper bound.)
+(Independence — fetches sharing a round — is applicative structure, not
+monadic; it was deliberately removed from the core and returns with a free
+applicative layered over the monad, where PostgreSQL pipeline batching lives.)
 
 All of it in one definition, written in `fetch!` do-sugar:
 
@@ -340,19 +339,17 @@ On a fetched row, `s["Id"]` in an expression position embeds the cell as a typed
 literal (the inner query's WHERE), and anywhere else reads the honest value —
 the same brackets both ways. Over the wire the doors are per-driver:
 `f.execIO conn budget` (SQLite), `f.execPg conn budget` (PostgreSQL, pipelined),
-`f.execMs conn budget` (SQL Server) — each with an unchecked `…All` variant
-(`execPgAll` interprets sequentially: the pipeline stage machine pre-allocates
-rounds from a static bound, which the unchecked door declines to name).
+`f.execMs conn budget` (SQL Server) — each with an unchecked `…All` variant.
+All interpret sequentially, one statement per round.
 
 **PostgreSQL** works the same way (`import LeanLinq.Driver.Postgres`, `Pg.connect` with
 a conninfo string; requires libpq — `brew install libpq` / `libpq-dev`): the driver
 rewrites the compiled `:name` placeholders to the wire's `$N` form and sends every
 parameter with an explicit type OID, which resolves `EXTRACT(YEAR FROM $1)`-style
-inference properly. And on PostgreSQL the `DbFetch` grading pays off for real:
-`f.execPg conn budget` interprets independence through libpq **pipeline mode** —
-`seq` sides and `for` loop bodies share round trips, so the declared grade is an
-actual latency bound, not just an upper estimate. `lake exe pgdriver` sweeps the full
-corpus against live PostgreSQL, typed `Values`-to-`Values` against the evaluator.
+inference properly. `f.execPg conn budget` interprets one statement per round
+(pipeline batching is applicative structure and returns with the free-applicative
+layer). `lake exe pgdriver` sweeps the full corpus against live PostgreSQL, typed
+`Values`-to-`Values` against the evaluator.
 
 **SQL Server** completes the trilogy (`import LeanLinq.Driver.Mssql`, `Ms.connect`
 with host/port/credentials; requires FreeTDS — `brew install freetds` /

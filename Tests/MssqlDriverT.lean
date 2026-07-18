@@ -45,7 +45,7 @@ def main : IO UInt32 := do
   -- DbFetch smokes: over the wire == in memory (sequential on TDS)
   unless ← checkSpenders (← spenders.execMs conn 2 seedParams) do
     failures := failures + 1
-  unless ← checkBothTables (← bothTables.execMs conn 1 seedParams) do
+  unless ← checkBothTables (← bothTables.execMs conn 2 seedParams) do
     failures := failures + 1
   unless ← checkPerRowLoop (← perRowLoop.execMs conn 3 seedParams) do
     failures := failures + 1

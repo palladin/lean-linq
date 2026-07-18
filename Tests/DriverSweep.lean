@@ -130,11 +130,14 @@ def spenders : DbFetch TestCtx 2 (Nat × List (Values OrdersS)) := fetch! {
   return (adults.length, children)
 }
 
-/-- The shared `seq` smoke: two *independent* fetches, grade `max 1 1 = 1` —
-on a pipelining driver this is one round carrying two statements. -/
-def bothTables : DbFetch TestCtx 1 (List (Values CustomersS) × List (Values OrdersS)) :=
-  .seq (DbFetchP.map Prod.mk (.fetch (Query.from' (ts := TestCtx) customers)))
-       (.fetch (Query.from' (ts := TestCtx) orders))
+/-- The two-fetch smoke, sequential by design: independence is
+applicative structure — retired with `seq`, returning with the free
+applicative — so two fetches cost `1 + 1 = 2` in the monad. -/
+def bothTables : DbFetch TestCtx 2 (List (Values CustomersS) × List (Values OrdersS)) := fetch! {
+  let cs ← .fetch (Query.from' (ts := TestCtx) customers)
+  let os ← .fetch (Query.from' (ts := TestCtx) orders)
+  return (cs, os)
+}
 
 /-- The shared `for … do` smoke: the per-row loop over an in-hand key
 list — exact grade `1 * 3 + 0 = 3`, one sequential fetch per key. -/
@@ -207,14 +210,14 @@ def checkSpenders (live : Nat × List (Values OrdersS)) : IO Bool := do
 def checkBothTables (live : List (Values CustomersS) × List (Values OrdersS)) : IO Bool := do
   match bothTables.runWith ⟨seedEnv, seedParams, none⟩ with
   | .error e =>
-      IO.eprintln s!"EVAL ERROR bothTables (DbFetch seq): {repr e}"
+      IO.eprintln s!"EVAL ERROR bothTables (DbFetch two-fetch): {repr e}"
       pure false
   | .ok mem =>
       if live.1.mergeSort rowLe == mem.1.mergeSort rowLe &&
          live.2.mergeSort rowLe == mem.2.mergeSort rowLe then
         pure true
       else do
-        IO.eprintln "DRIVER MISMATCH bothTables (DbFetch seq)"
+        IO.eprintln "DRIVER MISMATCH bothTables (DbFetch two-fetch)"
         pure false
 
 def checkPerRowLoop (live : List Nat) : IO Bool := do
