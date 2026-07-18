@@ -73,6 +73,111 @@ any driver to execute, and ships **native drivers for all four engines** — SQL
 `brew install mysql-client`), and SQL Server (FreeTDS, `sp_executesql` RPC): typed queries in, typed rows
 out, parameters bound natively — see "Executing for real" below.
 
+## `db!` — database programs with the round-trip bill in the type
+
+`Db` prices round trips in the type (`fetch` = 1, data-dependent `bind` =
+`+`, per-row `for` = body grade × collection length — a derived bind-chain), and
+execution demands a budget plus a proof — the philosophy being that everything is
+priced and the *proof* is the gate. Grades are canonical **max-plus polynomials
+over table-size symbols** — there is no ⊤ and no ℕ∞ anywhere: the unknown is not
+"unbounded", it is a *symbol*, and a size valuation σ collapses any grade to a
+plain `Nat`. `customers.size + 1` is a type; `q.gcard` prices a query's rows in
+the same symbols (a source is its table's symbol, joins multiply, unions add,
+`limit` caps — with a real `min` when the inner bound is closed); canonical forms
+make the arithmetic definitional (`1 + 1*X = X + 1` is `rfl`).
+
+That gives N+1 four doors, none accidental: `fetchFor` batches a whole key set
+into one `IN (…)` round (grade 1); `let ys ← for x in xs do body` loops per row
+with the **exact dynamic grade** `k * xs.length` — for collections already in
+hand, proved at the door (`by decide` for literals, `omega` for computed
+budgets); over *just-fetched* rows, `fetchLimit q n` returns a length-refined
+list (`{xs // xs.length ≤ n}`, backed by the first theorem about the executable
+semantics: `Query.run_limit_length_le`, `LIMIT` really limits), and looping over
+its `.val` fuses into `DbP.forRows`, whose budget proof *is* the refinement
+— grade `m + k * n`, closed, silent; and the plain spelling needs no bound at
+all — `let xs ← q.execQuery` then `for p in xs do body` fuses into `forFetched`,
+because `fetch` carries as its postcondition that the rows fit `q.gcard` at every
+size valuation σ, and the dependent bind (`bindD`) takes evidence *conditional on
+that postcondition* — the loop's budget proof consumes the contract and
+transports it through the evaluation homomorphism, grade `1 + k * q.gcard` in the
+database's own terms. `exec budget` refuses a symbolic grade statically (no
+number dominates a table symbol); the sized door `execWithin` collapses the
+polynomial against the live database's own sizes and checks *before* interpreting
+a single round; `execAll` runs unchecked, visibly. You can write N+1 when you
+mean it — priced by a bounded query or by the database itself — and you cannot
+write it by accident: a loop over a collection *derived* from fetched rows
+(`filterMap` ids and the like) has no contract to consume, and no proof exists.
+(Independence — fetches sharing a round — is applicative structure, not
+monadic; it was deliberately removed from the core and returns with a free
+applicative layered over the monad, where PostgreSQL pipeline batching lives.)
+
+All of it in one definition, written in `db!` do-sugar:
+
+```lean
+def topSpendersDetail (n : Nat) :
+    Db ShopDb (Grade.nat n + 1) (List (String × Nat)) := db! {
+  let spenders ← Query.from' (ts := ShopDb) customers
+    |>.where' (fun c => 18 <. c["Age"])
+    |>.orderBy (fun c => [c["Name"].asc])
+    |>.fetchLimit n                           -- LIMIT n, length-refined rows
+  let report ← for s in spenders.val do       -- fuses into forRows: the proof is the refinement
+    Query.from' (ts := ShopDb) orders
+      |>.where' (fun o => o["CustomerId"] ==. s["Id"])
+      |>.execQuery
+      |>.map (fun os => (s["Name"], os.length))
+  return report
+}
+
+#eval (topSpendersDetail 5).exec 6 db      -- 5 + 1 rounds declared; proof by decide, silent
+
+-- and "all rows, per row" needs no bound at all — the price is symbolic:
+def topSpendersAll : Db ShopDb (customers.size + 1) (List (String × Nat)) := db! {
+  let spenders ← Query.from' (ts := ShopDb) customers
+    |>.where' (fun c => 18 <. c["Age"]) |>.execQuery
+  let report ← for s in spenders do           -- fuses into forFetched: the proof is fetch's contract
+    Query.from' (ts := ShopDb) orders
+      |>.where' (fun o => o["CustomerId"] ==. s["Id"])
+      |>.execQuery
+      |>.map (fun os => (s["Name"], os.length))
+  return report
+}
+
+#eval topSpendersAll.execWithin 50 db              -- collapses |customers|+1 at db's sizes, checks, runs
+#check_failure (topSpendersAll.exec 1000 db)       -- no number dominates |customers| + 1
+```
+
+Writes are effects in the same monad — `insert`, `update`, `delete`,
+`INSERT … SELECT`, and batched multi-row `VALUES` each cost one operation and
+return their **affected-row count** (exact in the model, engine-reported over the
+wire). The grade is simply the count of database operations, reads and writes
+alike — so the write-side N+1 carries its bill too:
+
+```lean
+-- one SELECT, then one INSERT per row — the type says what it costs:
+def duplicateAll : Db ShopDb (customers.size + 1) Nat := db! {
+  let rows ← Query.from' (ts := ShopDb) customers |>.execQuery
+  let ks ← for r in rows do
+    customers.insert (ts := ShopDb)
+      |>.value "Id" r["Id"] |>.value "Age" r["Age"] |>.value "Name" r["Name"]
+      |>.execInsert
+  return ks.sum
+}
+
+-- the same copy as INSERT … SELECT: the engine moves the rows, grade 1
+def duplicateAllFast : Db ShopDb 1 Nat := db! {
+  let k ← customers.insertFrom (Query.from' (ts := ShopDb) customers)
+    |>.execInsertSelect
+  return k
+}
+```
+
+On a fetched row, `s["Id"]` in an expression position embeds the cell as a typed
+literal (the inner query's WHERE), and anywhere else reads the honest value —
+the same brackets both ways. Over the wire the doors are per-driver:
+`f.execIO conn budget` (SQLite), `f.execPg conn budget` (PostgreSQL, pipelined),
+`f.execMs conn budget` (SQL Server) — each with an unchecked `…All` variant.
+All interpret sequentially, one statement per round.
+
 ## Building
 
 ```
@@ -264,84 +369,6 @@ def demo : IO Unit := do
   verified inside rolled-back transactions).
 - **`Db` programs run over the wire**: `f.execIO conn budget` interprets the same
   round-budgeted tree `runWith` interprets in memory, with the same proof discipline.
-
-`Db` prices round trips in the type (`fetch` = 1, data-dependent `bind` =
-`+`, per-row `for` = body grade × collection length — a derived bind-chain), and
-execution demands a budget plus a proof — the philosophy being that everything is
-priced and the *proof* is the gate. Grades are canonical **max-plus polynomials
-over table-size symbols** — there is no ⊤ and no ℕ∞ anywhere: the unknown is not
-"unbounded", it is a *symbol*, and a size valuation σ collapses any grade to a
-plain `Nat`. `customers.size + 1` is a type; `q.gcard` prices a query's rows in
-the same symbols (a source is its table's symbol, joins multiply, unions add,
-`limit` caps — with a real `min` when the inner bound is closed); canonical forms
-make the arithmetic definitional (`1 + 1*X = X + 1` is `rfl`).
-
-That gives N+1 four doors, none accidental: `fetchFor` batches a whole key set
-into one `IN (…)` round (grade 1); `let ys ← for x in xs do body` loops per row
-with the **exact dynamic grade** `k * xs.length` — for collections already in
-hand, proved at the door (`by decide` for literals, `omega` for computed
-budgets); over *just-fetched* rows, `fetchLimit q n` returns a length-refined
-list (`{xs // xs.length ≤ n}`, backed by the first theorem about the executable
-semantics: `Query.run_limit_length_le`, `LIMIT` really limits), and looping over
-its `.val` fuses into `DbP.forRows`, whose budget proof *is* the refinement
-— grade `m + k * n`, closed, silent; and the plain spelling needs no bound at
-all — `let xs ← q.execQuery` then `for p in xs do body` fuses into `forFetched`,
-because `fetch` carries as its postcondition that the rows fit `q.gcard` at every
-size valuation σ, and the dependent bind (`bindD`) takes evidence *conditional on
-that postcondition* — the loop's budget proof consumes the contract and
-transports it through the evaluation homomorphism, grade `1 + k * q.gcard` in the
-database's own terms. `exec budget` refuses a symbolic grade statically (no
-number dominates a table symbol); the sized door `execWithin` collapses the
-polynomial against the live database's own sizes and checks *before* interpreting
-a single round; `execAll` runs unchecked, visibly. You can write N+1 when you
-mean it — priced by a bounded query or by the database itself — and you cannot
-write it by accident: a loop over a collection *derived* from fetched rows
-(`filterMap` ids and the like) has no contract to consume, and no proof exists.
-(Independence — fetches sharing a round — is applicative structure, not
-monadic; it was deliberately removed from the core and returns with a free
-applicative layered over the monad, where PostgreSQL pipeline batching lives.)
-
-All of it in one definition, written in `db!` do-sugar:
-
-```lean
-def topSpendersDetail (n : Nat) :
-    Db ShopDb (Grade.nat n + 1) (List (String × Nat)) := db! {
-  let spenders ← Query.from' (ts := ShopDb) customers
-    |>.where' (fun c => 18 <. c["Age"])
-    |>.orderBy (fun c => [c["Name"].asc])
-    |>.fetchLimit n                           -- LIMIT n, length-refined rows
-  let report ← for s in spenders.val do       -- fuses into forRows: the proof is the refinement
-    Query.from' (ts := ShopDb) orders
-      |>.where' (fun o => o["CustomerId"] ==. s["Id"])
-      |>.execQuery
-      |>.map (fun os => (s["Name"], os.length))
-  return report
-}
-
-#eval (topSpendersDetail 5).exec 6 db      -- 5 + 1 rounds declared; proof by decide, silent
-
--- and "all rows, per row" needs no bound at all — the price is symbolic:
-def topSpendersAll : Db ShopDb (customers.size + 1) (List (String × Nat)) := db! {
-  let spenders ← Query.from' (ts := ShopDb) customers
-    |>.where' (fun c => 18 <. c["Age"]) |>.execQuery
-  let report ← for s in spenders do           -- fuses into forFetched: the proof is fetch's contract
-    Query.from' (ts := ShopDb) orders
-      |>.where' (fun o => o["CustomerId"] ==. s["Id"])
-      |>.execQuery
-      |>.map (fun os => (s["Name"], os.length))
-  return report
-}
-
-#eval topSpendersAll.execWithin 50 db              -- collapses |customers|+1 at db's sizes, checks, runs
-#check_failure (topSpendersAll.exec 1000 db)       -- no number dominates |customers| + 1
-```
-
-On a fetched row, `s["Id"]` in an expression position embeds the cell as a typed
-literal (the inner query's WHERE), and anywhere else reads the honest value —
-the same brackets both ways. Over the wire the doors are per-driver:
-`f.execIO conn budget` (SQLite), `f.execPg conn budget` (PostgreSQL, pipelined),
-`f.execMs conn budget` (SQL Server) — each with an unchecked `…All` variant.
-All interpret sequentially, one statement per round.
 
 **PostgreSQL** works the same way (`import LeanLinq.Driver.Postgres`, `Pg.connect` with
 a conninfo string; requires libpq — `brew install libpq` / `libpq-dev`): the driver
