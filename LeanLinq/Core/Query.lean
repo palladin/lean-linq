@@ -127,6 +127,17 @@ end
 
 @[reducible] def QueryP.gcard (q : QueryA ts s) : Grade := q.gcardAux 0
 
+/-- What a scalar cell can promise from sizes alone: COUNT is a
+cardinality — never NULL, and it fits the spine's own symbolic bound —
+while the content aggregates (SUM/AVG/MIN/MAX) promise nothing, of
+necessity: sizes do not determine cell contents. -/
+@[reducible] def ScalarQueryP.cellBound {ts : Ctx} :
+    {c : SqlType} → ScalarA ts c → Nullable c.ty → (String → Nat) → Prop
+  | _, .countQ sp, v, σ =>
+      v.isSome = true ∧ ∀ k : Int, v = some k →
+        k.toNat ≤ (sp.gcardAux 0).eval σ
+  | _, .aggQ .., _, _ => True
+
 namespace QueryP
 
 variable {ρ : Schema → Type}

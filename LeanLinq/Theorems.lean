@@ -396,6 +396,188 @@ theorem SpineQP.evalScopes_gcard_le {ts : Ctx} {g : Terminal} {s : Schema}
               q.gcardAux n * (f ⟨s!"a{n}"⟩).gcardAux (n + 1) from rfl,
               Grade.eval_mul, Nat.mul_assoc]
 
+/-- The count walk (`enumScopes`) is bounded the same way — the third
+member of the induction, arm-for-arm the row walk minus terminal work. -/
+theorem SpineQP.enumScopes_gcard_le {ts : Ctx} {g : Terminal} {s : Schema}
+    {ee : EvalEnv ts} : (sp : SpineQ ts g s) → {n : Nat} → {scopes : List Scope} →
+    {rs : List Scope} → (hp : g = .plain) →
+    (hn : ∀ sc ∈ scopes, n = sc.length) →
+    sp.enumScopes ee n scopes hp = .ok rs →
+    rs.length ≤ scopes.length * (sp.gcardAux n).eval (TableEnv.sizes ee.tables)
+  | .yield r, n, scopes, rs, _, _, h => by
+      rw [show ((SpineQP.yield r).gcardAux n) = Grade.nat 1 from rfl,
+        Grade.eval_nat, Nat.mul_one]
+      simp only [SpineQP.enumScopes, pure, Except.pure, Except.ok.injEq] at h
+      subst h
+      exact Nat.le_refl _
+  | .groupYield .., _, _, _, hp, _, _ => nomatch hp
+  | .guard b rest, n, scopes, rs, hp, hn, h => by
+      rw [SpineQP.enumScopes.eq_def] at h
+      simp only at h
+      obtain ⟨survivors, hs, h⟩ := Except.bind_ok h
+      refine Nat.le_trans (SpineQP.enumScopes_gcard_le rest hp ?_ h) ?_
+      · intro sc' hsc'
+        refine hn sc' (List.filterMap_mapM_except_mem hs ?_ sc' hsc')
+        intro x y hfx
+        obtain ⟨bv, _, hfx⟩ := Except.bind_ok hfx
+        simp only [pure, Except.pure, Except.ok.injEq] at hfx
+        split at hfx
+        · exact (Option.some.injEq ..).mp hfx |>.symm
+        · cases hfx
+      · rw [show ((SpineQP.guard b rest).gcardAux n) = rest.gcardAux n from rfl]
+        exact Nat.mul_le_mul_right _ (List.length_filterMap_mapM_except_le hs)
+  | .order ks rest, n, scopes, rs, hp, hn, h => by
+      rw [SpineQP.enumScopes.eq_def] at h
+      simp only at h
+      rw [show ((SpineQP.order ks rest).gcardAux n) = rest.gcardAux n from rfl]
+      exact SpineQP.enumScopes_gcard_le rest hp hn h
+  | .fromT (s := s₀) (n := nm) (inst := i) _ f, n, scopes, rs, hp, hn, h => by
+      rw [SpineQP.enumScopes.eq_def] at h
+      simp only at h
+      have hext : ∀ sc' ∈ (scopes.flatMap fun sc =>
+          (i.rows ee.tables).map fun v => (s!"a{n}", ⟨s₀, v⟩) :: sc),
+          n + 1 = sc'.length := by
+        intro sc' hsc'
+        obtain ⟨sc, hsc, hmem⟩ := List.mem_flatMap.mp hsc'
+        obtain ⟨v, _, rfl⟩ := List.mem_map.mp hmem
+        simpa using congrArg Nat.succ (hn sc hsc)
+      have hbelow := SpineQP.enumScopes_gcard_le (f ⟨s!"a{n}"⟩) hp hext h
+      have hexts : (scopes.flatMap fun sc =>
+          (i.rows ee.tables).map fun v => (s!"a{n}", ⟨s₀, v⟩) :: sc).length
+            ≤ scopes.length * TableEnv.sizes ee.tables nm :=
+        List.length_flatMap_le scopes (fun sc _ =>
+          Nat.le_trans (Nat.le_of_eq (List.length_map ..)) (i.rows_sizes ee.tables))
+      calc rs.length
+          ≤ _ * ((f ⟨s!"a{n}"⟩).gcardAux (n + 1)).eval (TableEnv.sizes ee.tables) :=
+            hbelow
+        _ ≤ (scopes.length * TableEnv.sizes ee.tables nm) *
+              ((f ⟨s!"a{n}"⟩).gcardAux (n + 1)).eval (TableEnv.sizes ee.tables) :=
+            Nat.mul_le_mul_right _ hexts
+        _ = scopes.length *
+              ((SpineQP.fromT (inst := i) _ f).gcardAux n).eval (TableEnv.sizes ee.tables) := by
+            rw [show ((SpineQP.fromT (inst := i) _ f).gcardAux n) =
+              Grade.tbl nm * (f ⟨s!"a{n}"⟩).gcardAux (n + 1) from rfl,
+              Grade.eval_mul, Grade.eval_tbl, Nat.mul_assoc]
+  | .joinT (s := s₀) (n := nm) (inst := i) _ on' f, n, scopes, rs, hp, hn, h => by
+      rw [SpineQP.enumScopes.eq_def] at h
+      simp only at h
+      obtain ⟨hits, hh, h⟩ := Except.bind_ok h
+      have hmemE := List.mem_of_filterM_except hh
+      have hext : ∀ sc' ∈ hits, n + 1 = sc'.length := by
+        intro sc' hsc'
+        obtain ⟨sc, hsc, hmem⟩ := List.mem_flatMap.mp (hmemE sc' hsc')
+        obtain ⟨v, _, rfl⟩ := List.mem_map.mp hmem
+        simpa using congrArg Nat.succ (hn sc hsc)
+      have hbelow := SpineQP.enumScopes_gcard_le (f ⟨s!"a{n}"⟩) hp hext h
+      have hhits : hits.length ≤ scopes.length * TableEnv.sizes ee.tables nm :=
+        Nat.le_trans (List.length_filterM_except_le hh)
+          (List.length_flatMap_le scopes (fun sc _ =>
+            Nat.le_trans (Nat.le_of_eq (List.length_map ..)) (i.rows_sizes ee.tables)))
+      calc rs.length
+          ≤ _ * ((f ⟨s!"a{n}"⟩).gcardAux (n + 1)).eval (TableEnv.sizes ee.tables) :=
+            hbelow
+        _ ≤ (scopes.length * TableEnv.sizes ee.tables nm) *
+              ((f ⟨s!"a{n}"⟩).gcardAux (n + 1)).eval (TableEnv.sizes ee.tables) :=
+            Nat.mul_le_mul_right _ hhits
+        _ = scopes.length *
+              ((SpineQP.joinT (inst := i) _ on' f).gcardAux n).eval (TableEnv.sizes ee.tables) := by
+            rw [show ((SpineQP.joinT (inst := i) _ on' f).gcardAux n) =
+              Grade.tbl nm * (f ⟨s!"a{n}"⟩).gcardAux (n + 1) from rfl,
+              Grade.eval_mul, Grade.eval_tbl, Nat.mul_assoc]
+  | .joinLeftT (s := s₀) (n := nm) (inst := i) _ on' f, n, scopes, rs, hp, hn, h => by
+      rw [SpineQP.enumScopes.eq_def] at h
+      simp only at h
+      obtain ⟨parts, hm, h⟩ := Except.bind_ok h
+      have hpart : ∀ part ∈ parts,
+          part.length ≤ TableEnv.sizes ee.tables nm + 1 := by
+        intro part hpm
+        obtain ⟨sc, _, hev⟩ := List.mem_of_mapM_except _ hm part hpm
+        obtain ⟨hits, hh, hev⟩ := Except.bind_ok hev
+        have hR : hits.length ≤ TableEnv.sizes ee.tables nm :=
+          Nat.le_trans (List.length_filterM_except_le hh) (i.rows_sizes ee.tables)
+        split at hev
+        · simp only [pure, Except.pure, Except.ok.injEq] at hev
+          subst hev
+          simp only [List.length_cons, List.length_nil]
+          omega
+        · simp only [pure, Except.pure, Except.ok.injEq] at hev
+          subst hev
+          rw [List.length_map]
+          exact Nat.le_succ_of_le hR
+      have hext : ∀ sc' ∈ parts.flatten, n + 1 = sc'.length := by
+        intro sc' hsc'
+        obtain ⟨part, hpm, hin⟩ := List.mem_flatten.mp hsc'
+        obtain ⟨sc, hsc, hev⟩ := List.mem_of_mapM_except _ hm part hpm
+        obtain ⟨hits, _, hev⟩ := Except.bind_ok hev
+        split at hev
+        · simp only [pure, Except.pure, Except.ok.injEq] at hev
+          subst hev
+          rw [List.mem_singleton] at hin
+          subst hin
+          simpa using congrArg Nat.succ (hn sc hsc)
+        · simp only [pure, Except.pure, Except.ok.injEq] at hev
+          subst hev
+          obtain ⟨v, _, rfl⟩ := List.mem_map.mp hin
+          simpa using congrArg Nat.succ (hn sc hsc)
+      have hbelow := SpineQP.enumScopes_gcard_le (f ⟨s!"a{n}"⟩) hp hext h
+      have hflat : parts.flatten.length ≤
+          scopes.length * (TableEnv.sizes ee.tables nm + 1) :=
+        List.length_mapM_except _ hm ▸ List.length_flatten_le parts hpart
+      have htop : TableEnv.sizes ee.tables nm + 1 ≤
+          (Grade.tbl nm + 1).eval (TableEnv.sizes ee.tables) := by
+        have := Grade.le_eval_add (TableEnv.sizes ee.tables)
+          (Grade.ne_tbl nm) (Grade.ne_nat 1)
+        simpa using this
+      calc rs.length
+          ≤ _ * ((f ⟨s!"a{n}"⟩).gcardAux (n + 1)).eval (TableEnv.sizes ee.tables) :=
+            hbelow
+        _ ≤ (scopes.length * ((Grade.tbl nm + 1).eval (TableEnv.sizes ee.tables))) *
+              ((f ⟨s!"a{n}"⟩).gcardAux (n + 1)).eval (TableEnv.sizes ee.tables) :=
+            Nat.mul_le_mul_right _ (Nat.le_trans hflat
+              (Nat.mul_le_mul_left _ htop))
+        _ = scopes.length *
+              ((SpineQP.joinLeftT (inst := i) _ on' f).gcardAux n).eval (TableEnv.sizes ee.tables) := by
+            rw [show ((SpineQP.joinLeftT (inst := i) _ on' f).gcardAux n) =
+              (Grade.tbl nm + 1) * (f ⟨s!"a{n}"⟩).gcardAux (n + 1) from rfl,
+              Grade.eval_mul, Nat.mul_assoc]
+  | .fromQ (s := s₀) q f, n, scopes, rs, hp, hn, h => by
+      rw [SpineQP.enumScopes.eq_def] at h
+      simp only at h
+      obtain ⟨parts, hm, h⟩ := Except.bind_ok h
+      have hpart : ∀ part ∈ parts,
+          part.length ≤ (q.gcardAux n).eval (TableEnv.sizes ee.tables) := by
+        intro part hpm
+        obtain ⟨sc, hsc, hev⟩ := List.mem_of_mapM_except _ hm part hpm
+        obtain ⟨rows, hq, hev⟩ := Except.bind_ok hev
+        simp only [pure, Except.pure, Except.ok.injEq] at hev
+        subst hev
+        rw [List.length_map]
+        exact hn sc hsc ▸ QueryP.evalRowsIn_gcard_le q hq
+      have hext : ∀ sc' ∈ parts.flatten, n + 1 = sc'.length := by
+        intro sc' hsc'
+        obtain ⟨part, hpm, hin⟩ := List.mem_flatten.mp hsc'
+        obtain ⟨sc, hsc, hev⟩ := List.mem_of_mapM_except _ hm part hpm
+        obtain ⟨rows, _, hev⟩ := Except.bind_ok hev
+        simp only [pure, Except.pure, Except.ok.injEq] at hev
+        subst hev
+        obtain ⟨v, _, rfl⟩ := List.mem_map.mp hin
+        simpa using congrArg Nat.succ (hn sc hsc)
+      have hbelow := SpineQP.enumScopes_gcard_le (f ⟨s!"a{n}"⟩) hp hext h
+      have hflat : parts.flatten.length ≤
+          scopes.length * (q.gcardAux n).eval (TableEnv.sizes ee.tables) :=
+        List.length_mapM_except _ hm ▸ List.length_flatten_le parts hpart
+      calc rs.length
+          ≤ _ * ((f ⟨s!"a{n}"⟩).gcardAux (n + 1)).eval (TableEnv.sizes ee.tables) :=
+            hbelow
+        _ ≤ (scopes.length * (q.gcardAux n).eval (TableEnv.sizes ee.tables)) *
+              ((f ⟨s!"a{n}"⟩).gcardAux (n + 1)).eval (TableEnv.sizes ee.tables) :=
+            Nat.mul_le_mul_right _ hflat
+        _ = scopes.length *
+              ((SpineQP.fromQ q f).gcardAux n).eval (TableEnv.sizes ee.tables) := by
+            rw [show ((SpineQP.fromQ q f).gcardAux n) =
+              q.gcardAux n * (f ⟨s!"a{n}"⟩).gcardAux (n + 1) from rfl,
+              Grade.eval_mul, Nat.mul_assoc]
+
 theorem QueryP.evalRowsIn_gcard_le {ts : Ctx} {s : Schema} {ee : EvalEnv ts} :
     (q : QueryA ts s) → {sc : Scope} → {xs : List (Values s)} →
     q.evalRowsIn ee sc = .ok xs →

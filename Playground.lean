@@ -223,19 +223,32 @@ def topSpendersDetail2 (n : Nat) :
 #eval (topSpendersDetail2 5).exec 2 demoEnv
 -- Except.ok [("Jane Smith", 1), ("John Doe", 1)] — grade 1 + 1, any n
 
-/- "All the records" is two phases: you cannot know the fan-out before
-asking, so ask first — the count becomes the loop's bound and the
-budget, and `omega` proves the door for every n. Between the two `exec`s
-is the moment you *learn* n; no single program can promise a round count
-before that. -/
-def allSpendersDetail : Except EvalError (List (String × Nat)) := do
-  let cnt ← (adults.count).fetch.exec 1 demoEnv        -- round 1: how many?
-  let n := (cnt.getD 0).toNat
-  (topSpendersDetail n).exec (n + 1) demoEnv .nil none
-    (by simpa only [Grade.ofNat_eq_nat, Grade.nat_add]
-      using Grade.le_refl (Grade.nat (n + 1)))
+/- "All the records" used to be two phases in `Except` — you could not
+know the fan-out before asking, so no single program could promise a
+round count. **Now it can**: `fetchCount`'s spec says the answer fits
+`gcard`, and that spec pays the loop's budget — the fully dynamic
+"count, then loop that many times" is ONE program, priced statically
+in the database's own terms: one round to ask, one for the page, at
+most `|customers|` for the fan-out. -/
+def allSpendersDetail :
+    DbFetch PlayCtx (customers.size + 2) (List (String × Nat)) :=
+  DbFetchP.withBound (DbFetchP.relax
+    (DbFetchP.bindD (Query.fetchCount adults) (fun n => topSpendersDetail n)
+      (Query.gcard adults + Grade.nat 1)
+      (fun σ n hsp => by
+        have hn : n ≤ (Query.gcard adults).eval σ :=
+          hsp (· ≤ (Query.gcard adults).eval σ) (fun m hm => hm)
+        have hadd := Grade.le_eval_add (a := Query.gcard adults) (b := Grade.nat 1) σ
+          (QueryP.gcardAux_ne (adults AliasOf) 0) (Grade.ne_nat 1)
+        simp only [Grade.ofNat_eq_nat, Grade.eval_nat] at hadd
+        rw [show (Grade.nat n + 1) = Grade.nat (n + 1) from rfl, Grade.eval_nat]
+        omega)))
 
-#eval allSpendersDetail   -- Except.ok [("Jane Smith", 1), ("John Doe", 1)]
+-- collapsed at demoEnv (3 customers): budget 5 suffices, 4 does not…
+#guard (allSpendersDetail.execWithin 5 demoEnv).toOption
+    == some [("Jane Smith", 1), ("John Doe", 1)]
+-- …and no closed budget dominates |customers| + 2:
+#check_failure (allSpendersDetail.exec 1000 demoEnv)
 
 /- Under-budgeting the loop is caught at elaboration —
 `(ordersFor [1, 2]).exec 1 demoEnv` fails `by decide` (grade 2 > 1). An

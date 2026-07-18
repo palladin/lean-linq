@@ -122,8 +122,12 @@ inductive DbFetchP (c : Ctx) : Grade → (α : Type) → Wp α → Type 1 where
   | fetch : {s : Schema} → (q : Query c s) →
       DbFetchP c 1 (List (Values s)) (fun post σ =>
         ∀ xs, xs.length ≤ (Query.gcard q).eval σ → post xs)
-  | fetchCell : {t : SqlPrim} → {n : Bool} → ScalarQuery c ⟨t, n⟩ →
-      DbFetchP c 1 (Nullable t) (Wp.triv _)
+  -- the scalar cell, with the spec its shape supports: a COUNT promises
+  -- its value fits the spine's symbolic bound (demonic, like fetch);
+  -- content aggregates promise nothing — sizes don't determine contents
+  | fetchCell : {t : SqlPrim} → {n : Bool} → (sc : ScalarQuery c ⟨t, n⟩) →
+      DbFetchP c 1 (Nullable t) (fun post σ =>
+        ∀ v, ScalarQueryP.cellBound (sc AliasOf) v σ → post v)
   -- THE bind: value-dependent grade capped by `B`, justified by evidence
   -- conditional on what is actually TRUE of the producer's results —
   -- its strongest postcondition `Wp.sp` (for a fetch producer this is
@@ -190,6 +194,38 @@ def runWith (ee : EvalEnv c) : {r : Grade} → {α : Type} → {w : Wp α} →
   | _, _, _, .bindD x f _ _ => do runWith ee (f (← runWith ee x))
   | _, _, _, .weakenP _ x => runWith ee x
 
+/-- COUNT's cell really is bounded — `enumScopes_gcard_le` at the
+top-level scope; content aggregates owe nothing. -/
+theorem cellBound_of_evalCell {t : SqlPrim} {nb : Bool}
+    (sq : ScalarQuery c ⟨t, nb⟩) {ee : EvalEnv c} {v : Nullable t}
+    (h : sq.evalCell ee = .ok v) :
+    ScalarQueryP.cellBound (sq AliasOf) v (TableEnv.sizes ee.tables) := by
+  unfold ScalarQuery.evalCell at h
+  generalize sq AliasOf = sa at h ⊢
+  match sa, h with
+  | .aggQ op sp, _ => trivial
+  | .countQ sp, h => ?_
+  rw [ScalarQueryP.evalCellIn.eq_def] at h
+  try simp only at h
+  obtain ⟨scs, hs, h⟩ := Except.bind_ok h
+  try simp only [pure, Except.pure, Except.ok.injEq] at h
+  try injection h with h
+  subst h
+  refine ⟨rfl, ?_⟩
+  intro k hk
+  injection hk with hk
+  subst hk
+  have hb := SpineQP.enumScopes_gcard_le sp rfl
+    (scopes := [[]]) (fun sc hsc => by
+      cases hsc with
+      | head => rfl
+      | tail _ hx => cases hx) hs
+  simp only [List.length_singleton] at hb
+  first
+    | simpa [Int.toNat_natCast] using hb
+    | simpa [Int.toNat_ofNat] using hb
+    | omega
+
 /-- The **adequacy** door: the run satisfies its spec. Same semantics as
 `runWith`, but the result carries `Wp.sp w` — every demand the spec can
 back is a fact about *this* result at *this* run's sizes. The `fetch`
@@ -205,7 +241,10 @@ def runWithP (ee : EvalEnv c) : {r : Grade} → {α : Type} → {w : Wp α} →
       match hev : q.evalRows ee with
       | .ok xs => .ok ⟨xs, fun _ hw => hw xs (Query.evalRows_gcard_le q hev)⟩
       | .error e => .error e
-  | _, _, _, .fetchCell sq => do .ok ⟨← sq.evalCell ee, fun _ h => h.elim⟩
+  | _, _, _, .fetchCell sq =>
+      match hev : sq.evalCell ee with
+      | .ok v => .ok ⟨v, fun _ hw => hw v (cellBound_of_evalCell sq hev)⟩
+      | .error e => .error e
   | _, _, _, .bindD x f _ _ => do
       let ⟨a, ha⟩ ← runWithP ee x
       let ⟨b, hb⟩ ← runWithP ee (f a)
@@ -465,9 +504,33 @@ export LeanLinq.LoopList (forLoop)
 export LeanLinq.LoopQuery (forLoop)
 end DbFetch
 
+/-- `q.fetchCount` — ask how many rows `q` has, as a one-round program
+whose spec is the clean demonic count bound: whatever number comes back
+fits `q.gcard` at σ. Derived from `fetchCell (q.count)` — the decode and
+the spine↔query bound bridge ride one `weakenP`. -/
+def Query.fetchCount (q : Query c s) :
+    DbFetchP c 1 Nat (fun post σ =>
+      ∀ n, n ≤ (Query.gcard q).eval σ → post n) := by
+  refine DbFetchP.withBound (n := 1) (.weakenP ?_
+    (DbFetchP.bindD (.fetchCell (q.count))
+      (fun v => .pure (v.getD 0).toNat) 0 (fun _ _ _ => Nat.le_refl _)))
+  intro post σ hpost v hcb
+  rcases v with _ | k
+  · cases hcb.1
+  · refine hpost k.toNat ?_
+    have hb := hcb.2 k rfl
+    have hbr : ((q AliasOf).asPlainSpine.gcardAux 0) = Query.gcard q := by
+      show (QueryP.asPlainSpine (q AliasOf)).gcardAux 0 = (q AliasOf).gcardAux 0
+      rw [QueryP.asPlainSpine.eq_def]
+      split
+      · rename_i sp heq
+        rw [heq]
+      · rfl
+    rwa [hbr] at hb
+
 /-- `sc.fetch` — a scalar query as a one-round program. -/
 def ScalarQuery.fetch (sc : ScalarQuery c ⟨t, n⟩) : DbFetch c 1 (Nullable t) :=
-  .fetchCell sc
+  .relax (.fetchCell sc)
 
 /-- `q.fetchLimit n` — the length-refined fetch, flowing:
 `Query.from' … |>.orderBy … |>.fetchLimit 5`. -/
@@ -585,7 +648,7 @@ open Lean in
     `(LeanLinq.DbFetchP.withBound $folded)
 
 namespace QueryB
-export Query (fetch fetchLimit forQuery)
+export Query (fetch fetchLimit forQuery fetchCount)
 end QueryB
 
 namespace ScalarB
