@@ -135,7 +135,7 @@ def demoEnv : TableEnv PlayCtx.tables :=
   |>.select (fun c => ![(c["Age"] / 0).as "Boom"])).run demoEnv
 -- Except.error LeanLinq.EvalError.divByZero
 
-/-! ## DbFetch — round-budgeted database programs
+/-! ## Db — round-budgeted database programs
 
 The round-trip bill is a type index: `fetch` costs 1, independent `seq`s
 share rounds (`max`), data-dependent `bind`s add, and the per-row loop
@@ -146,7 +146,7 @@ loop over rows a fetch *inside the same program* returned — classic
 N+1 — which never elaborates; the batched door (`fetchFor`, one
 `IN (…)` statement) costs 1 for any collection size. -/
 
-def spendersReport : DbFetch PlayCtx 2 (Nat × Nat) := fetch! {
+def spendersReport : Db PlayCtx 2 (Nat × Nat) := db! {
   let parents ← adults.fetch
   let ids := parents.filterMap fun v => (v.get? "Id" .long).bind id
   let children ← .fetchFor ids fun ks =>
@@ -163,7 +163,7 @@ carries the *exact* dynamic round count in the type, and the door takes
 a proof — `by decide` once the list is a literal, `by omega` for a
 computed budget. -/
 def ordersFor (ids : List Int) :
-    DbFetch PlayCtx (Grade.nat ids.length) (List Nat) := fetch! {
+    Db PlayCtx (Grade.nat ids.length) (List Nat) := db! {
   let waves ← for k in ids do
     Query.from' (ts := PlayCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. SqlExpr.long k)
@@ -171,7 +171,7 @@ def ordersFor (ids : List Int) :
   return waves.map (·.length)
 }
 -- the annotation states `ids.length` even though the loop's raw index
--- is `1 * ids.length` (the constructor's exact arithmetic): `fetch!`
+-- is `1 * ids.length` (the constructor's exact arithmetic): `db!`
 -- wraps its expansion in `withBound`, and `simp` closes the gap
 
 #eval (ordersFor [1, 2]).exec 2 demoEnv   -- Except.ok [1, 1] — grade 2
@@ -180,13 +180,13 @@ def ordersFor (ids : List Int) :
 `fetchLimit q n` puts the bound in the type (`{xs // xs.length ≤ n}`,
 realized by `LIMIT n` — a theorem about the semantics,
 `Query.run_limit_length_le`), and looping over `parents.val` fuses into
-`DbFetch.forRows`, whose budget proof comes from the refinement. The
+`Db.forRows`, whose budget proof comes from the refinement. The
 bound can itself be a parameter: the grade is `n + 1` — one round for
 the parents, at most `n` for the fan-out — and `p["Id"]` embeds the
 fetched cell as a typed literal. N+1 written deliberately: the bounded
 query pays for the fan-out. -/
 def topSpendersDetail (n : Nat) :
-    DbFetch PlayCtx (Grade.nat n + 1) (List (String × Nat)) := fetch! {
+    Db PlayCtx (Grade.nat n + 1) (List (String × Nat)) := db! {
   let spenders ← adults.fetchLimit n
   let report ← for s in spenders.val do
     Query.from' (ts := PlayCtx) orders
@@ -211,7 +211,7 @@ batched door replaces the per-row loop — every order arrives in one
 playing both roles: `o["CustomerId"].inValues ks` embeds into SQL,
 `o["CustomerId"] == s["Id"]` compares fetched values. -/
 def topSpendersDetail2 (n : Nat) :
-    DbFetch PlayCtx 2 (List (String × Nat)) := fetch! {
+    Db PlayCtx 2 (List (String × Nat)) := db! {
   let spenders ← adults.fetchLimit n
   let allOrders ← .fetchFor (spenders.val.map (·["Id"])) fun ks =>
     Query.from' (ts := PlayCtx) orders
@@ -231,13 +231,13 @@ round count. **Now it can**: `fetchCount`'s spec says the answer fits
 in the database's own terms: one round to ask, one for the page, at
 most `|customers|` for the fan-out. -/
 def allSpendersDetail :
-    DbFetch PlayCtx (customers.size + 2) (List (String × Nat)) :=
-  DbFetchP.withBound (DbFetchP.relax
-    (DbFetchP.bindD (Query.fetchCount adults) (fun n => topSpendersDetail n)
+    Db PlayCtx (customers.size + 2) (List (String × Nat)) :=
+  DbP.withBound (DbP.relax
+    (DbP.bindD (Query.fetchCount adults) (fun n => topSpendersDetail n)
       (Query.gcard adults + Grade.nat 1)
       (fun σ n hsp => by
         have hn : n ≤ (Query.gcard adults).eval σ :=
-          hsp (· ≤ (Query.gcard adults).eval σ) (fun m hm => hm)
+          hsp (fun m _ => m ≤ (Query.gcard adults).eval σ) (fun m hm => hm)
         have hadd := Grade.le_eval_add (a := Query.gcard adults) (b := Grade.nat 1) σ
           (QueryP.gcardAux_ne (adults AliasOf) 0) (Grade.ne_nat 1)
         simp only [Grade.ofNat_eq_nat, Grade.eval_nat] at hadd
@@ -254,12 +254,12 @@ def allSpendersDetail :
 `(ordersFor [1, 2]).exec 1 demoEnv` fails `by decide` (grade 2 > 1). An
 *unbounded* fetch gives the loop no proof to fuse with, so it still never
 elaborates; and the fully implicit N+1 is rejected too:
-`mapM` needs a `Monad` instance, and `DbFetch` cannot have one, because
+`mapM` needs a `Monad` instance, and `Db` cannot have one, because
 hiding the grade inside a fixed `m : Type → Type` would blind the budget
 check. The checker below verifies this fails to elaborate. -/
-#check_failure fun (ids : List Int) => fetch! {
+#check_failure fun (ids : List Int) => db! {
   let parents ← .fetch adults
-  let children ← ids.mapM fun k => DbFetch.fetch
+  let children ← ids.mapM fun k => Db.fetch
     (Query.from' (ts := PlayCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. SqlExpr.long k))
   return (parents.length, children.length)
@@ -281,7 +281,7 @@ LIMIT, the type says exactly what it costs: `for s in adults do` loops
 over the *query*, and the loop's grade is the query's own symbolic
 card. -/
 def topSpendersDetailAll :
-    DbFetch PlayCtx (customers.size + 1) (List (String × Nat)) := fetch! {
+    Db PlayCtx (customers.size + 1) (List (String × Nat)) := db! {
   let report ← for s in adults do
     Query.from' (ts := PlayCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. s["Id"])
@@ -312,7 +312,7 @@ loop is still priced, because `fetch`'s postcondition (rows fit
 (`forFetched`, fused from the adjacent bind + `for`). The two spellings
 carry the same type: the price is the program's, not the sugar's. -/
 def topSpendersDetailAll' :
-    DbFetch PlayCtx (customers.size + 1) (List (String × Nat)) := fetch! {
+    Db PlayCtx (customers.size + 1) (List (String × Nat)) := db! {
   let spenders ← adults.fetch
   let report ← for s in spenders do
     Query.from' (ts := PlayCtx) orders
@@ -345,16 +345,18 @@ constructs the contract via `run_gcard` instead of promising it — the
 result arrives with the spec's strongest-post reading (`Wp.sp`) at this
 run's sizes, `sp_fetch` turns it back into the pointwise contract, and
 the page bound is a theorem of the run, no check anywhere. -/
-#guard ((((adults.limit 10).fetch).runWithP ⟨demoEnv, .nil, none⟩).toOption.map
-    (·.val.length)) == some 2
+#guard ((((adults.limit 10).fetch).runWithP .nil none demoEnv).toOption.map
+    (·.val.1.length)) == some 2
 
-example {res : {xs : List (Values [("Id", SqlType.long), ("Name", SqlType.string)]) //
+example {res : {p : List (Values [("Id", SqlType.long), ("Name", SqlType.string)])
+        × TableEnv PlayCtx.tables //
       Wp.sp (fun post σ =>
-        ∀ ys, ys.length ≤ (Query.gcard (adults.limit 10)).eval σ → post ys)
-        xs (TableEnv.sizes demoEnv)}}
-    (_h : ((adults.limit 10).fetch).runWithP ⟨demoEnv, .nil, none⟩ = .ok res) :
-    res.val.length ≤ 10 :=
-  fetchPage_fits adults 10 ((DbFetchP.sp_fetch _ _ _).mp res.property)
+        ∀ ys, ys.length ≤ (Query.gcard (adults.limit 10)).eval σ → post ys σ)
+        p.1 (TableEnv.sizes demoEnv) (TableEnv.sizes p.2)}}
+    (_h : ((adults.limit 10).fetch).runWithP .nil none demoEnv = .ok res) :
+    res.val.1.length ≤ 10 :=
+  fetchPage_fits adults 10
+    (res.property (fun ys _ => ys.length ≤ _) (fun _ hb => hb))
 
 /-! ## Statements -/
 
@@ -371,6 +373,19 @@ example {res : {xs : List (Values [("Id", SqlType.long), ("Name", SqlType.string
 -- statements also apply in memory, through the same `HasTable` instance:
 #eval ((customers.update (ts := PlayCtx)
   |>.setWith "Age" (fun c => c["Age"] + 1)).apply demoEnv) |> fun r => if r matches .ok _ then "applied" else "error"
+
+/-- Writes are monadic now — one program, reads and writes, one bill:
+insert a customer, then ask how many there are. Grade 2 = two database
+operations; the count comes back through `fetchCount`. -/
+def growThenCount : Db PlayCtx 2 Nat := db! {
+  let _ins ← .insert (customers.insert (ts := PlayCtx)
+    |>.value "Id" 100 |>.value "Age" 30
+    |>.value "Name" "Ada" |>.value "IsActive" true)
+  let n ← Query.fetchCount (Query.from' (ts := PlayCtx) customers)
+  return n
+}
+
+#guard (growThenCount.exec 2 demoEnv).toOption == some 4  -- 3 seeded + 1
 
 /-! ## The type system at work — uncomment any line for the error
 

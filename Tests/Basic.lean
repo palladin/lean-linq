@@ -118,7 +118,7 @@ def demoEnv : TableEnv BasicCtx.tables :=
   |>.select (fun c => ![c["Name"].as "Name"])).run demoEnv
     |>.toOption.map (·.length)) == some 1
 
-/-! ## DbFetch: the round budget is in the type — N+1 is unprovable.
+/-! ## Db: the round budget is in the type — N+1 is unprovable.
 
 The per-row loop *is* writable (Lean is dependently typed: its grade is
 `ks.length`), but `exec`'s budget obligation is only auto-dischargeable
@@ -129,14 +129,14 @@ from it; rows fetched *inside* the program admit no proof at all. -/
 def ordersOf (k : Int) := Query.from' (ts := BasicCtx) orders
   |>.where' (fun o => o["CustomerId"] ==. SqlExpr.int k)
 
-def perRow : (ks : List Int) → DbFetch BasicCtx ks.length (List (List (Values OrdersS)))
+def perRow : (ks : List Int) → Db BasicCtx ks.length (List (List (Values OrdersS)))
   | [] => .relax (.pure [])
   | k :: ks => (perRow ks).bind fun acc =>
-      (DbFetch.fetch (ordersOf k)).map (· :: acc)
+      (Db.fetch (ordersOf k)).map (· :: acc)
 
 /-- Batched programs have closed grades: `1 + 1`, discharged silently
-(`fetch!` is do-sugar over the graded combinators — grades stay visible). -/
-def batched : DbFetch BasicCtx 2 (Nat × Nat) := fetch! {
+(`db!` is do-sugar over the graded combinators — grades stay visible). -/
+def batched : Db BasicCtx 2 (Nat × Nat) := db! {
   let cs ← .fetch (Query.from' (ts := BasicCtx) customers)
   let os ← .fetch (Query.from' (ts := BasicCtx) orders)
   return (cs.length, os.length)
@@ -145,10 +145,10 @@ def batched : DbFetch BasicCtx 2 (Nat × Nat) := fetch! {
 #guard (batched.exec 2 demoEnv |>.toOption) == some (2, 0)
 
 /-- A program whose grade is itself a parameter: `n` sampling rounds. -/
-def sampleRounds : (n : Nat) → DbFetch BasicCtx n (List Nat)
+def sampleRounds : (n : Nat) → Db BasicCtx n (List Nat)
   | 0 => .relax (.pure [])
   | n + 1 => (sampleRounds n).bind fun acc =>
-      (DbFetch.fetch (Query.from' (ts := BasicCtx) customers)).map
+      (Db.fetch (Query.from' (ts := BasicCtx) customers)).map
         fun cs => cs.length :: acc
 
 /-- Symbolic grade under a symbolic budget: `n ≤ 2 * n + 1` is a theorem,
@@ -167,7 +167,7 @@ example (ids : List Int) : Except EvalError (List (List (Values OrdersS))) :=
 exact grade `1 * ks.length` in the type: closed lists close it
 (`by decide` sees `1 * 2 = 2`), parameter lists leave a symbolic grade
 the caller proves at the door (see below). -/
-def perRowAll (ks : List Int) := fetch! {
+def perRowAll (ks : List Int) := db! {
   let waves ← for k in ks do .fetch (ordersOf k)
   return waves.map (·.length)
 }
@@ -185,10 +185,10 @@ example (ks : List Int) : Except EvalError (List Nat) :=
 /-- The bounded post-fetch loop: `fetchLimit` puts the row bound in the
 type (`{xs // xs.length ≤ 3}` — `LIMIT` really limits, by
 `Query.run_limit_length_le`), and looping over `.val` fuses into
-`DbFetch.forRows`, whose budget proof is the refinement itself. Bound
+`Db.forRows`, whose budget proof is the refinement itself. Bound
 `1 + 1 * 3 = 4`, closed, silent — and the two-row table exercises the
 loop-shorter-than-bound path. -/
-def perRowBounded : DbFetch BasicCtx 4 (List Nat) := fetch! {
+def perRowBounded : Db BasicCtx 4 (List Nat) := db! {
   let parents ← Query.from' (ts := BasicCtx) customers |>.fetchLimit 3
   let waves ← for p in parents.val do
     Query.from' (ts := BasicCtx) orders
@@ -204,7 +204,7 @@ no `.val`, no restated bound. Legal because the loop is priced by the
 fetch's own *contract* (`forFetched`, fused from the adjacent bind +
 `for`): grade `1 + 1 * gcard customers`, symbolic in the table size,
 collapsed and checked by the sized door. -/
-def perRowFetched := fetch! {
+def perRowFetched := db! {
   let parents ← Query.from' (ts := BasicCtx) customers |>.fetch
   let waves ← for p in parents do
     Query.from' (ts := BasicCtx) orders
@@ -251,9 +251,9 @@ example (o : Row BasicCtx OrdersS.asNull) : SqlExpr BasicCtx ⟨.int, true⟩ :=
 -- classic N+1: one fetch per row of a runtime collection — the grade is
 -- `ids.length`, the budget obligation is undischargeable, no proof exists
 #check_failure fun (ids : List Int) => (perRow ids).exec 8 demoEnv
--- the fetch! sugar changes nothing: a dependent-grade sub-program still
+-- the db! sugar changes nothing: a dependent-grade sub-program still
 -- leaves an obligation with free variables at the door
-#check_failure fun (ids : List Int) => (fetch! {
+#check_failure fun (ids : List Int) => (db! {
   let rows ← perRow ids
   return rows.length
 }).exec 8 demoEnv
@@ -271,14 +271,14 @@ example (o : Row BasicCtx OrdersS.asNull) : SqlExpr BasicCtx ⟨.int, true⟩ :=
 -- the `.val` fusion cannot type — drop the `.val` and the plain loop is
 -- the legal, contract-priced spelling (`perRowFetched` above); keep it
 -- and the bound must come from `fetchLimit`
-#check_failure (fetch! {
+#check_failure (db! {
   let parents ← Query.from' (ts := BasicCtx) customers |>.fetch
   let waves ← for p in parents.val do
     Query.from' (ts := BasicCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. p["Id"])
       |>.fetch
   return waves.map (·.length)
-} : DbFetch BasicCtx 4 (List Nat))
+} : Db BasicCtx 4 (List Nat))
 -- under-budgeting the bounded fan-out: grade 4 > 3
 #check_failure (perRowBounded.exec 3 demoEnv)
 -- and `for … do` over a collection *derived* from fetched rows is still
@@ -287,7 +287,7 @@ example (o : Row BasicCtx OrdersS.asNull) : SqlExpr BasicCtx ⟨.int, true⟩ :=
 -- the fetched rows themselves is the legal, contract-priced spelling
 -- (`perRowFetched` above) — the N+1 rejection is about laundered
 -- provenance, and it is structural, not a lint
-#check_failure (fetch! {
+#check_failure (db! {
   let cs ← .fetch (Query.from' (ts := BasicCtx) customers)
   let ids := cs.filterMap fun v => (v.get? "Id" .int).bind id
   let waves ← for k in ids do .fetch (ordersOf k)
@@ -310,13 +310,13 @@ clamps to month-end and preserves the time of day. -/
 /-! `bindD'` discharges its budget automatically for the documented
 shapes: closed facts silently, and `fetchLimit`-refined loops through
 the refinement itself. -/
-example : DbFetch BasicCtx (1 + 2) (List (Values OrdersS)) :=
-  DbFetchP.bindD' (.fetch (Query.from' (ts := BasicCtx) orders))
-    (fun _ => DbFetchP.map id (.fetch (Query.from' (ts := BasicCtx) orders))) 2
+example : Db BasicCtx (1 + 2) (List (Values OrdersS)) :=
+  DbP.bindD' (.fetch (Query.from' (ts := BasicCtx) orders))
+    (fun _ => DbP.map id (.fetch (Query.from' (ts := BasicCtx) orders))) 2
 
-example (n : Nat) : DbFetch BasicCtx (1 + 1 * n) (List (List (Values OrdersS))) :=
-  DbFetchP.bindD'
-    (DbFetchP.fetchLimit (Query.from' (ts := BasicCtx) orders) n)
+example (n : Nat) : Db BasicCtx (1 + 1 * n) (List (List (Values OrdersS))) :=
+  DbP.bindD'
+    (DbP.fetchLimit (Query.from' (ts := BasicCtx) orders) n)
     (fun a => .forAll a.val
       (fun _ => .fetch (Query.from' (ts := BasicCtx) orders)))
     (1 * n)
@@ -365,7 +365,7 @@ example : Query.gcard (Query.from' (ts := BasicCtx) customers |>.limit 5)
 the query and the loop's budget is the fetch's contract — the closed
 `gcard` of a limited query — no bound restated anywhere, no refinement
 either: plain rows, plain `for`. -/
-def perRowCard : DbFetch BasicCtx 4 (List Nat) := fetch! {
+def perRowCard : Db BasicCtx 4 (List Nat) := db! {
   let parents ← Query.from' (ts := BasicCtx) customers |>.limit 3 |>.fetch
   let waves ← for p in parents do
     Query.from' (ts := BasicCtx) orders

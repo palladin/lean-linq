@@ -14,7 +14,7 @@ Typed queries in, typed rows out, over the wire protocol (via
 - **Types**: every parameter carries an explicit OID, which solves
   `EXTRACT(YEAR FROM $1)`-style inference properly (the CLI harness had to
   paper over it with `TIMESTAMP '…'` literals). Text format both ways.
-- **`DbFetch` interprets sequentially** (one statement per round):
+- **`Db` interprets sequentially** (one statement per round):
   independence is applicative structure, retired with the `seq`
   constructor; libpq pipeline batching returns with the free-applicative
   layer over the monad. -/
@@ -185,7 +185,7 @@ def Conn.execDelete (conn : Conn) (d : DeleteStmt c n s)
     (ps : ParamEnv c.params := by exact .nil) : IO Unit :=
   execCompiled conn (d.toSql .postgres) ps.toCells
 
-/-! ## `DbFetch` interpretation
+/-! ## `Db` interpretation
 
 The monad is sequential by design — dependence is monadic structure,
 and `bindD` cannot know what to ask until the previous answer arrives —
@@ -195,19 +195,22 @@ structure, retired with the `seq` constructor; it returns with the
 free-applicative layer over this monad. -/
 
 private def interp (conn : Pg.Conn) (ps : ParamEnv c.params) :
-    {r' : Grade} → {β : Type} → {w : Wp β} → DbFetchP c r' β w → IO β
+    {r' : Grade} → {β : Type} → {w : Wp β} → DbP c r' β w → IO β
   | _, _, _, .pure a => Pure.pure a
   | _, _, _, .fetch q => conn.query q ps
   | _, _, _, .fetchCell sc => conn.queryCell sc ps
+  | _, _, _, .insert (inst := _) i => conn.execInsert i ps
+  | _, _, _, .update (inst := _) u => conn.execUpdate u ps
+  | _, _, _, .delete (inst := _) d => conn.execDelete d ps
   | _, _, _, .bindD x f _ _ => do interp conn ps (f (← interp conn ps x))
   | _, _, _, .weakenP _ x => interp conn ps x
 
 end Pg
 
-/-- Interpret a `DbFetch` program against live PostgreSQL, one statement
+/-- Interpret a `Db` program against live PostgreSQL, one statement
 per round, gated by the usual budget obligation: `by decide` for closed
 grades, a caller-supplied proof otherwise. -/
-def DbFetchP.execPg {w : Wp α} (f : DbFetchP c r α w) (conn : Pg.Conn) (budget : Nat)
+def DbP.execPg {w : Wp α} (f : DbP c r α w) (conn : Pg.Conn) (budget : Nat)
     (ps : ParamEnv c.params := by exact .nil)
     (_h : r ≤ Grade.nat budget := by
       try simp only [Grade.ofNat_eq_nat, Grade.nat_add,
@@ -221,7 +224,7 @@ def DbFetchP.execPg {w : Wp α} (f : DbFetchP c r α w) (conn : Pg.Conn) (budget
 
 /-- The unchecked door over the wire: no budget, no obligation — the
 explicit opt-out, same as the in-memory `execAll`. -/
-def DbFetchP.execPgAll {w : Wp α} (f : DbFetchP c r α w) (conn : Pg.Conn)
+def DbP.execPgAll {w : Wp α} (f : DbP c r α w) (conn : Pg.Conn)
     (ps : ParamEnv c.params := by exact .nil) : IO α :=
   Pg.interp conn ps f
 

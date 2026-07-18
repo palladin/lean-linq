@@ -4,7 +4,7 @@ import Tests.DriverSweep
 /-! # Native SQLite driver — differential test (`lake exe sqlitedriver`)
 
 The shared sweep (`Tests/DriverSweep.lean`) over the in-process SQLite
-driver, plus the `DbFetch` smokes through `execIO`. -/
+driver, plus the `Db` smokes through `execIO`. -/
 
 open LeanLinq LeanLinq.Sqlite TQ
 
@@ -38,7 +38,7 @@ def main : IO UInt32 := do
     execRaw := conn.execRaw }
   let (passed, failures, skipped) ← runSweep ops
   let mut failures := failures
-  -- DbFetch smokes: over the wire == in memory
+  -- Db smokes: over the wire == in memory
   unless ← checkSpenders (← spenders.execIO conn 2 seedParams) do
     failures := failures + 1
   unless ← checkBothTables (← bothTables.execIO conn 2 seedParams) do

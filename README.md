@@ -261,10 +261,10 @@ def demo : IO Unit := do
   test suite does exactly that: `lake exe sqlitedriver` runs all registered cases through the
   driver and compares against the evaluator **at the `Values` level** (statements
   verified inside rolled-back transactions).
-- **`DbFetch` programs run over the wire**: `f.execIO conn budget` interprets the same
+- **`Db` programs run over the wire**: `f.execIO conn budget` interprets the same
   round-budgeted tree `runWith` interprets in memory, with the same proof discipline.
 
-`DbFetch` prices round trips in the type (`fetch` = 1, data-dependent `bind` =
+`Db` prices round trips in the type (`fetch` = 1, data-dependent `bind` =
 `+`, per-row `for` = body grade × collection length — a derived bind-chain), and
 execution demands a budget plus a proof — the philosophy being that everything is
 priced and the *proof* is the gate. Grades are canonical **max-plus polynomials
@@ -282,7 +282,7 @@ hand, proved at the door (`by decide` for literals, `omega` for computed
 budgets); over *just-fetched* rows, `fetchLimit q n` returns a length-refined
 list (`{xs // xs.length ≤ n}`, backed by the first theorem about the executable
 semantics: `Query.run_limit_length_le`, `LIMIT` really limits), and looping over
-its `.val` fuses into `DbFetchP.forRows`, whose budget proof *is* the refinement
+its `.val` fuses into `DbP.forRows`, whose budget proof *is* the refinement
 — grade `m + k * n`, closed, silent; and the plain spelling needs no bound at
 all — `let xs ← q.fetch` then `for p in xs do body` fuses into `forFetched`,
 because `fetch` carries as its postcondition that the rows fit `q.gcard` at every
@@ -300,11 +300,11 @@ write it by accident: a loop over a collection *derived* from fetched rows
 monadic; it was deliberately removed from the core and returns with a free
 applicative layered over the monad, where PostgreSQL pipeline batching lives.)
 
-All of it in one definition, written in `fetch!` do-sugar:
+All of it in one definition, written in `db!` do-sugar:
 
 ```lean
 def topSpendersDetail (n : Nat) :
-    DbFetch ShopDb (Grade.nat n + 1) (List (String × Nat)) := fetch! {
+    Db ShopDb (Grade.nat n + 1) (List (String × Nat)) := db! {
   let spenders ← Query.from' (ts := ShopDb) customers
     |>.where' (fun c => 18 <. c["Age"])
     |>.orderBy (fun c => [c["Name"].asc])
@@ -320,7 +320,7 @@ def topSpendersDetail (n : Nat) :
 #eval (topSpendersDetail 5).exec 6 db      -- 5 + 1 rounds declared; proof by decide, silent
 
 -- and "all rows, per row" needs no bound at all — the price is symbolic:
-def topSpendersAll : DbFetch ShopDb (customers.size + 1) (List (String × Nat)) := fetch! {
+def topSpendersAll : Db ShopDb (customers.size + 1) (List (String × Nat)) := db! {
   let spenders ← Query.from' (ts := ShopDb) customers
     |>.where' (fun c => 18 <. c["Age"]) |>.fetch
   let report ← for s in spenders do           -- fuses into forFetched: the proof is fetch's contract
@@ -362,7 +362,7 @@ PostgreSQL driver's OIDs). One DB-Library wrinkle is handled transparently: its 
 cannot express an *empty string* parameter (zero length means NULL at the API
 layer), so executions carrying one fall back to an equivalent `EXEC sp_executesql`
 batch with the statement still verbatim. TDS allows one active request per
-connection — no pipelining — so `DbFetch.execMs` is sequential and the `max` grade
+connection — no pipelining — so `Db.execMs` is sequential and the `max` grade
 stays an honest upper bound, as with in-process SQLite. `lake exe mssqldriver`
 sweeps the full corpus against live SQL Server (docker compose, port 14333), typed
 `Values`-to-`Values` against the evaluator — with the native drivers now covering
@@ -478,7 +478,7 @@ return `Bool`/`Prop`, so SQL needs its own).
 
 Core, full query surface (joins, grouping, aggregates, set ops, subqueries),
 statements, the three dialects, native drivers for all three engines, and the
-round-budgeted `DbFetch` layer are implemented, with a 402-case × 3-dialect
+round-budgeted `Db` layer are implemented, with a 402-case × 3-dialect
 golden suite (both surfaces), an executable in-memory oracle, per-driver
 corpus sweeps, and live 3-engine integration tests.
 

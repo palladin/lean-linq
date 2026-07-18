@@ -7,7 +7,7 @@ The shared sweep over live SQL Server (docker compose, port 14333): typed
 `Values`-to-`Values` against the evaluator, through native TDS
 `sp_executesql` RPC with true `@name` parameters — the first non-inlined
 MSSQL execution in the suite, and the third engine independently confirming
-the semantics. `DbFetch` smokes run through `execMs` (sequential — TDS has
+the semantics. `Db` smokes run through `execMs` (sequential — TDS has
 no pipelining). -/
 
 open LeanLinq LeanLinq.Ms TQ
@@ -42,7 +42,7 @@ def main : IO UInt32 := do
     rollback := "ROLLBACK TRAN" }
   let (passed, failures, skipped) ← runSweep ops
   let mut failures := failures
-  -- DbFetch smokes: over the wire == in memory (sequential on TDS)
+  -- Db smokes: over the wire == in memory (sequential on TDS)
   unless ← checkSpenders (← spenders.execMs conn 2 seedParams) do
     failures := failures + 1
   unless ← checkBothTables (← bothTables.execMs conn 2 seedParams) do

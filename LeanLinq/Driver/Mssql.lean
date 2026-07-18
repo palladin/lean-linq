@@ -20,7 +20,7 @@ Typed queries in, typed rows out, over TDS (via `native/freetds_shim.c`):
   `dbconvert(coltype → SYBCHAR)` and decoded by the shared text codecs
   (`LeanLinq.Driver.TextCell`).
 - TDS allows one active request per connection — no pipelining — so
-  `DbFetch.execMs` interprets sequentially and the `max` grade stays an
+  `Db.execMs` interprets sequentially and the `max` grade stays an
   honest upper bound (as with in-process SQLite). -/
 
 namespace LeanLinq.Ms
@@ -229,19 +229,22 @@ def Conn.execDelete (conn : Conn) (d : DeleteStmt c n s)
 
 end Ms
 
-/-- Interpret a `DbFetch` program against live SQL Server. TDS permits one
+/-- Interpret a `Db` program against live SQL Server. TDS permits one
 active request per connection (no pipelining), so interpretation is
 sequential and the `max` grade is an upper bound — same budget discipline
 as everywhere. -/
 private def Ms.interp (conn : Ms.Conn) (ps : ParamEnv c.params) :
-    {r' : Grade} → {β : Type} → {w : Wp β} → DbFetchP c r' β w → IO β
+    {r' : Grade} → {β : Type} → {w : Wp β} → DbP c r' β w → IO β
   | _, _, _, .pure a => Pure.pure a
   | _, _, _, .fetch q => conn.query q ps
   | _, _, _, .fetchCell sc => conn.queryCell sc ps
   | _, _, _, .weakenP _ x => interp conn ps x
+  | _, _, _, .insert (inst := _) i => conn.execInsert i ps
+  | _, _, _, .update (inst := _) u => conn.execUpdate u ps
+  | _, _, _, .delete (inst := _) d => conn.execDelete d ps
   | _, _, _, .bindD x f _ _ => do interp conn ps (f (← interp conn ps x))
 
-def DbFetchP.execMs {w : Wp α} (f : DbFetchP c r α w) (conn : Ms.Conn) (budget : Nat)
+def DbP.execMs {w : Wp α} (f : DbP c r α w) (conn : Ms.Conn) (budget : Nat)
     (ps : ParamEnv c.params := by exact .nil)
     (_h : r ≤ Grade.nat budget := by
       try simp only [Grade.ofNat_eq_nat, Grade.nat_add,
@@ -255,7 +258,7 @@ def DbFetchP.execMs {w : Wp α} (f : DbFetchP c r α w) (conn : Ms.Conn) (budget
 
 /-- The unbounded door over the wire: no budget, obligation-free — the
 explicit opt-out, same as the in-memory `execAll`. -/
-def DbFetchP.execMsAll {w : Wp α} (f : DbFetchP c r α w) (conn : Ms.Conn)
+def DbP.execMsAll {w : Wp α} (f : DbP c r α w) (conn : Ms.Conn)
     (ps : ParamEnv c.params := by exact .nil) : IO α :=
   Ms.interp conn ps f
 

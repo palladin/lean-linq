@@ -672,7 +672,7 @@ theorem Query.run_gcard {ts : Ctx} {s : Schema}
   QueryP.evalRowsIn_gcard_le (q AliasOf) h
 
 /-- The `EvalEnv`-shaped spelling — what the verified interpreter's
-`fetch` arm constructs its postcondition with (`DbFetchP.runWithP`). -/
+`fetch` arm constructs its postcondition with (`DbP.runWithP`). -/
 theorem Query.evalRows_gcard_le {ts : Ctx} {s : Schema}
     (q : Query ts s) {ee : EvalEnv ts} {xs : List (Values s)}
     (h : q.evalRows ee = .ok xs) :

@@ -6,7 +6,7 @@ import Tests.DriverSweep
 The shared sweep over live PostgreSQL (docker compose, port 5433): typed
 `Values`-to-`Values` against the evaluator, through the wire protocol with
 `$N` placeholders and OID-typed parameters — a second engine independently
-confirming the semantics. The `DbFetch` smokes run through `execPg`; the
+confirming the semantics. The `Db` smokes run through `execPg`; the
 `seq` one exercises a real pipeline round carrying two statements. -/
 
 open LeanLinq LeanLinq.Pg TQ
@@ -31,7 +31,7 @@ def main : IO UInt32 := do
         execRaw := conn.execRaw }
       let (passed, failures, skipped) ← runSweep ops
       let mut failures := failures
-      -- DbFetch smokes: over the wire (pipelined) == in memory
+      -- Db smokes: over the wire (pipelined) == in memory
       unless ← checkSpenders (← spenders.execPg conn 2 seedParams) do
         failures := failures + 1
       unless ← checkBothTables (← bothTables.execPg conn 2 seedParams) do
@@ -51,7 +51,7 @@ def main : IO UInt32 := do
         let bad := Query.from' (ts := TestCtx) customers
           |>.select (fun _ => ![(SqlExpr.int 10 / SqlExpr.int 0).as "X"])
         try
-          let _ ← (DbFetch.fetch bad).execPg conn 1 seedParams
+          let _ ← (Db.fetch bad).execPg conn 1 seedParams
           pure false  -- engine unexpectedly accepted 1/0
         catch _ =>
           let _ ← conn.query (Query.from' (ts := TestCtx) customers) seedParams

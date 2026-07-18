@@ -197,21 +197,24 @@ def Conn.execDelete (conn : Conn) (d : DeleteStmt c n s)
 
 end Sqlite
 
-/-- Interpret a `DbFetch` program against a live connection — the same tree
+/-- Interpret a `Db` program against a live connection — the same tree
 `runWith` interprets in memory. The budget discipline is identical (`by
 decide` for closed grades, caller-supplied proofs otherwise). `seq`
 executes sequentially here: SQLite is in-process, so a "round" costs a
 statement, not a network wait — the `max` grade is the contract for future
 networked drivers, which batch `seq`'s sides into shared rounds. -/
 private def Sqlite.interp (conn : Sqlite.Conn) (ps : ParamEnv c.params) :
-    {r' : Grade} → {β : Type} → {w : Wp β} → DbFetchP c r' β w → IO β
+    {r' : Grade} → {β : Type} → {w : Wp β} → DbP c r' β w → IO β
   | _, _, _, .pure a => Pure.pure a
   | _, _, _, .fetch q => conn.query q ps
   | _, _, _, .fetchCell sc => conn.queryCell sc ps
   | _, _, _, .weakenP _ x => interp conn ps x
+  | _, _, _, .insert (inst := _) i => conn.execInsert i ps
+  | _, _, _, .update (inst := _) u => conn.execUpdate u ps
+  | _, _, _, .delete (inst := _) d => conn.execDelete d ps
   | _, _, _, .bindD x f _ _ => do interp conn ps (f (← interp conn ps x))
 
-def DbFetchP.execIO {w : Wp α} (f : DbFetchP c r α w) (conn : Sqlite.Conn) (budget : Nat)
+def DbP.execIO {w : Wp α} (f : DbP c r α w) (conn : Sqlite.Conn) (budget : Nat)
     (ps : ParamEnv c.params := by exact .nil)
     (_h : r ≤ Grade.nat budget := by
       try simp only [Grade.ofNat_eq_nat, Grade.nat_add,
@@ -225,7 +228,7 @@ def DbFetchP.execIO {w : Wp α} (f : DbFetchP c r α w) (conn : Sqlite.Conn) (bu
 
 /-- The unbounded door over the wire: no budget, obligation-free — the
 explicit opt-out, same as the in-memory `execAll`. -/
-def DbFetchP.execIOAll {w : Wp α} (f : DbFetchP c r α w) (conn : Sqlite.Conn)
+def DbP.execIOAll {w : Wp α} (f : DbP c r α w) (conn : Sqlite.Conn)
     (ps : ParamEnv c.params := by exact .nil) : IO α :=
   Sqlite.interp conn ps f
 

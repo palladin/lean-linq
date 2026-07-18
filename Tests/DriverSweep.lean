@@ -120,8 +120,8 @@ def runSweep (ops : DriverOps) : IO (Nat × Nat × Nat) := do
     else failures := failures + 1
   pure (passed, failures, skipped)
 
-/-- The shared `fetch!` smoke: a data-dependent two-round program. -/
-def spenders : DbFetch TestCtx 2 (Nat × List (Values OrdersS)) := fetch! {
+/-- The shared `db!` smoke: a data-dependent two-round program. -/
+def spenders : Db TestCtx 2 (Nat × List (Values OrdersS)) := db! {
   let adults ← .fetch (Query.from' (ts := TestCtx) customers
     |>.where' (fun c => c["Age"] >=. SqlExpr.param "minAge"))
   let ids := adults.filterMap fun v => (v.get? "Id" .long).bind id
@@ -133,7 +133,7 @@ def spenders : DbFetch TestCtx 2 (Nat × List (Values OrdersS)) := fetch! {
 /-- The two-fetch smoke, sequential by design: independence is
 applicative structure — retired with `seq`, returning with the free
 applicative — so two fetches cost `1 + 1 = 2` in the monad. -/
-def bothTables : DbFetch TestCtx 2 (List (Values CustomersS) × List (Values OrdersS)) := fetch! {
+def bothTables : Db TestCtx 2 (List (Values CustomersS) × List (Values OrdersS)) := db! {
   let cs ← .fetch (Query.from' (ts := TestCtx) customers)
   let os ← .fetch (Query.from' (ts := TestCtx) orders)
   return (cs, os)
@@ -141,7 +141,7 @@ def bothTables : DbFetch TestCtx 2 (List (Values CustomersS) × List (Values Ord
 
 /-- The shared `for … do` smoke: the per-row loop over an in-hand key
 list — exact grade `1 * 3 + 0 = 3`, one sequential fetch per key. -/
-def perRowLoop : DbFetch TestCtx 3 (List Nat) := fetch! {
+def perRowLoop : Db TestCtx 3 (List Nat) := db! {
   let waves ← for k in ([1, 2, 3] : List Int) do
     Query.from' (ts := TestCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. SqlExpr.long k)
@@ -150,9 +150,9 @@ def perRowLoop : DbFetch TestCtx 3 (List Nat) := fetch! {
 }
 
 /-- The bounded post-fetch loop smoke: `fetchLimit` + the `for … .val`
-fusion (`DbFetch.forRows`) — grade `1 + 1 * 3 = 4`; parents ordered so
+fusion (`Db.forRows`) — grade `1 + 1 * 3 = 4`; parents ordered so
 every engine visits the same rows. -/
-def boundedFanOut : DbFetch TestCtx 4 (List Nat) := fetch! {
+def boundedFanOut : Db TestCtx 4 (List Nat) := db! {
   let parents ← Query.from' (ts := TestCtx) customers
     |>.orderBy (fun c => [c["Id"].asc])
     |>.fetchLimit 3
@@ -167,7 +167,7 @@ def boundedFanOut : DbFetch TestCtx 4 (List Nat) := fetch! {
 the loop's budget is the fetch's own contract — the closed `gcard` of a
 limited query. Plain rows, plain `for`, grade `1 + 1 * 3 = 4` with no
 bound restated. -/
-def cardFanOut : DbFetch TestCtx 4 (List Nat) := fetch! {
+def cardFanOut : Db TestCtx 4 (List Nat) := db! {
   let parents ← Query.from' (ts := TestCtx) customers
     |>.orderBy (fun c => [c["Id"].asc])
     |>.limit 3
@@ -183,7 +183,7 @@ def cardFanOut : DbFetch TestCtx 4 (List Nat) := fetch! {
 symbolic — `|customers| + 1`. No closed budget dominates a table symbol,
 so every budgeted door refuses it statically; the per-driver All doors
 run it unchecked. -/
-def wholeTableFanOut : DbFetch TestCtx (customers.size + 1) (List Nat) := fetch! {
+def wholeTableFanOut : Db TestCtx (customers.size + 1) (List Nat) := db! {
   let parents ← Query.from' (ts := TestCtx) customers
     |>.orderBy (fun c => [c["Id"].asc])
     |>.fetch
@@ -194,74 +194,74 @@ def wholeTableFanOut : DbFetch TestCtx (customers.size + 1) (List Nat) := fetch!
   return waves.map (·.length)
 }
 
-/-- Compare a `DbFetch` smoke result against its in-memory interpretation. -/
+/-- Compare a `Db` smoke result against its in-memory interpretation. -/
 def checkSpenders (live : Nat × List (Values OrdersS)) : IO Bool := do
   match spenders.runWith ⟨seedEnv, seedParams, none⟩ with
   | .error e =>
-      IO.eprintln s!"EVAL ERROR spenders (DbFetch): {repr e}"
+      IO.eprintln s!"EVAL ERROR spenders (Db): {repr e}"
       pure false
   | .ok mem =>
       if live.1 == mem.1 && live.2.mergeSort rowLe == mem.2.mergeSort rowLe then
         pure true
       else do
-        IO.eprintln "DRIVER MISMATCH spenders (DbFetch)"
+        IO.eprintln "DRIVER MISMATCH spenders (Db)"
         pure false
 
 def checkBothTables (live : List (Values CustomersS) × List (Values OrdersS)) : IO Bool := do
   match bothTables.runWith ⟨seedEnv, seedParams, none⟩ with
   | .error e =>
-      IO.eprintln s!"EVAL ERROR bothTables (DbFetch two-fetch): {repr e}"
+      IO.eprintln s!"EVAL ERROR bothTables (Db two-fetch): {repr e}"
       pure false
   | .ok mem =>
       if live.1.mergeSort rowLe == mem.1.mergeSort rowLe &&
          live.2.mergeSort rowLe == mem.2.mergeSort rowLe then
         pure true
       else do
-        IO.eprintln "DRIVER MISMATCH bothTables (DbFetch two-fetch)"
+        IO.eprintln "DRIVER MISMATCH bothTables (Db two-fetch)"
         pure false
 
 def checkPerRowLoop (live : List Nat) : IO Bool := do
   match perRowLoop.runWith ⟨seedEnv, seedParams, none⟩ with
   | .error e =>
-      IO.eprintln s!"EVAL ERROR perRowLoop (DbFetch for/do): {repr e}"
+      IO.eprintln s!"EVAL ERROR perRowLoop (Db for/do): {repr e}"
       pure false
   | .ok mem =>
       if live == mem then pure true
       else do
-        IO.eprintln s!"DRIVER MISMATCH perRowLoop (DbFetch for/do): {live} vs {mem}"
+        IO.eprintln s!"DRIVER MISMATCH perRowLoop (Db for/do): {live} vs {mem}"
         pure false
 
 def checkBoundedFanOut (live : List Nat) : IO Bool := do
   match boundedFanOut.runWith ⟨seedEnv, seedParams, none⟩ with
   | .error e =>
-      IO.eprintln s!"EVAL ERROR boundedFanOut (DbFetch forRows): {repr e}"
+      IO.eprintln s!"EVAL ERROR boundedFanOut (Db forRows): {repr e}"
       pure false
   | .ok mem =>
       if live == mem then pure true
       else do
-        IO.eprintln s!"DRIVER MISMATCH boundedFanOut (DbFetch forRows): {live} vs {mem}"
+        IO.eprintln s!"DRIVER MISMATCH boundedFanOut (Db forRows): {live} vs {mem}"
         pure false
 
 def checkCardFanOut (live : List Nat) : IO Bool := do
   match cardFanOut.runWith ⟨seedEnv, seedParams, none⟩ with
   | .error e =>
-      IO.eprintln s!"EVAL ERROR cardFanOut (DbFetch contract-priced): {repr e}"
+      IO.eprintln s!"EVAL ERROR cardFanOut (Db contract-priced): {repr e}"
       pure false
   | .ok mem =>
       if live == mem then pure true
       else do
-        IO.eprintln s!"DRIVER MISMATCH cardFanOut (DbFetch contract-priced): {live} vs {mem}"
+        IO.eprintln s!"DRIVER MISMATCH cardFanOut (Db contract-priced): {live} vs {mem}"
         pure false
 
 def checkWholeTableFanOut (live : List Nat) : IO Bool := do
   match wholeTableFanOut.execAll seedEnv seedParams with
   | .error e =>
-      IO.eprintln s!"EVAL ERROR wholeTableFanOut (DbFetch symbolic): {repr e}"
+      IO.eprintln s!"EVAL ERROR wholeTableFanOut (Db symbolic): {repr e}"
       pure false
   | .ok mem =>
       if live == mem then pure true
       else do
-        IO.eprintln s!"DRIVER MISMATCH wholeTableFanOut (DbFetch symbolic): {live} vs {mem}"
+        IO.eprintln s!"DRIVER MISMATCH wholeTableFanOut (Db symbolic): {live} vs {mem}"
         pure false
 
 end TQ

@@ -1,6 +1,6 @@
 /-! # `Grade` — round budgets, symbolic in table sizes
 
-The round-trip currency of `DbFetch`: **max-plus polynomials over table
+The round-trip currency of `Db`: **max-plus polynomials over table
 names** — a grade is the maximum of a canonical set of polynomials with
 `Nat` coefficients in symbols `|customers|`, `|orders|`, …. Closed
 grades (`2`, `5 + 3`) are the constant polynomials; symbolic grades
@@ -142,7 +142,7 @@ def mkPolys (ps : List GPoly) : List GPoly :=
 
 instance : OfNat Grade n := ⟨nat n⟩
 
-/-- Nat expressions embed as closed grades — `DbFetch c (n + 1) α`
+/-- Nat expressions embed as closed grades — `Db c (n + 1) α`
 reads as before. -/
 instance : Coe Nat Grade := ⟨nat⟩
 
@@ -202,7 +202,7 @@ theorem nat_le_nat {a b : Nat} (h : a ≤ b) : nat a ≤ nat b := by
   intro σ
   simpa [eval_nat] using h
 
-/-- `g + 0 = g` — the `▸`-cast fuel for `DbFetch.map`, by shape cases
+/-- `g + 0 = g` — the `▸`-cast fuel for `Db.map`, by shape cases
 (the closed-fold arm splits the reduction paths). -/
 theorem add_zero : (g : Grade) → g + (0 : Grade) = g
   | .polys [] => rfl
