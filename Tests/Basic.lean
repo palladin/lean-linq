@@ -193,7 +193,7 @@ def perRowBounded : Db BasicCtx 4 (List Nat) := db! {
   let waves ← for p in parents.val do
     Query.from' (ts := BasicCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. p["Id"])
-      |>.fetch
+      |>.execQuery
   return waves.map (·.length)
 }
 
@@ -205,11 +205,11 @@ fetch's own *contract* (`forFetched`, fused from the adjacent bind +
 `for`): grade `1 + 1 * gcard customers`, symbolic in the table size,
 collapsed and checked by the sized door. -/
 def perRowFetched := db! {
-  let parents ← Query.from' (ts := BasicCtx) customers |>.fetch
+  let parents ← Query.from' (ts := BasicCtx) customers |>.execQuery
   let waves ← for p in parents do
     Query.from' (ts := BasicCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. p["Id"])
-      |>.fetch
+      |>.execQuery
   return waves.map (·.length)
 }
 
@@ -272,11 +272,11 @@ example (o : Row BasicCtx OrdersS.asNull) : SqlExpr BasicCtx ⟨.int, true⟩ :=
 -- the legal, contract-priced spelling (`perRowFetched` above); keep it
 -- and the bound must come from `fetchLimit`
 #check_failure (db! {
-  let parents ← Query.from' (ts := BasicCtx) customers |>.fetch
+  let parents ← Query.from' (ts := BasicCtx) customers |>.execQuery
   let waves ← for p in parents.val do
     Query.from' (ts := BasicCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. p["Id"])
-      |>.fetch
+      |>.execQuery
   return waves.map (·.length)
 } : Db BasicCtx 4 (List Nat))
 -- under-budgeting the bounded fan-out: grade 4 > 3
@@ -366,11 +366,11 @@ the query and the loop's budget is the fetch's contract — the closed
 `gcard` of a limited query — no bound restated anywhere, no refinement
 either: plain rows, plain `for`. -/
 def perRowCard : Db BasicCtx 4 (List Nat) := db! {
-  let parents ← Query.from' (ts := BasicCtx) customers |>.limit 3 |>.fetch
+  let parents ← Query.from' (ts := BasicCtx) customers |>.limit 3 |>.execQuery
   let waves ← for p in parents do
     Query.from' (ts := BasicCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. p["Id"])
-      |>.fetch
+      |>.execQuery
   return waves.map (·.length)
 }
 

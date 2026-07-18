@@ -34,7 +34,7 @@ shape has its proof story, up a ladder of evidence —
   `for p in parents.val do body` fuses into `DbP.forRows`, whose
   budget proof *is* the refinement. Bound `m + k * n`, closed, silent;
 - loops over plain just-fetched rows, priced *symbolically*: no
-  refinement, no restated bound — `let xs ← q.fetch` then
+  refinement, no restated bound — `let xs ← q.execQuery` then
   `for p in xs do body` fuses into `forFetched`, whose evidence is
   `fetch`'s own contract (rows fit `q.gcard` at every σ). Grade
   `m + k * q.gcard`, in the database's own terms; `exec` refuses it
@@ -635,10 +635,32 @@ constructors, dot-notation on the query. -/
 /-- `q.fetch` — the query as a one-round program. The rows are a plain
 list; the contract (rows fit `gcard` at every σ) is the spec, demonic —
 `bindD`'s evidence consumes it through `sp_fetch`. -/
-def Query.fetch (q : Query c s) :
+def Query.execQuery (q : Query c s) :
     DbP c 1 (List (Values s)) (fun post σ =>
       ∀ xs, xs.length ≤ (Query.gcard q).eval σ → post xs σ) :=
   .fetch q
+
+/-- `i.execInsert` — the statement as a one-operation program, flowing:
+`customers.insert |>.value … |>.execInsert`. Affected count = 1, sizes
+move within the insert's interval spec. -/
+def InsertStmt.execInsert {n : String} {s : Schema} [HasTable c.tables n s]
+    (i : InsertStmt c n s) : DbP c 1 Nat (fun post σ =>
+      ∀ σ', (∀ m, m ≠ n → σ' m = σ m) → σ n ≤ σ' n → σ' n ≤ σ n + 1 →
+        post 1 σ') :=
+  .insert i
+
+/-- `u.execUpdate` — affected count is the WHERE's hits, sizes exact. -/
+def UpdateStmt.execUpdate {n : String} {s : Schema} [HasTable c.tables n s]
+    (u : UpdateStmt c n s) : DbP c 1 Nat (fun post σ =>
+      ∀ k, k ≤ σ n → post k σ) :=
+  .update u
+
+/-- `d.execDelete` — the count ties the shrink down. -/
+def DeleteStmt.execDelete {n : String} {s : Schema} [HasTable c.tables n s]
+    (d : DeleteStmt c n s) : DbP c 1 Nat (fun post σ =>
+      ∀ σ' k, (∀ m, m ≠ n → σ' m = σ m) → σ' n ≤ σ n → σ n ≤ σ' n + k →
+        post k σ') :=
+  .delete d
 
 /-- `q.forQuery f` — the per-row loop priced by the query's own card. -/
 def Query.forQuery {w₂ : Values s → Wp β} (q : Query c s)
@@ -810,7 +832,7 @@ open Lean in
     `(LeanLinq.DbP.withBound $folded)
 
 namespace QueryB
-export Query (fetch fetchLimit forQuery fetchCount)
+export Query (execQuery fetchLimit forQuery fetchCount)
 end QueryB
 
 namespace ScalarB

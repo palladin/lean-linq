@@ -284,7 +284,7 @@ list (`{xs // xs.length ≤ n}`, backed by the first theorem about the executabl
 semantics: `Query.run_limit_length_le`, `LIMIT` really limits), and looping over
 its `.val` fuses into `DbP.forRows`, whose budget proof *is* the refinement
 — grade `m + k * n`, closed, silent; and the plain spelling needs no bound at
-all — `let xs ← q.fetch` then `for p in xs do body` fuses into `forFetched`,
+all — `let xs ← q.execQuery` then `for p in xs do body` fuses into `forFetched`,
 because `fetch` carries as its postcondition that the rows fit `q.gcard` at every
 size valuation σ, and the dependent bind (`bindD`) takes evidence *conditional on
 that postcondition* — the loop's budget proof consumes the contract and
@@ -312,7 +312,7 @@ def topSpendersDetail (n : Nat) :
   let report ← for s in spenders.val do       -- fuses into forRows: the proof is the refinement
     Query.from' (ts := ShopDb) orders
       |>.where' (fun o => o["CustomerId"] ==. s["Id"])
-      |>.fetch
+      |>.execQuery
       |>.map (fun os => (s["Name"], os.length))
   return report
 }
@@ -322,11 +322,11 @@ def topSpendersDetail (n : Nat) :
 -- and "all rows, per row" needs no bound at all — the price is symbolic:
 def topSpendersAll : Db ShopDb (customers.size + 1) (List (String × Nat)) := db! {
   let spenders ← Query.from' (ts := ShopDb) customers
-    |>.where' (fun c => 18 <. c["Age"]) |>.fetch
+    |>.where' (fun c => 18 <. c["Age"]) |>.execQuery
   let report ← for s in spenders do           -- fuses into forFetched: the proof is fetch's contract
     Query.from' (ts := ShopDb) orders
       |>.where' (fun o => o["CustomerId"] ==. s["Id"])
-      |>.fetch
+      |>.execQuery
       |>.map (fun os => (s["Name"], os.length))
   return report
 }

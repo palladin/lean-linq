@@ -145,7 +145,7 @@ def perRowLoop : Db TestCtx 3 (List Nat) := db! {
   let waves ← for k in ([1, 2, 3] : List Int) do
     Query.from' (ts := TestCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. SqlExpr.long k)
-      |>.fetch
+      |>.execQuery
   return waves.map (·.length)
 }
 
@@ -159,7 +159,7 @@ def boundedFanOut : Db TestCtx 4 (List Nat) := db! {
   let waves ← for p in parents.val do
     Query.from' (ts := TestCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. p["Id"])
-      |>.fetch
+      |>.execQuery
   return waves.map (·.length)
 }
 
@@ -171,11 +171,11 @@ def cardFanOut : Db TestCtx 4 (List Nat) := db! {
   let parents ← Query.from' (ts := TestCtx) customers
     |>.orderBy (fun c => [c["Id"].asc])
     |>.limit 3
-    |>.fetch
+    |>.execQuery
   let waves ← for p in parents do
     Query.from' (ts := TestCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. p["Id"])
-      |>.fetch
+      |>.execQuery
   return waves.map (·.length)
 }
 
@@ -186,11 +186,11 @@ run it unchecked. -/
 def wholeTableFanOut : Db TestCtx (customers.size + 1) (List Nat) := db! {
   let parents ← Query.from' (ts := TestCtx) customers
     |>.orderBy (fun c => [c["Id"].asc])
-    |>.fetch
+    |>.execQuery
   let waves ← for p in parents do
     Query.from' (ts := TestCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. p["Id"])
-      |>.fetch
+      |>.execQuery
   return waves.map (·.length)
 }
 

@@ -147,7 +147,7 @@ N+1 — which never elaborates; the batched door (`fetchFor`, one
 `IN (…)` statement) costs 1 for any collection size. -/
 
 def spendersReport : Db PlayCtx 2 (Nat × Nat) := db! {
-  let parents ← adults.fetch
+  let parents ← adults.execQuery
   let ids := parents.filterMap fun v => (v.get? "Id" .long).bind id
   let children ← .fetchFor ids fun ks =>
     Query.from' (ts := PlayCtx) orders
@@ -167,7 +167,7 @@ def ordersFor (ids : List Int) :
   let waves ← for k in ids do
     Query.from' (ts := PlayCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. SqlExpr.long k)
-      |>.fetch
+      |>.execQuery
   return waves.map (·.length)
 }
 -- the annotation states `ids.length` even though the loop's raw index
@@ -191,7 +191,7 @@ def topSpendersDetail (n : Nat) :
   let report ← for s in spenders.val do
     Query.from' (ts := PlayCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. s["Id"])
-      |>.fetch
+      |>.execQuery
       |>.map (fun orders => (s["Name"], orders.length))
   return report
 }
@@ -285,7 +285,7 @@ def topSpendersDetailAll :
   let report ← for s in adults do
     Query.from' (ts := PlayCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. s["Id"])
-      |>.fetch
+      |>.execQuery
       |>.map (fun orders => (s["Name"], orders.length))
   return report
 }
@@ -313,11 +313,11 @@ loop is still priced, because `fetch`'s postcondition (rows fit
 carry the same type: the price is the program's, not the sugar's. -/
 def topSpendersDetailAll' :
     Db PlayCtx (customers.size + 1) (List (String × Nat)) := db! {
-  let spenders ← adults.fetch
+  let spenders ← adults.execQuery
   let report ← for s in spenders do
     Query.from' (ts := PlayCtx) orders
       |>.where' (fun o => o["CustomerId"] ==. s["Id"])
-      |>.fetch
+      |>.execQuery
       |>.map (fun orders => (s["Name"], orders.length))
   return report
 }
@@ -345,7 +345,7 @@ constructs the contract via `run_gcard` instead of promising it — the
 result arrives with the spec's strongest-post reading (`Wp.sp`) at this
 run's sizes, `sp_fetch` turns it back into the pointwise contract, and
 the page bound is a theorem of the run, no check anywhere. -/
-#guard ((((adults.limit 10).fetch).runWithP .nil none demoEnv).toOption.map
+#guard ((((adults.limit 10).execQuery).runWithP .nil none demoEnv).toOption.map
     (·.val.1.length)) == some 2
 
 example {res : {p : List (Values [("Id", SqlType.long), ("Name", SqlType.string)])
@@ -353,7 +353,7 @@ example {res : {p : List (Values [("Id", SqlType.long), ("Name", SqlType.string)
       Wp.sp (fun post σ =>
         ∀ ys, ys.length ≤ (Query.gcard (adults.limit 10)).eval σ → post ys σ)
         p.1 (TableEnv.sizes demoEnv) (TableEnv.sizes p.2)}}
-    (_h : ((adults.limit 10).fetch).runWithP .nil none demoEnv = .ok res) :
+    (_h : ((adults.limit 10).execQuery).runWithP .nil none demoEnv = .ok res) :
     res.val.1.length ≤ 10 :=
   fetchPage_fits adults 10
     (res.property (fun ys _ => ys.length ≤ _) (fun _ hb => hb))
@@ -378,9 +378,10 @@ example {res : {p : List (Values [("Id", SqlType.long), ("Name", SqlType.string)
 insert a customer, then ask how many there are. Grade 2 = two database
 operations; the count comes back through `fetchCount`. -/
 def growThenCount : Db PlayCtx 2 Nat := db! {
-  let _ins ← .insert (customers.insert (ts := PlayCtx)
+  let _ins ← customers.insert (ts := PlayCtx)
     |>.value "Id" 100 |>.value "Age" 30
-    |>.value "Name" "Ada" |>.value "IsActive" true)
+    |>.value "Name" "Ada" |>.value "IsActive" true
+    |>.execInsert
   let n ← Query.fetchCount (Query.from' (ts := PlayCtx) customers)
   return n
 }
@@ -390,9 +391,31 @@ def growThenCount : Db PlayCtx 2 Nat := db! {
 -- writes report their affected counts — engine-truthful over the wire
 -- (sqlite3_changes / PQcmdTuples / DBCOUNT), exact in the model:
 #guard ((db! {
-  let k ← .delete (customers.delete (ts := PlayCtx))
+  let k ← customers.delete (ts := PlayCtx) |>.execDelete
   return k
 }).exec 1 demoEnv).toOption == some 3   -- unconditional DELETE clears all 3
+
+/-- **The write-side N+1, written deliberately** — one SELECT, then one
+INSERT per row. The loop over just-fetched rows fuses through
+`forFetched`, its body is a write, and the type bills the truth:
+`customers.size + 1` database operations. `exec` refuses it statically
+(no number dominates a table symbol); the sized door collapses and
+checks. This is the program `INSERT … SELECT` will collapse to
+**one** operation — the write-side `fetchFor`. -/
+def duplicateAll : Db PlayCtx (customers.size + 1) Nat := db! {
+  let rows ← Query.from' (ts := PlayCtx) customers |>.execQuery
+  let ks ← for r in rows do
+    customers.insert (ts := PlayCtx)
+      |>.value "Id" r["Id"] |>.value "Age" r["Age"]
+      |>.value "Name" r["Name"] |>.value "IsActive" r["IsActive"]
+      |>.execInsert
+  return ks.sum
+}
+
+-- 3 rows fetched, 3 single-row inserts, each affecting 1: Σ = 3 —
+-- at demoEnv's sizes the bill is 1 + 3 = 4, and 3 rounds is refused
+#guard (duplicateAll.execWithin 4 demoEnv).toOption == some 3
+#check_failure (duplicateAll.exec 1000 demoEnv)
 
 /-- And the write's spec *pays*: through insert's interval spec composed
 with the count's bound (the state-wp threading them), the count comes
