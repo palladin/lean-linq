@@ -69,7 +69,8 @@ error it is.
 
 **Scope**: lean-linq compiles queries to `CompiledSql` (SQL text + parameter bindings) for
 any driver to execute, and ships **native drivers for all three engines** — SQLite
-(C FFI over the system sqlite3), PostgreSQL (libpq), and SQL Server (FreeTDS, `sp_executesql` RPC): typed queries in, typed rows
+(C FFI over the system sqlite3), PostgreSQL (libpq), MySQL (libmysqlclient,
+`brew install mysql-client`), and SQL Server (FreeTDS, `sp_executesql` RPC): typed queries in, typed rows
 out, parameters bound natively — see "Executing for real" below.
 
 ## Building

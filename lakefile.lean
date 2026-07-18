@@ -8,15 +8,17 @@ open Lake DSL
 -- linker finds both (libsqlite3-dev, libpq-dev).
 open Lean Elab Term in
 elab "dbLinkArgs%" : term => do
-  let base := #["-lsqlite3", "-lpq", "-lsybdb"]
+  let base := #["-lsqlite3", "-lpq", "-lsybdb", "-lmysqlclient"]
   let args ←
     if System.Platform.isOSX then do
       let sdk ← IO.Process.output { cmd := "xcrun", args := #["--show-sdk-path"] }
       let pq ← IO.Process.output { cmd := "brew", args := #["--prefix", "libpq"] }
       let tds ← IO.Process.output { cmd := "brew", args := #["--prefix", "freetds"] }
+      let my ← IO.Process.output { cmd := "brew", args := #["--prefix", "mysql-client"] }
       pure (#["-L" ++ sdk.stdout.trimAscii.toString ++ "/usr/lib",
               "-L" ++ pq.stdout.trimAscii.toString ++ "/lib",
-              "-L" ++ tds.stdout.trimAscii.toString ++ "/lib"] ++ base)
+              "-L" ++ tds.stdout.trimAscii.toString ++ "/lib",
+              "-L" ++ my.stdout.trimAscii.toString ++ "/lib"] ++ base)
     else do
       -- The bundled ld.lld does not search system library dirs, and adding
       -- broad -L paths hijacks libc resolution (the toolchain's Scrt1.o
@@ -38,12 +40,13 @@ elab "dbLinkArgs%" : term => do
       let sqlite ← find ["libsqlite3.so", "libsqlite3.so.0"] "libsqlite3"
       let pq ← find ["libpq.so", "libpq.so.5"] "libpq"
       let tds ← find ["libsybdb.so", "libsybdb.so.5"] "libsybdb (freetds)"
+      let my ← find ["libmysqlclient.so", "libmysqlclient.so.21"] "libmysqlclient"
       -- The system .so files carry glibc symbol versions newer than the
       -- toolchain's bundled glibc can satisfy at link time; at run time the
       -- system loader resolves them against the system glibc (same distro,
       -- always sufficient). Tell the linker to trust runtime for shlib
       -- references instead of failing on what it cannot see.
-      pure #[sqlite, pq, tds, "-Wl,--allow-shlib-undefined"]
+      pure #[sqlite, pq, tds, my, "-Wl,--allow-shlib-undefined"]
   return Lean.toExpr args
 
 -- Include directory for libpq headers, resolved the same way (Linux:
@@ -76,6 +79,21 @@ elab "tdsIncludeDir%" : term => do
   return Lean.toExpr dir
 
 def tdsIncludeDir : String := tdsIncludeDir%
+
+open Lean Elab Term in
+elab "mysqlIncludeDir%" : term => do
+  let dir ←
+    if System.Platform.isOSX then do
+      let my ← IO.Process.output { cmd := "brew", args := #["--prefix", "mysql-client"] }
+      pure (my.stdout.trimAscii.toString ++ "/include/mysql")
+    else do
+      try
+        let out ← IO.Process.output { cmd := "mysql_config", args := #["--variable=pkgincludedir"] }
+        pure out.stdout.trimAscii.toString
+      catch _ => pure "/usr/include/mysql"
+  return Lean.toExpr dir
+
+def mysqlIncludeDir : String := mysqlIncludeDir%
 
 package «lean-linq» where
   version := v!"0.1.0"
@@ -117,6 +135,9 @@ lean_exe pgdriver where
 lean_exe mssqldriver where
   root := `Tests.MssqlDriverT
 
+lean_exe mysqldriver where
+  root := `Tests.MysqlDriverT
+
 /-- C shim wrapping the sqlite3 API into Lean-ABI functions. Compiled with
 the *system* C compiler (which knows where `sqlite3.h` lives — the
 toolchain's bundled clang is `-nostdinc`), with Lean's include dir added
@@ -135,6 +156,14 @@ extern_lib libpq_shim pkg := do
   let o ← buildO oFile src
     #["-I", leanInclude.toString, "-I", pqIncludeDir] #["-O2"] "cc"
   buildStaticLib (pkg.staticLibDir / nameToStaticLib "libpq_shim") #[o]
+
+extern_lib mysql_shim pkg := do
+  let src ← inputTextFile <| pkg.dir / "native" / "mysql_shim.c"
+  let oFile := pkg.buildDir / "native" / "mysql_shim.o"
+  let leanInclude := (← getLeanInstall).includeDir
+  let o ← buildO oFile src
+    #["-I", leanInclude.toString, "-I", mysqlIncludeDir] #["-O2"] "cc"
+  buildStaticLib (pkg.staticLibDir / nameToStaticLib "mysql_shim") #[o]
 
 extern_lib freetds_shim pkg := do
   let src ← inputTextFile <| pkg.dir / "native" / "freetds_shim.c"
