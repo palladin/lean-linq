@@ -467,6 +467,38 @@ theorem eval_mul (a b : Grade) : (a * b).eval σ = a.eval σ * b.eval σ := by
   show (Grade.mul (.polys ps) (.polys qs)).eval σ = _
   rw [eval_mul_polys, eval_polys, eval_polys]
 
+/-- Evaluation is monotone in the valuation: a bigger world prices
+higher — coefficients are `Nat`s, so every polynomial is monotone.
+What `delete`'s shrink spec trades on: post-delete grades only go
+down. -/
+theorem monoEval_mono {σ₁ σ₂ : String → Nat} (h : ∀ x, σ₁ x ≤ σ₂ x) :
+    (m : Mono) → GPoly.monoEval σ₁ m ≤ GPoly.monoEval σ₂ m
+  | [] => Nat.le_refl _
+  | x :: m => Nat.mul_le_mul (h x) (monoEval_mono h m)
+
+theorem sumEval_mono {σ₁ σ₂ : String → Nat} (h : ∀ x, σ₁ x ≤ σ₂ x) :
+    (l : List (Nat × Mono)) → GPoly.sumEval σ₁ l ≤ GPoly.sumEval σ₂ l
+  | [] => Nat.le_refl _
+  | (c, m) :: l => Nat.add_le_add
+      (Nat.mul_le_mul_left c (monoEval_mono h m)) (sumEval_mono h l)
+
+theorem maxE_mono {σ₁ σ₂ : String → Nat} (h : ∀ x, σ₁ x ≤ σ₂ x) :
+    (l : List GPoly) → maxE σ₁ l ≤ maxE σ₂ l
+  | [] => Nat.le_refl _
+  | p :: ps => by
+      rw [maxE, maxE]
+      have h1 : p.eval σ₁ ≤ p.eval σ₂ :=
+        Nat.add_le_add (Nat.le_refl _) (sumEval_mono h p.monos)
+      have h2 := maxE_mono h ps
+      exact Nat.max_le.mpr
+        ⟨Nat.le_trans h1 (Nat.le_max_left ..), Nat.le_trans h2 (Nat.le_max_right ..)⟩
+
+theorem eval_mono {σ₁ σ₂ : String → Nat} (h : ∀ x, σ₁ x ≤ σ₂ x) :
+    (g : Grade) → g.eval σ₁ ≤ g.eval σ₂
+  | .polys ps => by
+      rw [eval_polys, eval_polys]
+      exact maxE_mono h ps
+
 /-- Multiplication is monotone under the semantic order — the transport
 `bindD`'s evidence rides through (`k * nat len ≤ k * gcard` from
 `fetch`'s contract). -/

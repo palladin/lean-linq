@@ -140,16 +140,22 @@ inductive DbP (c : Ctx) : Grade → (α : Type) → Wp α → Type 1 where
       (B : Grade) →
       (∀ σ a, w.sp a σ σ → (g a).eval σ ≤ B.eval σ) →
       DbP c (m + B) β (w.bind w₂)
-  -- the write effects: one statement, one round, like any operation.
-  -- Specs are `triv` FOR NOW — their honest specs are σ-transformers
-  -- (insert bumps a size deterministically, update preserves, delete
-  -- shrinks demonically) and land with the apply-sizes law
+  -- the write effects: one statement, one round, and each carries the
+  -- strongest σ-transformer spec its observability supports — INSERT
+  -- moves this table's size within [σ n, σ n + 1] (exact bump modulo
+  -- duplicate names under the max) and touches nothing else; UPDATE
+  -- preserves sizes exactly; DELETE shrinks demonically (contents
+  -- decide how many rows die; sizes don't). Backed by the
+  -- `HasTable.sizes_set_*` laws at the adequacy door
   | insert : {n : String} → {s : Schema} → [inst : HasTable c.tables n s] →
-      InsertStmt c n s → DbP c 1 Unit (Wp.triv Unit)
+      InsertStmt c n s → DbP c 1 Unit (fun post σ =>
+        ∀ σ', (∀ m, m ≠ n → σ' m = σ m) → σ n ≤ σ' n → σ' n ≤ σ n + 1 →
+          post () σ')
   | update : {n : String} → {s : Schema} → [inst : HasTable c.tables n s] →
-      UpdateStmt c n s → DbP c 1 Unit (Wp.triv Unit)
+      UpdateStmt c n s → DbP c 1 Unit (fun post σ => post () σ)
   | delete : {n : String} → {s : Schema} → [inst : HasTable c.tables n s] →
-      DeleteStmt c n s → DbP c 1 Unit (Wp.triv Unit)
+      DeleteStmt c n s → DbP c 1 Unit (fun post σ =>
+        ∀ σ', (∀ m, σ' m ≤ σ m) → post () σ')
   -- the rule of consequence — underivable (indices don't transport
   -- along implication), and the door through which every program
   -- relaxes to the plain surface
@@ -242,6 +248,7 @@ theorem cellBound_of_evalCell {t : SqlPrim} {nb : Bool}
   intro k hk
   injection hk with hk
   subst hk
+  refine ⟨by omega, ?_⟩
   have hb := SpineQP.enumScopes_gcard_le sp rfl
     (scopes := [[]]) (fun sc hsc => by
       cases hsc with
@@ -252,6 +259,76 @@ theorem cellBound_of_evalCell {t : SqlPrim} {nb : Bool}
     | simpa [Int.toNat_natCast] using hb
     | simpa [Int.toNat_ofNat] using hb
     | omega
+
+/-- What an INSERT does to sizes, from `apply`'s own semantics and the
+`sizes_set_*` laws: foreign names fixed, this one in `[σ n, σ n + 1]`. -/
+theorem sizes_of_insert {n : String} {s : Schema} [inst : HasTable c.tables n s]
+    {i : InsertStmt c n s} {env env' : TableEnv c.tables}
+    {ps : ParamEnv c.params} {now : Option String}
+    (h : i.apply env ps now = .ok env') :
+    (∀ m, m ≠ n → TableEnv.sizes env' m = TableEnv.sizes env m) ∧
+    TableEnv.sizes env n ≤ TableEnv.sizes env' n ∧
+    TableEnv.sizes env' n ≤ TableEnv.sizes env n + 1 := by
+  unfold InsertStmt.apply at h
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure,
+      Functor.map, Except.map, throw, throwThe, MonadExceptOf.throw] at h
+  split at h
+  · contradiction
+  · split at h
+    all_goals first
+      | contradiction
+      | (injection h with h
+         subst h
+         refine ⟨fun m hm => inst.sizes_set_other env _ m hm, ?_, ?_⟩
+         · exact inst.sizes_set_mono env _ n
+             (by simp [List.length_append])
+         · refine Nat.le_trans (inst.sizes_set_le env _ n)
+             (Nat.max_le.mpr ⟨?_, ?_⟩)
+           · have := inst.rows_sizes env
+             simp only [List.length_append, List.length_cons, List.length_nil]
+             omega
+           · exact Nat.le_succ _)
+
+/-- UPDATE preserves sizes exactly: same row count in, same out. -/
+theorem sizes_of_update {n : String} {s : Schema} [inst : HasTable c.tables n s]
+    {u : UpdateStmt c n s} {env env' : TableEnv c.tables}
+    {ps : ParamEnv c.params} {now : Option String}
+    (h : u.apply env ps now = .ok env') :
+    ∀ m, TableEnv.sizes env' m = TableEnv.sizes env m := by
+  unfold UpdateStmt.apply at h
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure,
+      Functor.map, Except.map, throw, throwThe, MonadExceptOf.throw] at h
+  split at h
+  · contradiction
+  · split at h
+    all_goals first
+      | contradiction
+      | (rename_i rows hrows
+         injection h with h
+         subst h
+         have hlen := List.length_mapM_except _ hrows
+         intro m
+         exact Nat.le_antisymm
+           (inst.sizes_set_anti env _ m (Nat.le_of_eq hlen))
+           (inst.sizes_set_mono env _ m (Nat.le_of_eq hlen.symm)))
+
+/-- DELETE only shrinks: the survivors are a filter of the rows. -/
+theorem sizes_of_delete {n : String} {s : Schema} [inst : HasTable c.tables n s]
+    {d : DeleteStmt c n s} {env env' : TableEnv c.tables}
+    {ps : ParamEnv c.params} {now : Option String}
+    (h : d.apply env ps now = .ok env') :
+    ∀ m, TableEnv.sizes env' m ≤ TableEnv.sizes env m := by
+  unfold DeleteStmt.apply at h
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure,
+      Functor.map, Except.map, throw, throwThe, MonadExceptOf.throw] at h
+  split at h
+  all_goals first
+    | contradiction
+    | (rename_i rows hrows
+       injection h with h
+       subst h
+       intro m
+       exact inst.sizes_set_anti env _ m (List.length_filterM_except_le hrows))
 
 /-- The **adequacy** door: the run satisfies its spec. Same semantics as
 `runWith`, but the result carries `Wp.sp w` — every demand the spec can
@@ -275,16 +352,23 @@ def runWithP (ps : ParamEnv c.params) (now : Option String) :
       | .ok v => .ok ⟨(v, env), fun _ hw => hw v (cellBound_of_evalCell sq hev)⟩
       | .error e => .error e
   | _, _, _, .insert (inst := inst) i, env =>
-      match i.apply (inst := inst) env ps now with
-      | .ok env' => .ok ⟨((), env'), fun _ h => h.elim⟩
+      match hev : i.apply (inst := inst) env ps now with
+      | .ok env' =>
+          .ok ⟨((), env'), fun _ hw =>
+            (sizes_of_insert hev).elim fun hother ⟨hlo, hhi⟩ =>
+              hw _ hother hlo hhi⟩
       | .error e => .error e
   | _, _, _, .update (inst := inst) u, env =>
-      match u.apply (inst := inst) env ps now with
-      | .ok env' => .ok ⟨((), env'), fun _ h => h.elim⟩
+      match hev : u.apply (inst := inst) env ps now with
+      | .ok env' =>
+          .ok ⟨((), env'), fun _ hw => by
+            rw [funext (sizes_of_update hev)]
+            exact hw⟩
       | .error e => .error e
   | _, _, _, .delete (inst := inst) d, env =>
-      match d.apply (inst := inst) env ps now with
-      | .ok env' => .ok ⟨((), env'), fun _ h => h.elim⟩
+      match hev : d.apply (inst := inst) env ps now with
+      | .ok env' =>
+          .ok ⟨((), env'), fun _ hw => hw _ (sizes_of_delete hev)⟩
       | .error e => .error e
   | _, _, _, .bindD x f _ _, env => do
       let ⟨(a, env₁), ha⟩ ← runWithP ps now x env
@@ -570,7 +654,7 @@ def Query.fetchCount (q : Query c s) :
   rcases v with _ | k
   · cases hcb.1
   · refine hpost k.toNat ?_
-    have hb := hcb.2 k rfl
+    have hb := (hcb.2 k rfl).2
     have hbr : ((q AliasOf).asPlainSpine.gcardAux 0) = Query.gcard q := by
       show (QueryP.asPlainSpine (q AliasOf)).gcardAux 0 = (q AliasOf).gcardAux 0
       rw [QueryP.asPlainSpine.eq_def]

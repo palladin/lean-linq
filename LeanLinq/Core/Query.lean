@@ -135,7 +135,7 @@ necessity: sizes do not determine cell contents. -/
     {c : SqlType} → ScalarA ts c → Nullable c.ty → (String → Nat) → Prop
   | _, .countQ sp, v, σ =>
       v.isSome = true ∧ ∀ k : Int, v = some k →
-        k.toNat ≤ (sp.gcardAux 0).eval σ
+        0 ≤ k ∧ k.toNat ≤ (sp.gcardAux 0).eval σ
   | _, .aggQ .., _, _ => True
 
 namespace QueryP

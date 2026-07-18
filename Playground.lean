@@ -387,6 +387,28 @@ def growThenCount : Db PlayCtx 2 Nat := db! {
 
 #guard (growThenCount.exec 2 demoEnv).toOption == some 4  -- 3 seeded + 1
 
+/-- And the write's spec *pays*: through insert's interval spec composed
+with the count's bound (the state-wp threading them), the count comes
+back **provably ≤ old size + 1** — a theorem of this run, before
+looking at the number. -/
+example {res : {p : Nat × TableEnv PlayCtx.tables //
+      Wp.sp _ p.1 (TableEnv.sizes demoEnv) (TableEnv.sizes p.2)}}
+    (_h : (DbP.bindD (.insert (customers.insert (ts := PlayCtx)
+        |>.value "Id" 100 |>.value "Age" 30
+        |>.value "Name" "Ada" |>.value "IsActive" true))
+        (fun _ => Query.fetchCount (Query.from' (ts := PlayCtx) customers))
+        1 (fun _ _ _ => Nat.le_refl _)).runWithP .nil none demoEnv = .ok res) :
+    res.val.1 ≤ TableEnv.sizes demoEnv "customers" + 1 := by
+  refine res.property
+    (fun n _ => n ≤ TableEnv.sizes demoEnv "customers" + 1) ?_
+  intro σ' _ _ hhi n hn
+  have hg : (Query.gcard (Query.from' (ts := PlayCtx) customers)).eval σ'
+      = σ' "customers" := by
+    rw [show Query.gcard (Query.from' (ts := PlayCtx) customers)
+      = Grade.tbl "customers" from by rfl, Grade.eval_tbl]
+  rw [hg] at hn
+  omega
+
 /-! ## The type system at work — uncomment any line for the error
 
 #eval (Query.from' (ts := PlayCtx) customers |>.where' (fun c => c["Nmae"] ==. "Ada")).toSql .sqlite
