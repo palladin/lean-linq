@@ -108,6 +108,24 @@ def DeleteStmt.apply (d : DeleteStmt ts n s) [inst : HasTable ts.tables n s]
     (now : Option String := none) : Except EvalError (TableEnv ts.tables) :=
   (d.applyCount env ps now).map (·.1)
 
+/-- Apply with the affected-row count: rows already typed, appended —
+affected = the list's length, exactly. An empty batch is invalid SQL
+everywhere, and invalid here. -/
+def InsertValuesStmt.applyCount (st : InsertValuesStmt ts n s)
+    [inst : HasTable ts.tables n s]
+    (env : TableEnv ts.tables) (_ps : ParamEnv ts.params := by exact .nil)
+    (_now : Option String := none) :
+    Except EvalError (TableEnv ts.tables × Nat) := do
+  if st.rows.isEmpty then
+    throw (.invalidStatement "INSERT with no rows")
+  pure (inst.set env (inst.rows env ++ st.rows), st.rows.length)
+
+def InsertValuesStmt.apply (st : InsertValuesStmt ts n s)
+    [inst : HasTable ts.tables n s]
+    (env : TableEnv ts.tables) (ps : ParamEnv ts.params := by exact .nil)
+    (now : Option String := none) : Except EvalError (TableEnv ts.tables) :=
+  (st.applyCount env ps now).map (·.1)
+
 /-- Apply with the affected-row count: the source's rows, appended —
 affected = however many the query yields. -/
 def InsertSelectStmt.applyCount (st : InsertSelectStmt ts n s)

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/palladin/lean-linq/actions/workflows/ci.yml/badge.svg)](https://github.com/palladin/lean-linq/actions/workflows/ci.yml)
 [![Lean 4](https://img.shields.io/badge/Lean-v4.31.0-blue)](https://leanprover.github.io/)
-[![dialects](https://img.shields.io/badge/SQL-SQLite%20%7C%20PostgreSQL%20%7C%20SQL%20Server-informational)](#integration-tests)
+[![dialects](https://img.shields.io/badge/SQL-SQLite%20%7C%20PostgreSQL%20%7C%20MySQL%20%7C%20SQL%20Server-informational)](#integration-tests)
 
 A type-safe, deeply-embedded SQL query DSL for Lean 4 — language-integrated queries built
 from intrinsically-typed GADTs and PHOAS binders: schemas index the types of queries and rows,
@@ -68,7 +68,7 @@ a `String` when the schema says NOT NULL, an `Option String` only when it says
 error it is.
 
 **Scope**: lean-linq compiles queries to `CompiledSql` (SQL text + parameter bindings) for
-any driver to execute, and ships **native drivers for all three engines** — SQLite
+any driver to execute, and ships **native drivers for all four engines** — SQLite
 (C FFI over the system sqlite3), PostgreSQL (libpq), MySQL (libmysqlclient,
 `brew install mysql-client`), and SQL Server (FreeTDS, `sp_executesql` RPC): typed queries in, typed rows
 out, parameters bound natively — see "Executing for real" below.
@@ -77,7 +77,7 @@ out, parameters bound natively — see "Executing for real" below.
 
 ```
 lake build                        # library
-lake test                         # golden tests: 358 cases × 3 dialects (exact SQL + parameters)
+lake test                         # golden tests: 404 cases × 4 dialects (exact SQL + parameters)
 lake exe tests --update           # regenerate Tests/golden/{sqlite,sqlserver,postgres}.golden
 
 docker compose up -d --wait       # PostgreSQL + SQL Server test databases
@@ -352,7 +352,16 @@ inference properly. `f.execPg conn budget` interprets one statement per round
 layer). `lake exe pgdriver` sweeps the full corpus against live PostgreSQL, typed
 `Values`-to-`Values` against the evaluator.
 
-**SQL Server** completes the trilogy (`import LeanLinq.Driver.Mssql`, `Ms.connect`
+**MySQL** (`import LeanLinq.Driver.Mysql`, `Mysql.connect`; requires
+libmysqlclient — `brew install mysql-client` / `libmysqlclient-dev`) executes over
+prepared statements: the driver rewrites each `:name` *occurrence* to MySQL's
+unnamed `?` and emits values in occurrence order (a repeated named reference
+repeats its value — unlike PostgreSQL's `$N`), parameters bind as text (MySQL
+coerces in typed contexts), and results decode through the same shared cell
+parser as every other driver. `lake exe mysqldriver` sweeps the corpus against
+the compose service on port 3307.
+
+**SQL Server** (`import LeanLinq.Driver.Mssql`, `Ms.connect`
 with host/port/credentials; requires FreeTDS — `brew install freetds` /
 `freetds-dev`). It is the one engine that needs **no placeholder rewriting at all**:
 the sqlServer dialect already compiles `@p0`/`@minAge`, TDS's native named-parameter
@@ -367,7 +376,7 @@ connection — no pipelining — so `Db.execMs` is sequential and the `max` grad
 stays an honest upper bound, as with in-process SQLite. `lake exe mssqldriver`
 sweeps the full corpus against live SQL Server (docker compose, port 14333), typed
 `Values`-to-`Values` against the evaluator — with the native drivers now covering
-all three engines, the string-based CLI integration harness is a retirement
+all four engines, the string-based CLI integration harness is a retirement
 candidate once the parallel-run period ends.
 
 ## Running queries in memory
@@ -401,7 +410,7 @@ def db : TableEnv MyDb.tables := .cons [/- value rows -/] .nil
 ```
 
 This is also how the test suite works: the integration runner computes every
-case's expected rows with `Query.run` and differential-tests all three
+case's expected rows with `Query.run` and differential-tests all four
 engines against it — the executable semantics is the oracle, not hand-written
 expectations. And it is the foundation for stating propositions about result
 sets (rows of `q.where' p` satisfy `p`, `orderBy` results are sorted, …) as
@@ -478,8 +487,8 @@ return `Bool`/`Prop`, so SQL needs its own).
 ## Status
 
 Core, full query surface (joins, grouping, aggregates, set ops, subqueries),
-statements, the three dialects, native drivers for all three engines, and the
-round-budgeted `Db` layer are implemented, with a 402-case × 3-dialect
+statements, the four dialects, native drivers for all four engines, and the
+round-budgeted `Db` layer are implemented, with a 404-case × 4-dialect
 golden suite (both surfaces), an executable in-memory oracle, per-driver
 corpus sweeps, and live 3-engine integration tests.
 

@@ -402,3 +402,4 @@ MeasurementsInsert	1,0.5,2|2,2.25,NULL|3,-1.5,0.5|4,100,-2|200,12.5,0.25
 MeasurementsUpdate	1,1,2|2,2.25,NULL|3,-1.5,0.5|4,100,-2
 InsertSelectAdults	1,25,John Doe,1|2,30,Jane Smith,1|3,16,Minor User,0|4,65,Senior User,1|1001,25,John Doe,1|1002,30,Jane Smith,1|1004,65,Senior User,1
 InsertSelectLimited	1,25,John Doe,1|2,30,Jane Smith,1|3,16,Minor User,0|4,65,Senior User,1|2001,25,John Doe,1|2002,30,Jane Smith,1
+InsertValuesBatch	1,25,John Doe,1|2,30,Jane Smith,1|3,16,Minor User,0|4,65,Senior User,1|300,41,Batch One,1|301,NULL,Batch Two,0|302,43,NULL,NULL

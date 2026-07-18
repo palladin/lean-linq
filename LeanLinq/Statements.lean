@@ -102,6 +102,52 @@ def DeleteStmt.toSql (d : DeleteStmt ts n s) (db : DatabaseType := .sqlite) : Co
   let (sql, st) := Id.run ((d.compile.run db).run {})
   { sql, params := st.params }
 
+/-- A typed cell as a parameter value — the encoder the batched VALUES
+insert rides (data already in hand travels as parameters, never as
+text). -/
+def SqlValue.ofCell : (t : SqlPrim) → t.interp → SqlValue
+  | .int, i => .int i
+  | .long, i => .long i
+  | .double, f => .double f
+  | .decimal, d => .decimal (renderDecimal d)
+  | .string, s => .string s
+  | .bool, b => .bool b
+  | .dateTime, s => .dateTime s
+  | .guid, g => .guid g
+
+/-- `INSERT INTO t VALUES (…), (…), …` — the batched multi-row write:
+rows already in hand (typed `Values`), one statement, grade 1,
+affected = the list's length exactly. -/
+structure InsertValuesStmt (ts : Ctx) (n : String) (s : Schema) where
+  rows : List (Values s)
+
+/-- `t.insertAll rows` — aim an in-hand list at the table. -/
+def Table.insertAll (_ : Table n s) (rows : List (Values s)) :
+    InsertValuesStmt ts n s :=
+  ⟨rows⟩
+
+private def compileValuesRow : (s : Schema) → Values s → CompileM (List String)
+  | [], .nil => pure []
+  | (_, c) :: rest, .cons cell r => do
+      let item ← match c, cell with
+        | ⟨t, true⟩, cell =>
+            match cell with
+            | none => pure "NULL"
+            | some v => pushParam (SqlValue.ofCell t v)
+        | ⟨t, false⟩, cell => pushParam (SqlValue.ofCell t cell)
+      return item :: (← compileValuesRow rest r)
+
+def InsertValuesStmt.compile (st : InsertValuesStmt ts n s) : CompileM String := do
+  let cols ← s.mapM fun (nm, _) => quote nm
+  let rows ← st.rows.mapM fun r => do
+    return s!"({String.intercalate ", " (← compileValuesRow s r)})"
+  return s!"INSERT INTO {← quote n} ({String.intercalate ", " cols}) VALUES {String.intercalate ", " rows}"
+
+def InsertValuesStmt.toSql (st : InsertValuesStmt ts n s)
+    (db : DatabaseType := .sqlite) : CompiledSql :=
+  let (sql, stt) := Id.run ((st.compile.run db).run {})
+  { sql, params := stt.params }
+
 /-- `INSERT INTO t (cols) SELECT …` — the batched write: the engine
 moves the rows, one statement, grade 1. The source query's schema must
 match the target's — enforced by the type. -/

@@ -102,6 +102,22 @@ def InsertSelectLimited := customers.insertFrom (ts := TestCtx)
     |>.select (fun c => ![(c["Id"] + 2000).as "Id", c["Age"].as "Age",
       c["Name"].as "Name", c["IsActive"].as "IsActive"]))
 
+def siv (st : InsertValuesStmt TestCtx n s) [inst : HasTable TestCtx.tables n s] : Case :=
+  { compile := fun db => st.toSql db
+    expected := fun env =>
+      match st.apply env seedParams with
+      | .ok env' => renderTableRows (inst.rows env')
+      | .error e => evalFailure e
+    ordered := true
+    payload := .insVals st }
+
+/-- Batched multi-row VALUES: typed rows in hand, PK-safe ids, one NULL
+cell in the middle. -/
+def InsertValuesBatch := customers.insertAll (ts := TestCtx)
+  [.cons 300 (.cons (some 41) (.cons (some "Batch One") (.cons (some true) .nil))),
+   .cons 301 (.cons none (.cons (some "Batch Two") (.cons (some false) .nil))),
+   .cons 302 (.cons (some 43) (.cons none (.cons none .nil)))]
+
 def MeasurementsInsert := measurements.insert (ts := TestCtx)
   |>.value "Id" 200 |>.value "Value" 12.5 |>.value "Factor" 0.25
 def MeasurementsUpdate := measurements.update (ts := TestCtx)
@@ -124,7 +140,8 @@ def statementCases : List (String × Case) := [
   ("MeasurementsInsert", si MeasurementsInsert),
   ("MeasurementsUpdate", su MeasurementsUpdate),
   ("InsertSelectAdults", sis InsertSelectAdults),
-  ("InsertSelectLimited", sis InsertSelectLimited)
+  ("InsertSelectLimited", sis InsertSelectLimited),
+  ("InsertValuesBatch", siv InsertValuesBatch)
 ]
 
 end TQ

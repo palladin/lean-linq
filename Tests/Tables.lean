@@ -140,6 +140,8 @@ inductive Registered where
       (d : DeleteStmt TestCtx n s)
   | insSel {n : String} {s : Schema} [inst : HasTable TestCtx.tables n s]
       (st : InsertSelectStmt TestCtx n s)
+  | insVals {n : String} {s : Schema} [inst : HasTable TestCtx.tables n s]
+      (st : InsertValuesStmt TestCtx n s)
 
 /-- A registered test case: how it compiles, what rows it must produce
 (computed by the evaluator over the typed seed database), and the typed

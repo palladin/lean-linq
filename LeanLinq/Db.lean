@@ -166,6 +166,12 @@ inductive DbP (c : Ctx) : Grade → (α : Type) → Wp α → Type 1 where
       (st : InsertSelectStmt c n s) → DbP c 1 Nat (fun post σ =>
         ∀ σ' k, (∀ m, m ≠ n → σ' m = σ m) → σ n ≤ σ' n → σ' n ≤ σ n + k →
           k ≤ (Query.gcard st.source).eval σ → post k σ')
+  -- the batched VALUES write: rows in hand, one statement, affected =
+  -- their count exactly, sizes moving within [σ n, σ n + |rows|]
+  | insertValues : {n : String} → {s : Schema} → [inst : HasTable c.tables n s] →
+      (st : InsertValuesStmt c n s) → DbP c 1 Nat (fun post σ =>
+        ∀ σ', (∀ m, m ≠ n → σ' m = σ m) → σ n ≤ σ' n →
+          σ' n ≤ σ n + st.rows.length → post st.rows.length σ')
   -- the rule of consequence — underivable (indices don't transport
   -- along implication), and the door through which every program
   -- relaxes to the plain surface
@@ -178,7 +184,7 @@ abbrev Db (c : Ctx) (r : Grade) (α : Type) : Type 1 :=
   DbP c r α (Wp.triv α)
 
 namespace Db
-export DbP (pure fetch fetchCell insert update delete insertSelect bindD weakenP)
+export DbP (pure fetch fetchCell insert update delete insertSelect insertValues bindD weakenP)
 end Db
 
 namespace DbP
@@ -230,6 +236,9 @@ def runSt (ps : ParamEnv c.params) (now : Option String) :
       let (env', k) ← d.applyCount (inst := inst) env ps now
       Except.ok (k, env')
   | _, _, _, .insertSelect (inst := inst) st, env => do
+      let (env', k) ← st.applyCount (inst := inst) env ps now
+      Except.ok (k, env')
+  | _, _, _, .insertValues (inst := inst) st, env => do
       let (env', k) ← st.applyCount (inst := inst) env ps now
       Except.ok (k, env')
   | _, _, _, .bindD x f _ _, env => do
@@ -392,6 +401,34 @@ theorem sizes_of_insertSelect {n : String} {s : Schema}
          omega
        · exact Query.evalRows_gcard_le st.source hrows)
 
+/-- Batched VALUES: growth capped by the batch, count exactly its
+length. -/
+theorem sizes_of_insertValues {n : String} {s : Schema}
+    [inst : HasTable c.tables n s]
+    {st : InsertValuesStmt c n s} {env env' : TableEnv c.tables}
+    {ps : ParamEnv c.params} {now : Option String} {k : Nat}
+    (h : st.applyCount env ps now = .ok (env', k)) :
+    (∀ m, m ≠ n → TableEnv.sizes env' m = TableEnv.sizes env m) ∧
+    TableEnv.sizes env n ≤ TableEnv.sizes env' n ∧
+    TableEnv.sizes env' n ≤ TableEnv.sizes env n + st.rows.length ∧
+    k = st.rows.length := by
+  unfold InsertValuesStmt.applyCount at h
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure,
+      Functor.map, Except.map, throw, throwThe, MonadExceptOf.throw] at h
+  split at h
+  · contradiction
+  · injection h with h
+    injection h with h1 h2
+    subst h1
+    subst h2
+    refine ⟨fun m hm => inst.sizes_set_other env _ m hm,
+      inst.sizes_set_mono env _ n (by simp), ?_, rfl⟩
+    refine Nat.le_trans (inst.sizes_set_le env _ n)
+      (Nat.max_le.mpr ⟨?_, Nat.le_add_right ..⟩)
+    have := inst.rows_sizes env
+    simp only [List.length_append]
+    omega
+
 /-- The **adequacy** door: the run satisfies its spec. Same semantics as
 `runWith`, but the result carries `Wp.sp w` — every demand the spec can
 back is a fact about *this* result at *this* run's sizes. The `fetch`
@@ -443,6 +480,14 @@ def runWithP (ps : ParamEnv c.params) (now : Option String) :
             obtain ⟨hother, hlo, hhi, hg⟩ := sizes_of_insertSelect hev
             exact hw _ k hother hlo hhi hg⟩
       | .error e => .error e
+  | _, _, _, .insertValues (inst := inst) st, env =>
+      match hev : st.applyCount (inst := inst) env ps now with
+      | .ok (env', k) =>
+          .ok ⟨(k, env'), fun _ hw => by
+            obtain ⟨hother, hlo, hhi, hk⟩ := sizes_of_insertValues hev
+            subst hk
+            exact hw _ hother hlo hhi⟩
+      | .error e => .error e
   | _, _, _, .bindD x f _ _, env => do
       let ⟨(a, env₁), ha⟩ ← runWithP ps now x env
       let ⟨(b, env₂), hb⟩ ← runWithP ps now (f a) env₁
@@ -472,6 +517,9 @@ def runCountSt (ps : ParamEnv c.params) (now : Option String) :
       let (env', k) ← d.applyCount (inst := inst) env ps now
       Except.ok (k, env', 1)
   | _, _, _, .insertSelect (inst := inst) st, env => do
+      let (env', k) ← st.applyCount (inst := inst) env ps now
+      Except.ok (k, env', 1)
+  | _, _, _, .insertValues (inst := inst) st, env => do
       let (env', k) ← st.applyCount (inst := inst) env ps now
       Except.ok (k, env', 1)
   | _, _, _, .bindD x f _ _, env => do
@@ -717,6 +765,16 @@ def InsertSelectStmt.execInsertSelect {n : String} {s : Schema}
       ∀ σ' k, (∀ m, m ≠ n → σ' m = σ m) → σ n ≤ σ' n → σ' n ≤ σ n + k →
         k ≤ (Query.gcard st.source).eval σ → post k σ') :=
   .insertSelect st
+
+/-- `st.execInsertValues` — the batched in-hand write, flowing:
+`customers.insertAll rows |>.execInsertValues` — one operation, count =
+the list's length. -/
+def InsertValuesStmt.execInsertValues {n : String} {s : Schema}
+    [HasTable c.tables n s] (st : InsertValuesStmt c n s) :
+    DbP c 1 Nat (fun post σ =>
+      ∀ σ', (∀ m, m ≠ n → σ' m = σ m) → σ n ≤ σ' n →
+        σ' n ≤ σ n + st.rows.length → post st.rows.length σ') :=
+  .insertValues st
 
 /-- `d.execDelete` — the count ties the shrink down. -/
 def DeleteStmt.execDelete {n : String} {s : Schema} [HasTable c.tables n s]
