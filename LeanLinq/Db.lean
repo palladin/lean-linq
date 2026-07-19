@@ -11,7 +11,7 @@ result. Inside the query language that is unrepresentable (one `Query` value
 ⇒ one statement); `Db` closes the *host-language* half: a program that
 talks to the database carries its round-trip bill as part of its
 specification — a closed numeral for batched programs, an exact
-data-dependent expression for per-row loops, a max-plus polynomial in
+data-dependent expression for per-row loops, a symbolic function of
 table sizes for loops priced by the database itself.
 
 The core is the graded Freer Dijkstra monad (`LeanLinq.Freer`):
@@ -175,6 +175,52 @@ instance {α : Type} (e : DbE c α) : HasBill (dbWp e) 1 := ⟨dbWp_bill e⟩
 instance {α β : Type} (e : α → DbE c β) :
     HasBillF (fun a => dbWp (e a)) 1 := ⟨fun a => dbWp_bill (e a)⟩
 
+/-! ## Grade normalization — pricing `Query.gcard someDef` at the doors
+
+The door tactics decompose grade expressions with `eval_add`/`eval_mul`/
+`eval_min` and finish with `omega` — but a grade like
+`Query.gcard adults` hides its algebra behind the user's `def`, which
+`simp` cannot unfold without knowing the name. Definitional unfolding
+can: this simproc rewrites `Grade.eval σ g` to the *applied* form `g σ`
+normalized just far enough that every head is a `Nat` operation `omega`
+understands (`+`, `*`, `min`, `max` kept opaque; everything else — user
+defs, `gcard`'s recursion, the pointwise constructors — unfolded by
+defeq). The rewrite carries no proof: every step is `rfl`. -/
+
+open Lean Meta in
+private partial def gradeNatNorm (e : Expr) : MetaM Expr := do
+  let e ← whnfCore e
+  let f := e.getAppFn
+  let some n := f.constName? | return e
+  let args := e.getAppArgs
+  -- a *Nat-level* binary operation (exact arity — an over-applied `*` is a
+  -- Grade-level product applied to σ, which must keep unfolding instead)
+  let isNatOp :=
+    ((n == ``Nat.add || n == ``Nat.mul) && args.size == 2) ||
+    ((n == ``HAdd.hAdd || n == ``HMul.hMul) && args.size == 6) ||
+    ((n == ``Min.min || n == ``Max.max) && args.size == 4)
+  if isNatOp then
+    let i := args.size - 2
+    let j := args.size - 1
+    let a ← gradeNatNorm args[i]!
+    let b ← gradeNatNorm args[j]!
+    return mkAppN f ((args.set! i a).set! j b)
+  else
+    match ← unfoldDefinition? e with
+    | some e' => gradeNatNorm e'
+    | none =>
+        let e' ← whnf e
+        if e' == e then return e else gradeNatNorm e'
+
+open Lean Meta Simp in
+simproc gradeEvalNorm (Grade.eval _ _) := fun e => do
+  let_expr Grade.eval σ g := e | return .continue
+  -- simp runs procs at reducible transparency; the whole point here is
+  -- to unfold user `def`s, so switch to default for the normalization
+  let e' ← withTransparency .default <| gradeNatNorm (mkApp g σ)
+  if e' == e then return .continue
+  return .visit { expr := e' }
+
 namespace DbP
 
 /-! ## The op doors — one effect call each, at the op's own spec -/
@@ -240,9 +286,8 @@ closed grade. -/
 def bind {α β : Type} {w : Wp α} {w₂ : α → Wp β} (x : DbP c α w)
     (k : (a : α) → DbP c β (w₂ a)) {m n : Grade}
     [hm : HasBill w m] [hn : HasBillF w₂ n]
-    (hmne : m.NE := by grade_ne) (hnne : n.NE := by grade_ne)
     (hns : Grade.Stable n := by grade_stable) : Db c (m + n) β :=
-  FreerD.weaken (Wp.bill_bind_of_le hm.le hn.le hmne hnne hns)
+  FreerD.weaken (Wp.bill_bind_of_le hm.le hn.le hns)
     (FreerD.bindS x k)
 
 /-- Mapping is free: the bill does not move. -/
@@ -259,14 +304,28 @@ def withBound {α : Type} {w : Wp α} (x : DbP c α w) {m : Grade}
     [HasBill w m] {n : Grade}
     (h : m = n := by first
       | rfl
-      | decide
-      | ((simp only [Grade.ofNat_eq_nat, Grade.nat_add,
-            Grade.nat_mul, Grade.nat_one_mul, Grade.mul_nat_one,
-            Grade.nat_zero_add, Grade.add_nat_zero]) <;>
-         first
-           | rfl
-           | (apply congrArg Grade.nat; omega))) : Db c n α :=
+      | (refine Grade.ext fun σ => ?_
+         simp only [gradeEvalNorm, Grade.ofNat_eq_nat, Grade.eval_add,
+           Grade.eval_mul, Grade.eval_min, Grade.eval_nat, Grade.eval_tbl,
+           Table.size]
+         omega)) : Db c n α :=
   h ▸ relax x
+
+/-- State the bill as any provably **dominating** one — `db!`'s wrapper:
+a type ascription is an upper bound (which is what a bill means), so
+`Db c 4 α` accepts a program whose raw bill is `1 + 1 * min (|C|, 3)`.
+Same pointwise auto-discharge as the doors; a symbolic bill against a
+closed ascription still has no proof — the static refusal. -/
+def withBill {α : Type} {w : Wp α} (x : DbP c α w) {m : Grade}
+    [HasBill w m] {n : Grade}
+    (h : m ≤ n := by first
+      | exact Grade.le_refl _
+      | (intro σ
+         simp only [gradeEvalNorm, Grade.ofNat_eq_nat, Grade.eval_add,
+           Grade.eval_mul, Grade.eval_min, Grade.eval_nat, Grade.eval_tbl,
+           Table.size]
+         omega)) : Db c n α :=
+  FreerD.weaken (Wp.bill_mono h) (FreerD.weaken (HasBill.le) x)
 
 /-- Bill weakening: a program billed at `m` is billed at any `n ≥ m` —
 `Wp.bill_mono` behind the same auto-discharge as the doors. -/
@@ -277,6 +336,11 @@ def weaken {α : Type} (x : Db c m α) (n : Grade)
       first
         | exact Grade.le_refl _
         | (apply Grade.nat_le_nat; omega)
+        | (intro σ
+           simp only [gradeEvalNorm, Grade.ofNat_eq_nat, Grade.eval_add,
+             Grade.eval_mul, Grade.eval_min, Grade.eval_nat, Grade.eval_tbl,
+             Table.size]
+           omega)
         | assumption) : Db c n α :=
   FreerD.weaken (Wp.bill_mono h) x
 
@@ -298,13 +362,19 @@ def bindD' {α β : Type} {w : Wp α} {g : α → Grade}
         | exact _root_.LeanLinq.Grade.le_refl _
         | (apply _root_.LeanLinq.Grade.nat_le_nat; omega)
         | exact _root_.LeanLinq.Grade.nat_le_nat a.property
+        | (intro σ
+           simp only [_root_.LeanLinq.gradeEvalNorm,
+             _root_.LeanLinq.Grade.ofNat_eq_nat,
+             _root_.LeanLinq.Grade.eval_add, _root_.LeanLinq.Grade.eval_mul,
+             _root_.LeanLinq.Grade.eval_min, _root_.LeanLinq.Grade.eval_nat,
+             _root_.LeanLinq.Grade.eval_tbl]
+           omega)
         | fail "cannot bound the dependent continuation — fetch the collection through fetchLimit, or supply the proof")
     {m : Grade} [hm : HasBill w m]
-    (hmne : m.NE := by grade_ne) (hBne : B.NE := by grade_ne)
     (hBs : Grade.Stable B := by grade_stable) :
     Db c (m + B) β :=
   FreerD.weaken
-    (Wp.bill_bindD_of_le hm.le (fun _ => Wp.le_refl _) h hmne hBne hBs)
+    (Wp.bill_bindD_of_le hm.le (fun _ => Wp.le_refl _) h hBs)
     (FreerD.bindS x f)
 
 /-! ## The derived loop — a bind-chain, mapM-shaped
@@ -341,13 +411,11 @@ def forRows {α β : Type} {n : Nat} {w : Wp {xs : List α // xs.length ≤ n}}
     (x : DbP c {xs : List α // xs.length ≤ n} w)
     (f : (a : α) → DbP c β (w₂ a))
     {m kg : Grade} [hm : HasBill w m] [hk : HasBillF w₂ kg]
-    (hmne : m.NE := by grade_ne) (hkne : kg.NE := by grade_ne)
     (hst : Grade.Stable kg := by grade_stable) :
     Db c (m + kg * Grade.nat n) (List β) :=
   FreerD.weaken
     (Wp.bill_bindD_of_le hm.le (fun _ => Wp.le_refl _)
       (fun a => Grade.mul_le_mul_left kg (Grade.nat_le_nat a.property))
-      hmne (Grade.ne_mul hkne (Grade.ne_nat n))
       (Grade.stable_mul_nat hst n))
     (FreerD.bindS x (fun a => DbP.forAll a.val f hst))
 
@@ -360,7 +428,6 @@ def forFetched {s : Schema} {β : Type} {q : Query c s}
     {w₂ : Values s → Wp β} {kg : Grade} [hk : HasBillF w₂ kg]
     (x : DbP c (List (Values s)) (dbWp (DbE.fetch q)))
     (f : (v : Values s) → DbP c β (w₂ v))
-    (hkne : kg.NE := by grade_ne)
     (hst : Grade.Stable kg := by grade_stable) :
     Db c (1 + kg * Query.gcard q) (List β) :=
   FreerD.weaken
@@ -372,8 +439,7 @@ def forFetched {s : Schema} {β : Type} {q : Query c s}
           kg.eval σ * (Query.gcard q).eval σ :=
         Nat.mul_le_mul_left _ hlen
       have hadd := Grade.le_eval_add (a := (1 : Grade))
-        (b := kg * Query.gcard q) σ (Grade.ne_nat 1)
-        (Grade.ne_mul hkne (QueryP.gcardAux_ne (q AliasOf) 0))
+        (b := kg * Query.gcard q) σ
       rw [Grade.eval_mul] at hadd
       simp only [Grade.ofNat_eq_nat, Grade.eval_nat] at hadd ⊢
       omega)
@@ -385,10 +451,9 @@ own terms. **Derived, not primitive**: `forFetched` over the fetch op. -/
 def forQuery {s : Schema} {β : Type} {w₂ : Values s → Wp β}
     {kg : Grade} [HasBillF w₂ kg] (q : Query c s)
     (f : (v : Values s) → DbP c β (w₂ v))
-    (hkne : kg.NE := by grade_ne)
     (hst : Grade.Stable kg := by grade_stable) :
     Db c (1 + kg * Query.gcard q) (List β) :=
-  forFetched (DbP.fetch q) f hkne hst
+  forFetched (DbP.fetch q) f hst
 
 end DbP
 
@@ -461,10 +526,9 @@ def DeleteStmt.execDelete {n : String} {s : Schema} [HasTable c.tables n s]
 def Query.forQuery {s : Schema} {β : Type} {w₂ : Values s → Wp β}
     {kg : Grade} [HasBillF w₂ kg] (q : Query c s)
     (f : (v : Values s) → DbP c β (w₂ v))
-    (hkne : kg.NE := by grade_ne)
     (hst : Grade.Stable kg := by grade_stable) :
     Db c (1 + kg * Query.gcard q) (List β) :=
-  DbP.forQuery q f hkne hst
+  DbP.forQuery q f hst
 
 /-! `db!`'s loop target, overloaded by the iteree: a plain list loops
 by `forAll` (bill `k * |xs|`), a query by `forQuery` (bill
@@ -480,10 +544,9 @@ def LoopList.forLoop {α β : Type} {w₂ : α → Wp β} {kg : Grade}
 def LoopQuery.forLoop {s : Schema} {β : Type} {w₂ : Values s → Wp β}
     {kg : Grade} [HasBillF w₂ kg] (q : Query c s)
     (f : (v : Values s) → DbP c β (w₂ v))
-    (hkne : kg.NE := by grade_ne)
     (hst : Grade.Stable kg := by grade_stable) :
     Db c (1 + kg * Query.gcard q) (List β) :=
-  DbP.forQuery q f hkne hst
+  DbP.forQuery q f hst
 
 namespace Db
 export DbP (pure fetch fetchCell insert update delete insertSelect
@@ -518,7 +581,7 @@ def Query.fetchCountP (q : Query c s) : DbP c Nat (Query.countWp q) :=
           split
           · rename_i sp heq
             rw [heq]
-          · rfl
+          · exact Grade.mul_nat_one _
         rwa [hbr] at hb)
     (FreerD.bindS (DbP.fetchCell (q.count))
       (fun v => FreerD.pure (v.getD 0).toNat))
@@ -538,7 +601,6 @@ theorem Query.countWp_bill_bind {q : Query c s} {β : Type} :
   refine hb b σ' k₂ ?_
   rw [Grade.nat_add, Grade.eval_nat] at hk₂
   have hadd := Grade.le_eval_add (a := Query.gcard q) (b := Grade.nat 2) σ
-    (QueryP.gcardAux_ne (q AliasOf) 0) (Grade.ne_nat 2)
   rw [Grade.eval_nat] at hadd
   omega
 
@@ -877,6 +939,11 @@ def DbP.exec {α : Type} {w : Wp α} (f : DbP c α w) (budget : Nat)
       first
         | exact Grade.le_refl _
         | (apply Grade.nat_le_nat; omega)
+        | (intro σ
+           simp only [gradeEvalNorm, Grade.ofNat_eq_nat, Grade.eval_add,
+             Grade.eval_mul, Grade.eval_min, Grade.eval_nat, Grade.eval_tbl,
+             Table.size]
+           omega)
         | assumption) : Except EvalError α :=
   DbP.runWith ⟨env, ps, now⟩ f
 
@@ -924,9 +991,10 @@ exact dynamic bill `k * xs.length`), and the final `return e` is
 closed sum for batched programs, so `exec`'s obligation discharges
 silently. Two niceties keep inferred bills readable: the final
 `let ys ← e; return f ys` pair fuses into `map` (no trailing `+ 0`),
-and the whole block is wrapped in `withBound`, so a type annotation may
-state any provably equal spelling of the bill — `ids.length` where the
-raw index is `1 * ids.length`. -/
+and the whole block is wrapped in `withBill`, so a type annotation may
+state any provably **dominating** spelling of the bill — `ids.length`
+where the raw index is `1 * ids.length`, or a stated upper bound over a
+`min`-priced limit. -/
 
 syntax (name := fetchBind) "let " ident " ← " term : fetchClause
 syntax (name := fetchForAll) "let " ident " ← " "for " ident " in " term:max
@@ -1007,7 +1075,7 @@ open Lean in
         `(let $(⟨c[1]⟩) := $(⟨c[3]⟩); $acc)
       else
         Macro.throwErrorAt c "expected `let x ← e`, `let x := e`, `let ys ← for x in xs do e`, or a final `return e`"
-    `(LeanLinq.DbP.withBound $folded)
+    `(LeanLinq.DbP.withBill $folded)
 
 namespace QueryB
 export Query (execQuery fetchLimit forQuery fetchCount)
@@ -1030,12 +1098,9 @@ or takes the limit itself). -/
 theorem gcardAux_limitC_le {ts : Ctx} {s : Schema} (q : QueryA ts s)
     (l : Nat) (off? : Option Nat) (m : Nat) (σ : String → Nat) :
     ((QueryP.limitC q (some l) off?).gcardAux m).eval σ ≤ l := by
-  show ((match (q.gcardAux m).closed? with
-    | some k => Grade.nat (Nat.min k l)
-    | none => Grade.nat l) : Grade).eval σ ≤ l
-  cases (q.gcardAux m).closed? with
-  | some k => rw [Grade.eval_nat]; exact Nat.min_le_right k l
-  | none => rw [Grade.eval_nat]; exact Nat.le_refl l
+  show (Grade.gmin (q.gcardAux m) (Grade.nat l)).eval σ ≤ l
+  rw [Grade.eval_min, Grade.eval_nat]
+  exact Nat.min_le_right ..
 
 theorem gcard_limit_le {ts : Ctx} {s : Schema} (q : Query ts s) (n : Nat)
     (σ : String → Nat) : (Query.gcard (q.limit n)).eval σ ≤ n := by

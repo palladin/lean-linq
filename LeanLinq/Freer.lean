@@ -6,9 +6,10 @@ The generic core under `Db`: a Freer monad over an abstract effect
 signature `E`, intrinsically indexed by a **graded** weakest-precondition
 transformer — the spec observes the result, the table sizes, *and the
 cost consumed*. One spec object per op (`EffWp`) carries both the op's
-logical meaning and its price; grades (`Grade`, canonical max-plus
-polynomials) survive as the *bound language* inside specs — `Wp.bill` —
-which is what keeps budget checks at the execution doors automatic.
+logical meaning and its price; grades (`Grade`, semantic functions from
+size valuations to `Nat`) survive as the *bound language* inside
+specs — `Wp.bill` — which is what keeps budget checks at the execution
+doors automatic.
 
 Three constructors and nothing else: `pure`, `bindE` (ONE effect call,
 then the rest — Freer normal form, so the cost of a program is
@@ -94,18 +95,6 @@ theorem Grade.stable_mul_nat {k : Grade} (h : Grade.Stable k) (j : Nat) :
   rw [Grade.eval_mul, Grade.eval_mul, Grade.eval_nat, Grade.eval_nat]
   exact Nat.mul_le_mul_right j (h σ σ')
 
-/-- Discharge `Grade.NE` goals for kit-built grades. -/
-syntax "grade_ne" : tactic
-
-macro_rules
-  | `(tactic| grade_ne) =>
-    `(tactic| first
-        | assumption
-        | exact LeanLinq.Grade.ne_nat _
-        | exact LeanLinq.Grade.ne_tbl _
-        | (apply LeanLinq.Grade.ne_add <;> grade_ne)
-        | (apply LeanLinq.Grade.ne_mul <;> grade_ne))
-
 /-- Discharge `Grade.Stable` goals for closed grades. -/
 syntax "grade_stable" : tactic
 
@@ -143,8 +132,7 @@ at the postcondition the continuation manufactures. -/
 theorem bill_bindD_of_le {α β : Type} {w : Wp α} {w₂ : α → Wp β}
     {m B : Grade} {g : α → Grade}
     (hm : w.le (bill m)) (hn : ∀ a, (w₂ a).le (bill (g a)))
-    (hg : ∀ a, g a ≤ B)
-    (hmne : m.NE) (hBne : B.NE) (hs : Grade.Stable B) :
+    (hg : ∀ a, g a ≤ B) (hs : Grade.Stable B) :
     (w.bind w₂).le (bill (m + B)) := by
   intro post σ k hb
   refine hm _ σ k ?_
@@ -154,16 +142,16 @@ theorem bill_bindD_of_le {α β : Type} {w : Wp α} {w₂ : α → Wp β}
   refine hb b σ'' k₂ ?_
   have hga := hg a σ'
   have hstab := hs σ σ'
-  have hadd := Grade.le_eval_add (a := m) (b := B) σ hmne hBne
+  have hadd := Grade.le_eval_add (a := m) (b := B) σ
   omega
 
 /-- Constant-budget sequencing — the surface `bind`'s law. -/
 theorem bill_bind_of_le {α β : Type} {w : Wp α} {w₂ : α → Wp β}
     {m n : Grade}
     (hm : w.le (bill m)) (hn : ∀ a, (w₂ a).le (bill n))
-    (hmne : m.NE) (hnne : n.NE) (hs : Grade.Stable n) :
+    (hs : Grade.Stable n) :
     (w.bind w₂).le (bill (m + n)) :=
-  bill_bindD_of_le hm hn (fun _ => Grade.le_refl n) hmne hnne hs
+  bill_bindD_of_le hm hn (fun _ => Grade.le_refl n) hs
 
 /-- Mapping is free: the bill does not move. -/
 theorem bill_map_of_le {α β : Type} {w : Wp α} {r : Grade} (f : α → β)

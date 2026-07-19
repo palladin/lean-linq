@@ -322,32 +322,41 @@ example (n : Nat) : Db BasicCtx (1 + 1 * n) (List (List (Values OrdersS))) :=
     (1 * n)
 
 /-! `Query.gcard` — the row bound is a fact of the query value, symbolic
-in table sizes, reducing definitionally on literal queries so `rfl`
-consumes it in types. A source is its table's own symbol; the bound
-concentrates at `limit` (a real `min` when the inner bound is closed);
-joins multiply; unions add; `intersect` takes its left operand. -/
+in table sizes. A source is its table's own symbol; `limit` takes the
+**pointwise min** of the inner bound and the limit (tighter than either:
+a limited query over a small table prices at the table, not the limit);
+joins multiply; unions add; `intersect` takes its left operand. The
+pins state the bound facts pointwise (`gradeEvalNorm` + `omega`), and
+the collapse pins show the min biting both ways. -/
 example : Query.gcard (Query.from' (ts := BasicCtx) customers)
-    = Grade.tbl "Customers" := by rfl
+    = Grade.tbl "Customers" :=
+  Grade.ext fun σ => by simp only [gradeEvalNorm, Nat.mul_one]
 example : Query.gcard (Query.from' (ts := BasicCtx) customers
-  |>.where' (fun c => c["Age"] >=. 18)) = Grade.tbl "Customers" := by rfl
+  |>.where' (fun c => c["Age"] >=. 18)) = Grade.tbl "Customers" :=
+  Grade.ext fun σ => by simp only [gradeEvalNorm, Nat.mul_one]
 example : Query.gcard (Query.from' (ts := BasicCtx) customers |>.limit 5)
-    = 5 := rfl
--- re-limiting: the inner bound is closed, so the limit arm takes a real
--- min — `(q.limit 5).limit 10` prices as 5, not 10
+    ≤ 5 := by intro σ; simp only [gradeEvalNorm]; omega
+-- the min bites both ways: at demoEnv's 2 customers the limited query
+-- prices at 2 (the table), while a big table prices at the limit
+#guard (Query.gcard (Query.from' (ts := BasicCtx) customers |>.limit 5)).eval
+    (TableEnv.sizes demoEnv) == 2
+#guard (Query.gcard (Query.from' (ts := BasicCtx) customers |>.limit 5)).eval
+    (fun _ => 100) == 5
+-- re-limiting: `(q.limit 5).limit 10` still prices under 5, not 10
 example : Query.gcard (Query.from' (ts := BasicCtx) customers |>.limit 5 |>.limit 10)
-    = 5 := rfl
+    ≤ 5 := by intro σ; simp only [gradeEvalNorm]; omega
 example : Query.gcard (Query.from' (ts := BasicCtx) customers
   |>.innerJoin orders (fun c o => c["Id"] ==. o["CustomerId"])
       (fun c o => ![c["Id"].as "Id", o["OrderId"].as "OId"])
-  |>.limit 7) = 7 := rfl
+  |>.limit 7) ≤ 7 := by intro σ; simp only [gradeEvalNorm]; omega
 example : Query.gcard ((Query.from' (ts := BasicCtx) customers |>.limit 5).union
            (Query.from' (ts := BasicCtx) customers |>.limit 3))
-    = 8 := rfl
+    ≤ 8 := by intro σ; simp only [gradeEvalNorm]; omega
 -- intersect prices by its left operand (the right would also bound it,
 -- but that fact is unprovable against float cells' opaque equality)
 example : Query.gcard ((Query.from' (ts := BasicCtx) customers |>.limit 5).intersect
            (Query.from' (ts := BasicCtx) customers |>.limit 3))
-    = 5 := rfl
+    ≤ 5 := by intro σ; simp only [gradeEvalNorm]; omega
 
 /-- `gcard` is a *theorem* about the executable semantics, not a
 convention: whatever a run returns fits the symbolic bound collapsed at
@@ -359,7 +368,7 @@ example {xs : List (Values CustomersS)}
     xs.length ≤ 2 :=
   Query.run_gcard _ demoEnv .nil none h
 example : Query.gcard (Query.from' (ts := BasicCtx) customers |>.limit 5)
-    ≤ Grade.nat 9 := Grade.nat_le_nat (by omega)
+    ≤ Grade.nat 9 := by intro σ; simp only [gradeEvalNorm]; omega
 
 /-- The N+1 idiom priced by the query's own shape: the LIMIT lives in
 the query and the loop's budget is the fetch's contract — the closed

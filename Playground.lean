@@ -171,8 +171,9 @@ def ordersFor (ids : List Int) :
   return waves.map (·.length)
 }
 -- the annotation states `ids.length` even though the loop's raw index
--- is `1 * ids.length` (the constructor's exact arithmetic): `db!`
--- wraps its expansion in `withBound`, and `simp` closes the gap
+-- is `1 * ids.length` (the combinator's exact arithmetic): `db!`
+-- wraps its expansion in `withBill`, and the pointwise tactic closes
+-- the gap
 
 #eval (ordersFor [1, 2]).exec 2 demoEnv   -- Except.ok [1, 1] — grade 2
 
@@ -454,8 +455,7 @@ example {res : {p : Nat × TableEnv PlayCtx.tables × Nat //
   intro σ' _ _ hhi n hn
   have hg : (Query.gcard (Query.from' (ts := PlayCtx) customers)).eval σ'
       = σ' "customers" := by
-    rw [show Query.gcard (Query.from' (ts := PlayCtx) customers)
-      = Grade.tbl "customers" from by rfl, Grade.eval_tbl]
+    simp only [gradeEvalNorm, Nat.mul_one]
   rw [hg] at hn
   omega
 

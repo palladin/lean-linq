@@ -149,47 +149,6 @@ theorem List.length_flatMap_le {K : Nat} {f : α → List β} :
       have ha := h a (List.mem_cons_self ..)
       omega
 
-/-! No `gcard` is the max-plus −∞ (`polys []`) — the fact `le_eval_add`
-needs at every `union`. -/
-
-mutual
-
-theorem SpineQP.gcardAux_ne {ts : Ctx} {g : Terminal} {s : Schema} :
-    (sp : SpineQ ts g s) → (n : Nat) → (sp.gcardAux n).NE
-  | .yield _, _ => Grade.ne_nat 1
-  | .groupYield .., _ => Grade.ne_nat 1
-  | .guard _ rest, n => rest.gcardAux_ne n
-  | .order _ rest, n => rest.gcardAux_ne n
-  | .fromT (n := nm) (inst := _) _ f, n =>
-      Grade.ne_mul (Grade.ne_tbl nm) ((f ⟨s!"a{n}"⟩).gcardAux_ne (n + 1))
-  | .joinT (n := nm) (inst := _) _ _ f, n =>
-      Grade.ne_mul (Grade.ne_tbl nm) ((f ⟨s!"a{n}"⟩).gcardAux_ne (n + 1))
-  | .joinLeftT (n := nm) (inst := _) _ _ f, n =>
-      Grade.ne_mul (Grade.ne_add (Grade.ne_tbl nm) (Grade.ne_nat 1))
-        ((f ⟨s!"a{n}"⟩).gcardAux_ne (n + 1))
-  | .fromQ q f, n =>
-      Grade.ne_mul (q.gcardAux_ne n) ((f ⟨s!"a{n}"⟩).gcardAux_ne (n + 1))
-
-theorem QueryP.gcardAux_ne {ts : Ctx} {s : Schema} :
-    (q : QueryA ts s) → (n : Nat) → (q.gcardAux n).NE
-  | .spine sp, n => sp.gcardAux_ne n
-  | .distinctC q, n => q.gcardAux_ne n
-  | .limitC q lim? _, n => by
-      show Grade.NE (match lim? with
-        | some l =>
-            match (q.gcardAux n).closed? with
-            | some k => Grade.nat (Nat.min k l)
-            | none => Grade.nat l
-        | none => q.gcardAux n)
-      cases lim? with
-      | some l => cases (q.gcardAux n).closed? <;> exact Grade.ne_nat _
-      | none => exact q.gcardAux_ne n
-  | .setOpC .union a b, n => Grade.ne_add (a.gcardAux_ne n) (b.gcardAux_ne n)
-  | .setOpC .intersect a _, n => a.gcardAux_ne n
-  | .setOpC .except a _, n => a.gcardAux_ne n
-
-end
-
 mutual
 
 /-- Result counts of the downward walk are bounded by
@@ -343,9 +302,7 @@ theorem SpineQP.evalScopes_gcard_le {ts : Ctx} {g : Terminal} {s : Schema}
         List.length_mapM_except _ hm ▸ List.length_flatten_le parts hpart
       have htop : TableEnv.sizes ee.tables nm + 1 ≤
           (Grade.tbl nm + 1).eval (TableEnv.sizes ee.tables) := by
-        have := Grade.le_eval_add (TableEnv.sizes ee.tables)
-          (Grade.ne_tbl nm) (Grade.ne_nat 1)
-        simpa using this
+        simp [Grade.eval_add]
       calc rs.length
           ≤ _ * ((f ⟨s!"a{n}"⟩).gcardAux (n + 1)).eval (TableEnv.sizes ee.tables) :=
             hbelow
@@ -525,9 +482,7 @@ theorem SpineQP.enumScopes_gcard_le {ts : Ctx} {g : Terminal} {s : Schema}
         List.length_mapM_except _ hm ▸ List.length_flatten_le parts hpart
       have htop : TableEnv.sizes ee.tables nm + 1 ≤
           (Grade.tbl nm + 1).eval (TableEnv.sizes ee.tables) := by
-        have := Grade.le_eval_add (TableEnv.sizes ee.tables)
-          (Grade.ne_tbl nm) (Grade.ne_nat 1)
-        simpa using this
+        simp [Grade.eval_add]
       calc rs.length
           ≤ _ * ((f ⟨s!"a{n}"⟩).gcardAux (n + 1)).eval (TableEnv.sizes ee.tables) :=
             hbelow
@@ -613,18 +568,11 @@ theorem QueryP.evalRowsIn_gcard_le {ts : Ctx} {s : Schema} {ee : EvalEnv ts} :
           subst h
           have htake : ((inner.drop (off?.getD 0)).take l).length ≤ l :=
             List.length_take_le ..
-          simp only [QueryP.gcardAux]
-          cases hc : (q.gcardAux sc.length).closed? with
-          | some k =>
-              simp only [hc, Grade.eval_nat]
-              have hk := Grade.eval_of_closed? (σ := TableEnv.sizes ee.tables) hc
-              have hinner : ((inner.drop (off?.getD 0)).take l).length ≤ inner.length :=
-                Nat.le_trans (List.take_sublist ..).length_le
-                  (List.drop_sublist ..).length_le
-              exact Nat.le_min.mpr ⟨by omega, htake⟩
-          | none =>
-              simp only [hc, Grade.eval_nat]
-              exact htake
+          have hinner : ((inner.drop (off?.getD 0)).take l).length ≤ inner.length :=
+            Nat.le_trans (List.take_sublist ..).length_le
+              (List.drop_sublist ..).length_le
+          simp only [QueryP.gcardAux, Grade.eval_min, Grade.eval_nat]
+          exact Nat.le_min.mpr ⟨by omega, htake⟩
       | none =>
           subst h
           exact Nat.le_trans (List.drop_sublist ..).length_le hin
@@ -637,8 +585,7 @@ theorem QueryP.evalRowsIn_gcard_le {ts : Ctx} {s : Schema} {ee : EvalEnv ts} :
       cases op with
       | union =>
           subst h
-          refine Nat.le_trans ?_ (Grade.le_eval_add (TableEnv.sizes ee.tables)
-            (QueryP.gcardAux_ne a sc.length) (QueryP.gcardAux_ne b sc.length))
+          refine Nat.le_trans ?_ (Grade.le_eval_add (TableEnv.sizes ee.tables))
           calc (List.dedupBy Values.beq (ra ++ rb)).length
               ≤ (ra ++ rb).length := List.length_dedupBy_le _ _
             _ = ra.length + rb.length := List.length_append

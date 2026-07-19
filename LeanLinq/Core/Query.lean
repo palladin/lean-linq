@@ -83,12 +83,11 @@ alias numbering (`n`, maintained equal to the scope length), so the
 bound is the one that runs. For literal queries `gcard` reduces
 definitionally, so `by decide` can consume it inside types.
 
-`Grade` has no general `min` (max-plus polynomials aren't closed under
-it), but min of **closed** grades is closed — so `limit l` takes the
-real `min` when the inner bound is already a numeral, and the
-always-sound `l` otherwise; `intersect` takes its left operand. Every
-arm is backed by `run_gcard`: evaluation never returns more rows than
-the collapsed bound. -/
+`limit l` takes the pointwise `min` of the inner bound and the limit —
+semantic grades are closed under `min`, so a symbolic inner tightens
+the price too; `intersect` takes its left operand. Every arm is backed
+by `run_gcard`: evaluation never returns more rows than the collapsed
+bound. -/
 
 mutual
 
@@ -109,11 +108,11 @@ mutual
   | .limitC q lim? _, n =>
       match lim? with
       | some l =>
-          -- a closed inner bound meets the limit in a real min —
-          -- `(q.limit 3).limit 10` prices as 3, not 10
-          match (q.gcardAux n).closed? with
-          | some k => Grade.nat (Nat.min k l)
-          | none => Grade.nat l
+          -- the inner bound meets the limit in an honest pointwise min —
+          -- `(q.limit 3).limit 10` prices as 3, and a *symbolic* inner
+          -- now tightens the price too (the syntactic carrier could only
+          -- min closed bounds; the semantic one mins everything)
+          Grade.gmin (q.gcardAux n) (Grade.nat l)
       | none => q.gcardAux n
   | .setOpC .union a b, n => a.gcardAux n + b.gcardAux n
   -- intersect prices by its LEFT operand only. The right side would also

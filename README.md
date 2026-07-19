@@ -78,13 +78,15 @@ out, parameters bound natively — see "Executing for real" below.
 `Db` prices round trips in the type (`fetch` = 1, data-dependent `bind` =
 `+`, per-row `for` = body grade × collection length — a derived bind-chain), and
 execution demands a budget plus a proof — the philosophy being that everything is
-priced and the *proof* is the gate. Grades are canonical **max-plus polynomials
-over table-size symbols** — there is no ⊤ and no ℕ∞ anywhere: the unknown is not
-"unbounded", it is a *symbol*, and a size valuation σ collapses any grade to a
-plain `Nat`. `customers.size + 1` is a type; `q.gcard` prices a query's rows in
-the same symbols (a source is its table's symbol, joins multiply, unions add,
-`limit` caps — with a real `min` when the inner bound is closed); canonical forms
-make the arithmetic definitional (`1 + 1*X = X + 1` is `rfl`).
+priced and the *proof* is the gate. A grade **is its collapse** — a function
+from table-size valuations to `Nat` — and there is no ⊤ and no ℕ∞ anywhere: the
+unknown is not "unbounded", it is a *symbol* (`customers.size` reads the size),
+and evaluating at a valuation σ is application. `customers.size + 1` is a type;
+`q.gcard` prices a query's rows in the same terms (a source is its table's
+symbol, joins multiply, unions add, `limit` takes the pointwise `min` of the
+inner bound and the limit — tighter than either); the algebra is pointwise, so
+grade arithmetic is plain `Nat` arithmetic, and the doors discharge their
+obligations by unfolding to it (`omega` after a definitional normalization).
 
 That gives N+1 four doors, none accidental: `fetchFor` batches a whole key set
 into one `IN (…)` round (grade 1); `let ys ← for x in xs do body` loops per row
@@ -102,7 +104,7 @@ consumes the contract exactly where it was measured and transports it through
 the evaluation homomorphism, grade `1 + k * q.gcard` in the
 database's own terms. `exec budget` refuses a symbolic grade statically (no
 number dominates a table symbol); the sized door `execWithin` collapses the
-polynomial against the live database's own sizes and checks *before* interpreting
+grade against the live database's own sizes and checks *before* interpreting
 a single round; `execAll` runs unchecked, visibly. You can write N+1 when you
 mean it — priced by a bounded query or by the database itself — and you cannot
 write it by accident: a loop over a collection *derived* from fetched rows
