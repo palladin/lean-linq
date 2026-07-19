@@ -232,17 +232,9 @@ in the database's own terms: one round to ask, one for the page, at
 most `|customers|` for the fan-out. -/
 def allSpendersDetail :
     Db PlayCtx (customers.size + 2) (List (String × Nat)) :=
-  DbP.withBound (DbP.relax
-    (DbP.bindD (Query.fetchCount adults) (fun n => topSpendersDetail n)
-      (Query.gcard adults + Grade.nat 1)
-      (fun σ n hsp => by
-        have hn : n ≤ (Query.gcard adults).eval σ :=
-          hsp (fun m _ => m ≤ (Query.gcard adults).eval σ) (fun m hm => hm)
-        have hadd := Grade.le_eval_add (a := Query.gcard adults) (b := Grade.nat 1) σ
-          (QueryP.gcardAux_ne (adults AliasOf) 0) (Grade.ne_nat 1)
-        simp only [Grade.ofNat_eq_nat, Grade.eval_nat] at hadd
-        rw [show (Grade.nat n + 1) = Grade.nat (n + 1) from rfl, Grade.eval_nat]
-        omega)))
+  DbP.withBound
+    (FreerD.weaken (Query.countWp_bill_bind (q := adults))
+      (FreerD.bindS (Query.fetchCountP adults) (fun n => topSpendersDetail n)))
 
 -- collapsed at demoEnv (3 customers): budget 5 suffices, 4 does not…
 #guard (allSpendersDetail.execWithin 5 demoEnv).toOption
@@ -343,20 +335,29 @@ example {σ : String → Nat}
 `runWithP` runs the same tree `runWith` runs, but its `fetch` arm
 constructs the contract via `run_gcard` instead of promising it — the
 result arrives with the spec's strongest-post reading (`Wp.sp`) at this
-run's sizes, `sp_fetch` turns it back into the pointwise contract, and
-the page bound is a theorem of the run, no check anywhere. -/
+run's sizes and op count, `sp_fetch` turns it back into the pointwise
+contract, and the page bound is a theorem of the run, no check
+anywhere. -/
 #guard ((((adults.limit 10).execQuery).runWithP .nil none demoEnv).toOption.map
     (·.val.1.length)) == some 2
 
 example {res : {p : List (Values [("Id", SqlType.long), ("Name", SqlType.string)])
-        × TableEnv PlayCtx.tables //
-      Wp.sp (fun post σ =>
-        ∀ ys, ys.length ≤ (Query.gcard (adults.limit 10)).eval σ → post ys σ)
-        p.1 (TableEnv.sizes demoEnv) (TableEnv.sizes p.2)}}
+        × TableEnv PlayCtx.tables × Nat //
+      ∀ k₀, Wp.sp (dbWp (DbE.fetch (adults.limit 10)))
+        p.1 (TableEnv.sizes demoEnv) k₀ (TableEnv.sizes p.2.1) (k₀ + p.2.2)}}
     (_h : ((adults.limit 10).execQuery).runWithP .nil none demoEnv = .ok res) :
     res.val.1.length ≤ 10 :=
   fetchPage_fits adults 10
-    (res.property (fun ys _ => ys.length ≤ _) (fun _ hb => hb))
+    (res.property 0 (fun ys _ _ => ys.length ≤ _) (fun _ hb => hb))
+
+-- **count adequacy** — the bill in the type is a theorem of the run:
+-- the certified door hands back the op count, provably ≤ the bill at
+-- the model's own sizes (`customers.size + 1` collapses to 4 here)
+#guard ((topSpendersDetailAll.runWithP .nil none demoEnv).toOption.map
+    (·.val.2.2)) == some 3
+example {res} (h : topSpendersDetailAll.runWithP .nil none demoEnv = .ok res) :
+    res.val.2.2 ≤ (customers.size + 1).eval (TableEnv.sizes demoEnv) :=
+  DbP.runWithP_count_le h
 
 /-! ## Statements -/
 
@@ -438,16 +439,18 @@ def duplicateAllFast : Db PlayCtx 1 Nat := db! {
 with the count's bound (the state-wp threading them), the count comes
 back **provably ≤ old size + 1** — a theorem of this run, before
 looking at the number. -/
-example {res : {p : Nat × TableEnv PlayCtx.tables //
-      Wp.sp _ p.1 (TableEnv.sizes demoEnv) (TableEnv.sizes p.2)}}
-    (_h : (DbP.bindD (.insert (customers.insert (ts := PlayCtx)
-        |>.value "Id" 100 |>.value "Age" 30
-        |>.value "Name" "Ada" |>.value "IsActive" true))
-        (fun _ => Query.fetchCount (Query.from' (ts := PlayCtx) customers))
-        1 (fun _ _ _ => Nat.le_refl _)).runWithP .nil none demoEnv = .ok res) :
+example {res : {p : Nat × TableEnv PlayCtx.tables × Nat //
+      ∀ k₀, Wp.sp _ p.1 (TableEnv.sizes demoEnv) k₀ (TableEnv.sizes p.2.1)
+        (k₀ + p.2.2)}}
+    (_h : DbP.runWithP .nil none
+        (FreerD.bindS (DbP.insert (customers.insert (ts := PlayCtx)
+          |>.value "Id" 100 |>.value "Age" 30
+          |>.value "Name" "Ada" |>.value "IsActive" true))
+          (fun _ => Query.fetchCountP (Query.from' (ts := PlayCtx) customers)))
+        demoEnv = .ok res) :
     res.val.1 ≤ TableEnv.sizes demoEnv "customers" + 1 := by
-  refine res.property
-    (fun n _ => n ≤ TableEnv.sizes demoEnv "customers" + 1) ?_
+  refine res.property 0
+    (fun n _ _ => n ≤ TableEnv.sizes demoEnv "customers" + 1) ?_
   intro σ' _ _ hhi n hn
   have hg : (Query.gcard (Query.from' (ts := PlayCtx) customers)).eval σ'
       = σ' "customers" := by

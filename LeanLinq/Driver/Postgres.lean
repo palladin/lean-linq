@@ -202,32 +202,30 @@ def Conn.execInsertValues (conn : Conn) (st : InsertValuesStmt c n s)
 /-! ## `Db` interpretation
 
 The monad is sequential by design — dependence is monadic structure,
-and `bindD` cannot know what to ask until the previous answer arrives —
-so the interpreter is one statement per round. Pipelining (independent
-fetches sharing rounds via libpq pipeline mode) is *applicative*
-structure, retired with the `seq` constructor; it returns with the
-free-applicative layer over this monad. -/
+and the derived bind cannot know what to ask until the previous answer
+arrives — so the op handler runs one statement per round. Pipelining
+(independent fetches sharing rounds via libpq pipeline mode) is
+*applicative* structure; it returns with the free-applicative layer
+over this monad. -/
 
-private def interp (conn : Pg.Conn) (ps : ParamEnv c.params) :
-    {r' : Grade} → {β : Type} → {w : Wp β} → DbP c r' β w → IO β
-  | _, _, _, .pure a => Pure.pure a
-  | _, _, _, .fetch q => conn.query q ps
-  | _, _, _, .fetchCell sc => conn.queryCell sc ps
-  | _, _, _, .insert (inst := _) i => conn.execInsert i ps
-  | _, _, _, .update (inst := _) u => conn.execUpdate u ps
-  | _, _, _, .delete (inst := _) d => conn.execDelete d ps
-  | _, _, _, .insertSelect (inst := _) st => conn.execInsertSelect st ps
-  | _, _, _, .insertValues (inst := _) st => conn.execInsertValues st ps
-  | _, _, _, .bindD x f _ _ => do interp conn ps (f (← interp conn ps x))
-  | _, _, _, .weakenP _ x => interp conn ps x
+private def ops (conn : Pg.Conn) (ps : ParamEnv c.params) :
+    {β : Type} → DbE c β → IO β
+  | _, .fetch q => conn.query q ps
+  | _, .fetchCell sc => conn.queryCell sc ps
+  | _, .insert (inst := _) i => conn.execInsert i ps
+  | _, .update (inst := _) u => conn.execUpdate u ps
+  | _, .delete (inst := _) d => conn.execDelete d ps
+  | _, .insertSelect (inst := _) st => conn.execInsertSelect st ps
+  | _, .insertValues (inst := _) st => conn.execInsertValues st ps
 
 end Pg
 
 /-- Interpret a `Db` program against live PostgreSQL, one statement
-per round, gated by the usual budget obligation: `by decide` for closed
-grades, a caller-supplied proof otherwise. -/
-def DbP.execPg {w : Wp α} (f : DbP c r α w) (conn : Pg.Conn) (budget : Nat)
+per round, gated by the usual budget obligation: silent for closed
+bills, a caller-supplied proof otherwise. -/
+def DbP.execPg {w : Wp α} (f : DbP c α w) (conn : Pg.Conn) (budget : Nat)
     (ps : ParamEnv c.params := by exact .nil)
+    {r : Grade} [HasBill w r]
     (_h : r ≤ Grade.nat budget := by
       try simp only [Grade.ofNat_eq_nat, Grade.nat_add,
         Grade.nat_mul, Grade.nat_one_mul, Grade.mul_nat_one,
@@ -236,12 +234,12 @@ def DbP.execPg {w : Wp α} (f : DbP c r α w) (conn : Pg.Conn) (budget : Nat)
         | exact Grade.le_refl _
         | (apply Grade.nat_le_nat; omega)
         | assumption) : IO α :=
-  Pg.interp conn ps f
+  FreerD.foldM (E := DbE c) (fun e => Pg.ops conn ps e) f
 
 /-- The unchecked door over the wire: no budget, no obligation — the
 explicit opt-out, same as the in-memory `execAll`. -/
-def DbP.execPgAll {w : Wp α} (f : DbP c r α w) (conn : Pg.Conn)
+def DbP.execPgAll {w : Wp α} (f : DbP c α w) (conn : Pg.Conn)
     (ps : ParamEnv c.params := by exact .nil) : IO α :=
-  Pg.interp conn ps f
+  FreerD.foldM (E := DbE c) (fun e => Pg.ops conn ps e) f
 
 end LeanLinq

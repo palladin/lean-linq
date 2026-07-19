@@ -265,9 +265,8 @@ theorem nat_mul (a b : Nat) : nat a * nat b = nat (a * b) := by
 
 /-! ## The evaluation homomorphism — `mul_le_mul_left`'s ledger
 
-`bindD` + σ-conditional evidence is the composition story, and the
-loop's evidence transports through multiplication:
-`k * nat len ≤ k * gcard` from `fetch`'s contract. Monotonicity of `*`
+Sequencing composes bills, and the loop's proof transports through
+multiplication: `k * nat len ≤ k * gcard` from `fetch`'s contract. Monotonicity of `*`
 under the semantic order needs evaluation to commute with the smart
 multiplication — through `normM`, `mkPolys`, and the pairwise max-set
 product. Proved bottom-up, all in `Nat`. -/
@@ -500,7 +499,7 @@ theorem eval_mono {σ₁ σ₂ : String → Nat} (h : ∀ x, σ₁ x ≤ σ₂ x
       exact maxE_mono h ps
 
 /-- Multiplication is monotone under the semantic order — the transport
-`bindD`'s evidence rides through (`k * nat len ≤ k * gcard` from
+the loop's bill proof rides through (`k * nat len ≤ k * gcard` from
 `fetch`'s contract). -/
 theorem mul_le_mul_left (k : Grade) {a b : Grade} (h : a ≤ b) :
     k * a ≤ k * b := by

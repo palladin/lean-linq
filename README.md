@@ -97,9 +97,9 @@ its `.val` fuses into `DbP.forRows`, whose budget proof *is* the refinement
 — grade `m + k * n`, closed, silent; and the plain spelling needs no bound at
 all — `let xs ← q.execQuery` then `for p in xs do body` fuses into `forFetched`,
 because `fetch` carries as its postcondition that the rows fit `q.gcard` at every
-size valuation σ, and the dependent bind (`bindD`) takes evidence *conditional on
-that postcondition* — the loop's budget proof consumes the contract and
-transports it through the evaluation homomorphism, grade `1 + k * q.gcard` in the
+size valuation σ — and the graded spec threads σ, so the loop's budget proof
+consumes the contract exactly where it was measured and transports it through
+the evaluation homomorphism, grade `1 + k * q.gcard` in the
 database's own terms. `exec budget` refuses a symbolic grade statically (no
 number dominates a table symbol); the sized door `execWithin` collapses the
 polynomial against the live database's own sizes and checks *before* interpreting

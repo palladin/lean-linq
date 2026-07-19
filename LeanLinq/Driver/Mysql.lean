@@ -165,25 +165,23 @@ def Conn.execInsertValues (conn : Conn) (st : InsertValuesStmt c n s)
 
 /-! ## `Db` interpretation (sequential, one statement per round) -/
 
-private def interp (conn : Conn) (ps : ParamEnv c.params) :
-    {r' : Grade} → {β : Type} → {w : Wp β} → DbP c r' β w → IO β
-  | _, _, _, .pure a => Pure.pure a
-  | _, _, _, .fetch q => conn.query q ps
-  | _, _, _, .fetchCell sc => conn.queryCell sc ps
-  | _, _, _, .insert (inst := _) i => conn.execInsert i ps
-  | _, _, _, .update (inst := _) u => conn.execUpdate u ps
-  | _, _, _, .delete (inst := _) d => conn.execDelete d ps
-  | _, _, _, .insertSelect (inst := _) st => conn.execInsertSelect st ps
-  | _, _, _, .insertValues (inst := _) st => conn.execInsertValues st ps
-  | _, _, _, .bindD x f _ _ => do interp conn ps (f (← interp conn ps x))
-  | _, _, _, .weakenP _ x => interp conn ps x
+private def ops (conn : Conn) (ps : ParamEnv c.params) :
+    {β : Type} → DbE c β → IO β
+  | _, .fetch q => conn.query q ps
+  | _, .fetchCell sc => conn.queryCell sc ps
+  | _, .insert (inst := _) i => conn.execInsert i ps
+  | _, .update (inst := _) u => conn.execUpdate u ps
+  | _, .delete (inst := _) d => conn.execDelete d ps
+  | _, .insertSelect (inst := _) st => conn.execInsertSelect st ps
+  | _, .insertValues (inst := _) st => conn.execInsertValues st ps
 
 end Mysql
 
 /-- Interpret a `Db` program against live MySQL, one statement per round,
 gated by the usual budget obligation. -/
-def DbP.execMy {w : Wp α} (f : DbP c r α w) (conn : Mysql.Conn) (budget : Nat)
+def DbP.execMy {w : Wp α} (f : DbP c α w) (conn : Mysql.Conn) (budget : Nat)
     (ps : ParamEnv c.params := by exact .nil)
+    {r : Grade} [HasBill w r]
     (_h : r ≤ Grade.nat budget := by
       try simp only [Grade.ofNat_eq_nat, Grade.nat_add,
         Grade.nat_mul, Grade.nat_one_mul, Grade.mul_nat_one,
@@ -192,11 +190,11 @@ def DbP.execMy {w : Wp α} (f : DbP c r α w) (conn : Mysql.Conn) (budget : Nat)
         | exact Grade.le_refl _
         | (apply Grade.nat_le_nat; omega)
         | assumption) : IO α :=
-  Mysql.interp conn ps f
+  FreerD.foldM (E := DbE c) (fun e => Mysql.ops conn ps e) f
 
 /-- The unchecked door over the wire: no budget, no obligation. -/
-def DbP.execMyAll {w : Wp α} (f : DbP c r α w) (conn : Mysql.Conn)
+def DbP.execMyAll {w : Wp α} (f : DbP c α w) (conn : Mysql.Conn)
     (ps : ParamEnv c.params := by exact .nil) : IO α :=
-  Mysql.interp conn ps f
+  FreerD.foldM (E := DbE c) (fun e => Mysql.ops conn ps e) f
 
 end LeanLinq
