@@ -10,9 +10,14 @@ inductive CmpOp where
   | eq | ne | lt | le | gt | ge
   deriving DecidableEq, Repr
 
-inductive AggOp where
-  | sum | avg | min | max
-  deriving DecidableEq, Repr
+/-- An aggregate carries its admissible input type into both grouped and
+scalar query nodes. SUM/AVG require numeric input; MIN/MAX retain the input's
+ordering. Result nullability is tracked by the containing expression/query. -/
+inductive Aggregate : SqlPrim → Type where
+  | sum [numeric : SqlNumeric t] : Aggregate t
+  | avg [numeric : SqlNumeric t] : Aggregate t
+  | min : Aggregate t
+  | max : Aggregate t
 
 inductive DateUnit where
   | day | month | year
@@ -50,8 +55,8 @@ are never NULL, column references carry their declared flag, operators OR
 their operands' flags (SQL's NULL propagation), aggregates may be NULL
 (empty group), `isNull` is never NULL. The context index `ts` is fixed
 across a whole query, so the tables referenced by any embedded subquery are
-`HasTable`-checked against the same context. Numeric operators are
-constrained at the notation layer; the raw constructors are internal.
+`HasTable`-checked against the same context. Arithmetic and numeric scalar
+functions require `SqlNumeric` at their constructors, including the raw AST.
 
 Subqueries (`inSub`/`existsSub`/`scalarSub`) are stored **structurally** —
 the whole AST is one mutual family, so a correlated subquery is simply a
@@ -95,7 +100,7 @@ inductive SqlExprP (ρ : Schema → Type) (ts : Ctx) : SqlType → Type where
   -- including the literal parameters belonging to a computed key.
   | groupKey (index : Nat) : SqlExprP ρ ts c → SqlExprP ρ ts c
   -- operators: flags OR (SQL NULL propagation)
-  | arith (op : ArithOp) : SqlExprP ρ ts c → SqlExprP ρ ts c → SqlExprP ρ ts c
+  | arith (op : ArithOp) [numeric : SqlNumeric c.ty] : SqlExprP ρ ts c → SqlExprP ρ ts c → SqlExprP ρ ts c
   -- text/comparison/branch operators take operands at the nullable flag
   -- (strict operands widen via coercion): `String`/`Bool` literals have no
   -- default-instance channel, so a free flag metavariable on an operand
@@ -128,14 +133,15 @@ inductive SqlExprP (ρ : Schema → Type) (ts : Ctx) : SqlType → Type where
       SqlExprP ρ ts ⟨t, true⟩
   -- aggregates (meaningful in grouped selects / HAVING / scalar queries):
   -- SUM/AVG/MIN/MAX over an empty group are NULL; COUNT never is
-  | aggE (op : AggOp) : SqlExprP ρ ts ⟨t, n⟩ → SqlExprP ρ ts ⟨t, true⟩
+  | aggE (op : Aggregate t) : SqlExprP ρ ts ⟨t, n⟩ → SqlExprP ρ ts ⟨t, true⟩
   | countAll : SqlExprP ρ ts .int
-  -- functions: propagate their operands' flags
-  | abs : SqlExprP ρ ts c → SqlExprP ρ ts c
-  | round : SqlExprP ρ ts c → Int → SqlExprP ρ ts c
-  | ceiling : SqlExprP ρ ts c → SqlExprP ρ ts c
-  | floor : SqlExprP ρ ts c → SqlExprP ρ ts c
-  | substring : SqlExprP ρ ts ⟨.string, n⟩ → Int → Int → SqlExprP ρ ts ⟨.string, n⟩
+  -- Numeric functions preserve type/nullability and require numeric operands.
+  | abs [numeric : SqlNumeric c.ty] : SqlExprP ρ ts c → SqlExprP ρ ts c
+  | round [numeric : SqlNumeric c.ty] : SqlExprP ρ ts c → Int → SqlExprP ρ ts c
+  | ceiling [numeric : SqlNumeric c.ty] : SqlExprP ρ ts c → SqlExprP ρ ts c
+  | floor [numeric : SqlNumeric c.ty] : SqlExprP ρ ts c → SqlExprP ρ ts c
+  -- A signed start is meaningful; a negative length is never permitted.
+  | substring : SqlExprP ρ ts ⟨.string, n⟩ → Int → Nat → SqlExprP ρ ts ⟨.string, n⟩
   | upper : SqlExprP ρ ts ⟨.string, n⟩ → SqlExprP ρ ts ⟨.string, n⟩
   | lower : SqlExprP ρ ts ⟨.string, n⟩ → SqlExprP ρ ts ⟨.string, n⟩
   | trim : SqlExprP ρ ts ⟨.string, n⟩ → SqlExprP ρ ts ⟨.string, n⟩
@@ -243,7 +249,7 @@ inductive QueryP (ρ : Schema → Type) (ts : Ctx) : Schema → Type where
 nullability: SUM/AVG/MIN/MAX over an empty group are NULL; `COUNT(*)`
 never is. -/
 inductive ScalarQueryP (ρ : Schema → Type) (ts : Ctx) : SqlType → Type where
-  | aggQ (op : AggOp) {n : String} {t : SqlPrim} {nl : Bool}
+  | aggQ {n : String} {t : SqlPrim} {nl : Bool} (op : Aggregate t)
       (sp : SpineQP ρ ts .plain [(n, ⟨t, nl⟩)]) : ScalarQueryP ρ ts ⟨t, true⟩
   | countQ {s : Schema} (sp : SpineQP ρ ts .plain s) : ScalarQueryP ρ ts .int
 

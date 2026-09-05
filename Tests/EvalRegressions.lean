@@ -73,8 +73,10 @@ def noGroups := base.groupBy (fun r => ![r["k"].as "k"])
 #guard sqlSubstring "abcdef" (-2) 3 == ""
 #guard sqlSubstring "abcdef" (-2) 5 == "ab"
 #guard sqlSubstring "abcdef" 2 3 == "bcd"
-#guard ((SqlExpr.str "abcdef" : SqlExpr C .string).substring 1 (-1)).evalG ee [[]] ==
-  .error (.invalidStatement "negative SUBSTRING length")
+#guard ((SqlExpr.str "abcdef" : SqlExpr C .string).substring 1 0).evalG ee [[]] ==
+  .ok (some "")
+#guard ((SqlExpr.str "abcdef" : SqlExpr C .string).substring (-2) 5).evalG ee [[]] ==
+  .ok (some "ab")
 #guard dateAddDays "0001-01-01 00:00:00" 0 == "0001-01-01 00:00:00"
 #guard dateAddYears "1000-01-01 12:34:56" (-1) == "0999-01-01 12:34:56"
 #guard dateAddMonths "0999-12-31 12:34:56" 1 == "1000-01-31 12:34:56"

@@ -88,14 +88,14 @@ private def SqlPrim.avgV : (t : SqlPrim) → List t.interp → Except EvalError 
 /-- Fold an aggregate over the non-NULL values of a group (SQL semantics:
 NULLs are ignored, an all-NULL/empty group aggregates to NULL). MIN/MAX use
 the column order, so they work for every type; SUM/AVG only for numeric. -/
-def SqlPrim.aggV : (t : SqlPrim) → AggOp → List t.interp → Except EvalError (Nullable t)
+def SqlPrim.aggV : (t : SqlPrim) → Aggregate t → List t.interp → Except EvalError (Nullable t)
   | _, _, [] => pure none
   | t, .min, v :: vs =>
       pure (some (vs.foldl (fun acc x => if t.cmpV x acc == .lt then x else acc) v))
   | t, .max, v :: vs =>
       pure (some (vs.foldl (fun acc x => if t.cmpV x acc == .gt then x else acc) v))
-  | t, .sum, vs => t.sumV vs
-  | t, .avg, vs => t.avgV vs
+  | t, .sum (numeric := _), vs => t.sumV vs
+  | t, .avg (numeric := _), vs => t.avgV vs
 
 def SqlPrim.absV : (t : SqlPrim) → t.interp → Except EvalError (Nullable t)
   | .int, a => pure (some (a.natAbs : Int))

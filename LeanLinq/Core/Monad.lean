@@ -6,7 +6,6 @@ namespace LeanLinq
 native execution boundaries; the evaluator may still interpret the tree. -/
 inductive CompileError where
   | correlatedDerivedTable (alias column : String)
-  | negativeSubstringLength (length : Int)
   | invalidAggregate (reason : String)
   | invalidGrouping (reason : String)
   deriving Repr, BEq
@@ -15,8 +14,6 @@ instance : ToString CompileError where
   toString
     | .correlatedDerivedTable alias column =>
         s!"correlated derived-table source is unsupported: {alias}.{column} references a source in the containing statement"
-    | .negativeSubstringLength length =>
-        s!"SUBSTRING length must be nonnegative, got {length}"
     | .invalidAggregate reason => s!"invalid aggregate: {reason}"
     | .invalidGrouping reason => s!"invalid grouping: {reason}"
 

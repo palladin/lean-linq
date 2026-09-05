@@ -71,12 +71,12 @@ end Query
 (the compile walk is one structural mutual ring with the expression
 compiler, so a function-valued callback would defeat the termination
 argument): the yielded row itself, `COUNT(*)`, or an aggregate over the
-row's single column. Grouped terminals own their projection and ignore
-this. -/
-inductive SelSpec where
-  | defaultSel
-  | countSel
-  | aggSel (op : AggOp)
+row's single column. The schema index keeps the aggregate input type tied to
+that column. Grouped terminals own their projection and ignore this. -/
+inductive SelSpec : Schema → Type where
+  | defaultSel : SelSpec s
+  | countSel : SelSpec s
+  | aggSel (op : Aggregate t) : SelSpec [(name, ⟨t, nullable⟩)]
 
 /-- The SELECT list of a boundary derived table: every column of the
 marker row `alias.col AS col` — rendered textually (a marker `field`
@@ -105,11 +105,6 @@ def valueWrap (isPred : Bool) (s : String) : CompileM String := do
     return s!"CASE WHEN {s} THEN 1 WHEN NOT ({s}) THEN 0 ELSE NULL END"
   else
     return s
-
-private def checkAggregateType (op : AggOp) (t : SqlPrim) : CompileM Unit := do
-  if (op == .sum || op == .avg) &&
-      !(t == .int || t == .long || t == .double || t == .decimal) then
-    recordCompileError (.invalidAggregate s!"{op.token} requires a numeric argument")
 
 /-- Simple field keys need no preprojection. MySQL's positional prepared
 parameters are distinct occurrences; SQL Server also rejects constant-only
@@ -170,7 +165,7 @@ def SqlExprP.compile : SqlExpr ts c → CompileM String
       checkFieldScope row.alias name
       if row.alias.isEmpty then quote name
       else return s!"{← quote row.alias}.{← quote name}"
-  | .arith (c := c₀) op a b  => do
+  | .arith (c := c₀) (numeric := _) op a b  => do
       -- MySQL: `/` on integers yields DECIMAL; integer division is DIV
       let tok := if (← read) == .mysql && op == .div
           && (c₀.ty == .int || c₀.ty == .long)
@@ -201,9 +196,8 @@ def SqlExprP.compile : SqlExpr ts c → CompileM String
   | .scalarSub sub => return s!"({← withCompileStatement sub.compileScalar})"
   | .caseWhen c a b =>
       return s!"CASE WHEN {← predWrap c.isPredicate (← c.compile)} THEN {← valueWrap a.isPredicate (← a.compile)} ELSE {← valueWrap b.isPredicate (← b.compile)} END"
-  | .aggE (t := t) op e => do
+  | .aggE op e => do
       checkAggregate
-      checkAggregateType op t
       let sourceArg ← withAggregateArgument do
         withoutGroupProjection do valueWrap e.isPredicate (← e.compile)
       let arg ← projectGroupValue sourceArg
@@ -211,20 +205,20 @@ def SqlExprP.compile : SqlExpr ts c → CompileM String
   | .countAll => do
       checkAggregate
       pure "COUNT(*)"
-  | .abs e         => return s!"ABS({← valueWrap e.isPredicate (← e.compile)})"
-  | .round e digits => do
+  | .abs (numeric := _) e => return s!"ABS({← valueWrap e.isPredicate (← e.compile)})"
+  | .round (numeric := _) e digits => do
       let p ← pushParam (.int digits)
       return s!"ROUND({← valueWrap e.isPredicate (← e.compile)}, {p})"
-  | .ceiling e     => do
+  | .ceiling (numeric := _) e => do
       let name := match (← read) with
         | .sqlite => "CEIL"
         | _ => "CEILING"
       return s!"{name}({← valueWrap e.isPredicate (← e.compile)})"
-  | .floor e       => return s!"FLOOR({← valueWrap e.isPredicate (← e.compile)})"
+  | .floor (numeric := _) e => return s!"FLOOR({← valueWrap e.isPredicate (← e.compile)})"
   | .substring e start len => do
       let db ← read
       let name := if db == .sqlite then "SUBSTR" else "SUBSTRING"
-      if len < 0 then recordCompileError (.negativeSubstringLength len)
+      let len : Int := len
       -- PostgreSQL/SQL Server count positions before the first character
       -- against the requested length; SQLite/MySQL use different native
       -- conventions for zero/negative starts, so lower those explicitly.
@@ -400,18 +394,15 @@ def QueryP.compileStmt : QueryA ts s → CompileM String
 WHERE conjuncts until the terminal, then assemble one flat SELECT. The third
 argument (`SelSpec`) tells a *plain* terminal what to render as its SELECT
 list; grouped terminals own their projection and ignore it. -/
-def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec → CompileM String
+def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec s → CompileM String
   | .yield r, acc, k => do
-      let (sel, tail) ← match k with
-        | .defaultSel => do
+      let (sel, tail) ← match k, r with
+        | .defaultSel, r => do
             pure (String.intercalate ", " (← r.selectList), "")
-        | .countSel => pure ("COUNT(*)", "")
-        | .aggSel op =>
-            match r with
-            | .cons e .nil => do
-                let arg ← withAggregateArgument do valueWrap e.isPredicate (← e.compile)
-                pure (s!"{op.token}({arg})", "")
-            | _ => pure ("", "")   -- unreachable: aggQ spines are single-column
+        | .countSel, _ => pure ("COUNT(*)", "")
+        | .aggSel op, .cons e .nil => do
+            let arg ← withAggregateArgument do valueWrap e.isPredicate (← e.compile)
+            pure (s!"{op.token}({arg})", "")
       let head := if acc.distinct then "SELECT DISTINCT" else "SELECT"
       let orderClause :=
         if acc.orders.isEmpty then ""
@@ -468,10 +459,11 @@ def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec → CompileM St
   | .order (g := g) ks rest, acc, k => do
       if ks.isEmpty then return ← rest.compileSpine acc k
       match k with
-      | .countSel | .aggSel _ => rest.compileSpine acc k
+      | .countSel => rest.compileSpine acc .countSel
+      | .aggSel op => rest.compileSpine acc (.aggSel op)
       | .defaultSel =>
           let rendered := String.intercalate ", " (← withAggregateContext (g == .grouped) (compileOrderKeyItems ks))
-          rest.compileSpine { acc with orders := acc.orders.push rendered } k
+          rest.compileSpine { acc with orders := acc.orders.push rendered } .defaultSel
   | .fromT (n := nm) (inst := _) _ f, acc, k => do
       let alias ← freshAlias
       let item := s!"{← quote nm} {← quote alias}"
@@ -499,9 +491,7 @@ def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec → CompileM St
 /-- Compile a scalar aggregate query. -/
 def ScalarQueryP.compileScalar : ScalarA ts c → CompileM String
   | .countQ sp => sp.compileSpine {} .countSel
-  | .aggQ (t := t) op sp => do
-      checkAggregateType op t
-      sp.compileSpine {} (.aggSel op)
+  | .aggQ op sp => sp.compileSpine {} (.aggSel op)
 
 end
 

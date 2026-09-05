@@ -245,6 +245,15 @@ the library itself always emits parameterized SQL.
   context-typed named parameters (`SqlExpr.param "minAge"`), `abs`/`round`/`ceiling`/`floor`,
   `substring`/`upper`/`lower`/`trim`/`length`,
   `now`/`year`/`month`/`day`/`addDays`/`addMonths`/`addYears`/`diffDays`/`diffMonths`/`diffYears`.
+  Arithmetic and `abs`/`round`/`ceiling`/`floor` require numeric operands during
+  Lean elaboration, including when constructing raw AST nodes. `substring`
+  takes an `Int` start and a `Nat` length; negative lengths are type errors.
+  `round` precision remains an `Int`, so negative precision is accepted.
+  Aggregate operators carry their input type as `Aggregate t`: `sum` and `avg`
+  require `SqlNumeric t` in both raw grouped and scalar query constructors.
+  `min` and `max` preserve the existing input-type rules. The compiler and
+  evaluator retain the operator's input type, so numeric aggregate validation
+  happens during Lean elaboration.
 - **Queries**: `from'`/`where'`/`select`, `innerJoin`/`leftJoin` (fuse into one
   statement), `orderBy` (multi-key, fuses), `distinct`, `limitOffset`,
   `groupBy`/`having`/grouped `select` with aggregates (`a.count`, `a.sum`, …),

@@ -81,7 +81,7 @@ def SqlExprP.evalG {c : SqlType} (ee : EvalEnv ts) : List Scope → SqlExpr ts c
           match sc.get? row.alias name t' with
           | some cell => pure cell
           | none => .error (.internal s!"unresolved field {row.alias}.{name}")
-  | scs, .arith (c := c₀) op a b => do
+  | scs, .arith (c := c₀) (numeric := _) op a b => do
       strict2 (← a.evalG ee scs) (← b.evalG ee scs) (c₀.ty.arithV op)
   | scs, .concat a b => do
       strict2 (← a.evalG ee scs) (← b.evalG ee scs) fun x y => pure (some (x ++ y))
@@ -148,14 +148,13 @@ def SqlExprP.evalG {c : SqlType} (ee : EvalEnv ts) : List Scope → SqlExpr ts c
   | scs, .aggE (t := t₁) op e => do
       t₁.aggV op ((← scs.mapM fun sc => e.evalG ee [sc]).filterMap id)
   | scs, .countAll => pure (some (scs.length : Int))
-  | scs, .abs (c := c₀) e => do strict1 (← e.evalG ee scs) c₀.ty.absV
-  | scs, .round (c := c₀) e digits => do strict1 (← e.evalG ee scs) (c₀.ty.roundV digits)
-  | scs, .ceiling (c := c₀) e => do strict1 (← e.evalG ee scs) c₀.ty.ceilV
-  | scs, .floor (c := c₀) e => do strict1 (← e.evalG ee scs) c₀.ty.floorV
+  | scs, .abs (c := c₀) (numeric := _) e => do strict1 (← e.evalG ee scs) c₀.ty.absV
+  | scs, .round (c := c₀) (numeric := _) e digits => do strict1 (← e.evalG ee scs) (c₀.ty.roundV digits)
+  | scs, .ceiling (c := c₀) (numeric := _) e => do strict1 (← e.evalG ee scs) c₀.ty.ceilV
+  | scs, .floor (c := c₀) (numeric := _) e => do strict1 (← e.evalG ee scs) c₀.ty.floorV
   | scs, .substring e start len => do
       strict1 (← e.evalG ee scs) fun s =>
-        if len < 0 then .error (.invalidStatement "negative SUBSTRING length")
-        else pure (some (sqlSubstring s start len))
+        pure (some (sqlSubstring s start len))
   | scs, .upper e => do pure ((← e.evalG ee scs).map (·.toUpper))
   | scs, .lower e => do pure ((← e.evalG ee scs).map (·.toLower))
   | scs, .trim e => do pure ((← e.evalG ee scs).map sqlTrim)

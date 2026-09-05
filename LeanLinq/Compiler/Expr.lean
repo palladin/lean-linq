@@ -8,8 +8,11 @@ def ArithOp.token : ArithOp → String
 def CmpOp.token : CmpOp → String
   | .eq => "=" | .ne => "<>" | .lt => "<" | .le => "<=" | .gt => ">" | .ge => ">="
 
-def AggOp.token : AggOp → String
-  | .sum => "SUM" | .avg => "AVG" | .min => "MIN" | .max => "MAX"
+def Aggregate.token : Aggregate t → String
+  | .sum (numeric := _) => "SUM"
+  | .avg (numeric := _) => "AVG"
+  | .min => "MIN"
+  | .max => "MAX"
 
 def DateUnit.token : DateUnit → String
   | .day => "day" | .month => "month" | .year => "year"

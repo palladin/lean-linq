@@ -5,6 +5,8 @@ import Tests.CoreRegressions
 import Tests.EvalRegressions
 import Tests.CompilerRegressions
 import Tests.GroupedRegressions
+import Tests.ScalarTyping
+import Tests.AggregateTyping
 
 /-! # Golden-test runner
 

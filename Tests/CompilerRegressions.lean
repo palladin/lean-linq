@@ -154,11 +154,7 @@ def misplacedAggregate := source.where' (fun _ => (SqlExprP.countAll : SqlExprP 
 
 def substringZero := source.select (fun _ => ![(SqlExpr.str "abcd" |>.substring 0 2).as "Text"])
 def substringNegative := source.select (fun _ => ![(SqlExpr.str "abcd" |>.substring (-1) 3).as "Text"])
-def substringInvalid := source.select (fun _ => ![(SqlExpr.str "abcd" |>.substring 1 (-1)).as "Text"])
 #guard substringZero.toSql.params == #[ (":p0", .int 1), (":p1", .int 1), (":p2", .string "abcd") ]
 #guard substringNegative.toSql.params == substringZero.toSql.params
-#guard match substringInvalid.toSqlChecked with
-  | .error (.negativeSubstringLength (-1)) => true
-  | _ => false
 
 end CompilerRegressions

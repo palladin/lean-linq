@@ -12,12 +12,12 @@ inductive SqlPrim where
   | guid
   deriving DecidableEq, Repr
 
-/-- The numeric primitives accepted by SUM and AVG. -/
+/-- The numeric primitives accepted by arithmetic, scalar functions, SUM and AVG. -/
 def SqlPrim.isNumeric : SqlPrim → Bool
   | .int | .long | .double | .decimal => true
   | _ => false
 
-/-- Numeric aggregate arguments are checked at elaboration. -/
+/-- Numeric arguments are checked at elaboration, including raw scalar AST nodes. -/
 class SqlNumeric (t : SqlPrim) : Prop where
   valid : t.isNumeric = true
 
