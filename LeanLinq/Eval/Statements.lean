@@ -8,8 +8,10 @@ applies in memory. The target table is read and written through its
 `HasTable` instance — resolution happened at elaboration, so applying a
 statement to a database lacking its table is a type error, not a silent
 no-op. WHERE follows the same three-valued discipline as queries (a row is
-affected only when the predicate is `some true`); rows are addressed via the
-empty-alias marker row, exactly as the statement compiler renders them. -/
+affected only when the predicate is `some true`). The target marker is `a0`,
+matching the first fresh alias reserved by public statement compilation.
+Callbacks therefore observe the same target binding in either interpretation;
+nested query aliases begin at `a1` from the singleton target scope. -/
 
 namespace LeanLinq
 
@@ -68,9 +70,9 @@ def UpdateStmt.applyCount (u : UpdateStmt ts n s) [inst : HasTable ts.tables n s
   if u.sets.isEmpty then
     throw (.invalidStatement "UPDATE with no assignments")
   let ee : EvalEnv ts := ⟨env, ps, now⟩
-  let marker := Row.ofAlias "" s
+  let marker := Row.ofAlias "a0" s
   let rcs ← (inst.rows env).mapM fun v => do
-    let sc : Scope := [("", ⟨s, v⟩)]
+    let sc : Scope := [("a0", ⟨s, v⟩)]
     let hit ← match u.where? with
       | none => pure true
       | some p => do pure ((← (p marker).evalG ee [sc]) == some true)
@@ -94,12 +96,12 @@ def DeleteStmt.applyCount (d : DeleteStmt ts n s) [inst : HasTable ts.tables n s
     (now : Option String := none) :
     Except EvalError (TableEnv ts.tables × Nat) := do
   let ee : EvalEnv ts := ⟨env, ps, now⟩
-  let marker := Row.ofAlias "" s
+  let marker := Row.ofAlias "a0" s
   let rows ← (inst.rows env).filterM fun v => do
     match d.where? with
     | none => pure false                -- unconditional DELETE clears the table
     | some p =>
-        let sc : Scope := [("", ⟨s, v⟩)]
+        let sc : Scope := [("a0", ⟨s, v⟩)]
         pure ((← (p marker).evalG ee [sc]) != some true)
   pure (inst.set env rows, (inst.rows env).length - rows.length)
 

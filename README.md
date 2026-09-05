@@ -316,9 +316,9 @@ Manually eliminating a public wrapper exposes the intrinsic grouped AST; it
 does not convert the value into a row expression or an aggregate operand.
 The fresh scope type `κ` additionally prevents mixing public callbacks. Raw
 key references are local references interpreted by their current grouped
-terminal; they do not retain a particular callback's identity. Outer-row
-captures inside aggregate arguments and unsupported derived-table correlation
-still require checked compilation before native execution.
+terminal; they do not retain a particular callback's identity. Aggregate inputs
+can capture outer rows, including through expression subqueries. Unsupported
+derived-table correlation still requires checked compilation before execution.
 
 Explicit grouped type annotations now include the key schema:
 `GroupExprP κ ρ ts ks c` and `GroupRowP κ ρ ts ks s`. Query callbacks normally
@@ -328,12 +328,12 @@ This changes the grouped API: replace lists of `.key` expressions with named
 row literals, and replace `a.sum r["Amount"]` in pipeline callbacks with
 `a.sum (fun r => r["Amount"])`. Computed keys are accessed by their chosen name:
 grouping by `![(r["Age"] + 1).as "NextAge"]` exposes `k["NextAge"]`, without
-exposing `k["Age"]`. The compiler preserves the key's parameter identities when
-rendering it in multiple SQL clauses. MySQL and SQL Server compute these keys
-in an inner projection before grouping; MySQL preserves that boundary to keep
-prepared `HAVING` comparisons consistent. Computed-key queries can therefore
-require an extra materialization step on MySQL. Simple column keys retain their
-existing SQL shape.
+exposing `k["Age"]`. The compiler projects grouping keys and aggregate inputs
+before aggregation on every dialect. SELECT, HAVING, and ORDER BY then refer
+to those projected columns, preserving key parameter identities across clauses.
+Scalar SUM/AVG/MIN/MAX use the same input projection, so an outer-row capture is
+evaluated for each input row of its own query. MySQL preserves the projection
+boundary, which can require an extra materialization step.
 
 Queries **normalize at construction time** (`Query.bind`, the comprehension monad):
 `where'` splices a conjunct, `select` replaces the projection, joins extend the FROM clause,
@@ -392,10 +392,10 @@ customers.insert (ts := MyDb)
 customers.update (ts := MyDb)
   |>.setWith "Age" (fun c => c["Age"] + 1)
   |>.where' (fun c => c["Id"] ==. 200)
--- UPDATE "Customers" SET "Age" = ("Age" + :p0) WHERE ("Id" = :p1)
+-- UPDATE "Customers" AS "a0" SET "Age" = ("a0"."Age" + :p0) WHERE ("a0"."Id" = :p1)
 
 customers.delete (ts := MyDb) |>.where' (fun c => c["Age"] <. 18)
--- DELETE FROM "Customers" WHERE ("Age" < :p0)
+-- DELETE FROM "Customers" AS "a0" WHERE ("a0"."Age" < :p0)
 ```
 
 ## Executing for real: the native drivers
@@ -417,12 +417,14 @@ def demo : IO Unit := do
   `q.toSqlChecked dialect` (and corresponding scalar/statement methods), which
   return `Except CompileError CompiledSql`. Use that entry point when passing
   SQL to another driver. `toSql` remains the pure, unchecked rendering API for
-  inspection and compatibility. In particular, a correlated query used as a
-  derived FROM source is rejected when it crosses a query boundary; ordinary
-  correlated expression subqueries remain supported. Aggregate arguments cannot
-  capture outer query rows: engines can assign such aggregates to the outer
-  query and change its cardinality. Correlated filters with local aggregate
-  arguments remain supported.
+  inspection and compatibility. A derived FROM source is rejected when it
+  captures a sibling source in its containing statement; correlated expression
+  subqueries remain supported. Aggregate arguments may
+  capture outer rows or contain subqueries: the compiler first projects their
+  values inside the owning query, then aggregates those columns. This preserves
+  empty-input behavior and keeps the aggregate attached to its declared query.
+  UPDATE and DELETE give the target row an explicit alias so such captures
+  also refer to the correct row in statement callbacks.
 - **Parameters are bound natively**, and there are two kinds. *User parameters*
   (`Ctx.params`) are the query's typed interface — declared names whose values the
   caller supplies at execution, read from the same typed `ParamEnv c.params` by the

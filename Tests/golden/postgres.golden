@@ -35,17 +35,17 @@ FromWhereIsNotNull	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS
 FromWhereIsNullInt	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE "a0"."Age" IS NULL	
 FromWhereIsNotNullInt	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE "a0"."Age" IS NOT NULL	
 FromWhereIsNullCombined	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Name" IS NULL AND "a0"."Age" IS NOT NULL)	
-FromWhereAgeGreaterThanSum	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Age" > (SELECT SUM("a1"."Age") FROM "customers" "a1"))	
-SumAges	SELECT SUM("a0"."Age") FROM "customers" "a0"	
+FromWhereAgeGreaterThanSum	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Age" > (SELECT SUM("a2"."value") FROM (SELECT "a1"."Age" AS "value" FROM "customers" "a1") "a2"))	
+SumAges	SELECT SUM("a1"."value") FROM (SELECT "a0"."Age" AS "value" FROM "customers" "a0") "a1"	
 CountCustomers	SELECT COUNT(*) FROM "customers" "a0"	
 CountActiveCustomers	SELECT COUNT(*) FROM "customers" "a0" WHERE ("a0"."Age" >= :p0)	:p0=int 18
-SumPrices	SELECT SUM("a0"."Price") FROM "products" "a0"	
-AvgPrices	SELECT AVG("a0"."Price") FROM "products" "a0"	
-MinPrice	SELECT MIN("a0"."Price") FROM "products" "a0"	
-MaxPrice	SELECT MAX("a0"."Price") FROM "products" "a0"	
-SumExpensivePrices	SELECT SUM("a0"."Price") FROM "products" "a0" WHERE ("a0"."Price" > :p0)	:p0=decimal 100.0
-AvgExpensivePrices	SELECT AVG("a0"."Price") FROM "products" "a0" WHERE ("a0"."Price" > :p0)	:p0=decimal 100.0
-FromWhereAgeGreaterThanAverageAge	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Age" > (SELECT SUM("a1"."Age") FROM "customers" "a1"))	
+SumPrices	SELECT SUM("a1"."value") FROM (SELECT "a0"."Price" AS "value" FROM "products" "a0") "a1"	
+AvgPrices	SELECT AVG("a1"."value") FROM (SELECT "a0"."Price" AS "value" FROM "products" "a0") "a1"	
+MinPrice	SELECT MIN("a1"."value") FROM (SELECT "a0"."Price" AS "value" FROM "products" "a0") "a1"	
+MaxPrice	SELECT MAX("a1"."value") FROM (SELECT "a0"."Price" AS "value" FROM "products" "a0") "a1"	
+SumExpensivePrices	SELECT SUM("a1"."value") FROM (SELECT "a0"."Price" AS "value" FROM "products" "a0" WHERE ("a0"."Price" > :p0)) "a1"	:p0=decimal 100.0
+AvgExpensivePrices	SELECT AVG("a1"."value") FROM (SELECT "a0"."Price" AS "value" FROM "products" "a0" WHERE ("a0"."Price" > :p0)) "a1"	:p0=decimal 100.0
+FromWhereAgeGreaterThanAverageAge	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Age" > (SELECT SUM("a2"."value") FROM (SELECT "a1"."Age" AS "value" FROM "customers" "a1") "a2"))	
 FromWhereAgeIn	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE "a0"."Age" IN (:p0, :p1, :p2, :p3)	:p0=int 18; :p1=int 21; :p2=int 25; :p3=int 30
 FromWhereAgeInSubquery	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE "a0"."Age" IN (SELECT "a1"."Age" AS "Age" FROM "customers" "a1" WHERE ("a1"."Name" = :p0))	:p0=string "VIP"
 FromWhereAgeInSubqueryWithClosure	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE "a0"."Age" IN (SELECT "a1"."Age" AS "Age" FROM "customers" "a1" WHERE ("a1"."Name" = ("a0"."Name" || :p0)))	:p0=string "_VIP"
@@ -62,7 +62,7 @@ DateTimeAddMonthsClamp	SELECT (:p1 + INTERVAL '1 month') AS "Clamped" FROM "prod
 UnionThenIntersect	SELECT "a2"."Id" AS "Id" FROM (SELECT "a0"."Id" AS "Id" FROM "customers" "a0" WHERE ("a0"."Id" = :p0) UNION SELECT "a1"."Id" AS "Id" FROM "customers" "a1" WHERE ("a1"."Id" = :p1)) "a2" INTERSECT SELECT "a3"."Id" AS "Id" FROM "customers" "a3" WHERE ("a3"."Id" = :p2)	:p0=long 3; :p1=long 1; :p2=long 1
 ExceptNested	SELECT "a0"."Id" AS "Id" FROM "customers" "a0" EXCEPT SELECT "a3"."Id" AS "Id" FROM (SELECT "a1"."Id" AS "Id" FROM "customers" "a1" WHERE ("a1"."Id" = :p0) EXCEPT SELECT "a2"."Id" AS "Id" FROM "customers" "a2" WHERE ("a2"."Id" = :p1)) "a3"	:p0=long 1; :p1=long 1
 UnionWithLimitOperand	SELECT "a1"."Id" AS "Id" FROM (SELECT "a0"."Id" AS "Id" FROM "customers" "a0" ORDER BY "a0"."Id" ASC NULLS FIRST LIMIT 1) "a1" UNION SELECT "a2"."Id" AS "Id" FROM "customers" "a2" WHERE ("a2"."Id" = :p0)	:p0=long 3
-FromOrderByGroupBySelect	SELECT "a0"."Age" AS "Age", COUNT(*) AS "N" FROM "customers" "a0" GROUP BY "a0"."Age"	
+FromOrderByGroupBySelect	SELECT "a1"."g0" AS "Age", COUNT(*) AS "N" FROM (SELECT "a0"."Age" AS "g0" FROM "customers" "a0") "a1" GROUP BY "a1"."g0"	
 FromWhereBoolColumnAnd	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE ("a0"."IsActive" AND ("a0"."Age" >= :p0))	:p0=int 18
 LeftJoinOrderByNullableKey	SELECT "a0"."Name" AS "Name", "a1"."Amount" AS "Amount" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") ORDER BY "a1"."Amount" ASC NULLS FIRST, "a0"."Name" ASC NULLS FIRST	
 MeasurementsSelect	SELECT "a0"."Id" AS "Id", "a0"."Value" AS "Value", "a0"."Factor" AS "Factor" FROM "measurements" "a0" ORDER BY "a0"."Id" ASC NULLS FIRST	
@@ -70,17 +70,17 @@ MeasurementsArith	SELECT "a0"."Id" AS "Id", (("a0"."Value" * :p0) + :p1) AS "Sca
 MeasurementsCompare	SELECT "a0"."Id" AS "Id", "a0"."Value" AS "Value" FROM "measurements" "a0" WHERE ("a0"."Value" > :p0)	:p0=double 1.000000
 MeasurementsFactorNull	SELECT "a0"."Id" AS "Id" FROM "measurements" "a0" WHERE "a0"."Factor" IS NULL	
 MeasurementsOrderByFactor	SELECT "a0"."Id" AS "Id", "a0"."Factor" AS "Factor" FROM "measurements" "a0" ORDER BY "a0"."Factor" ASC NULLS FIRST, "a0"."Id" ASC NULLS FIRST	
-MeasurementsSum	SELECT SUM("a0"."Value") FROM "measurements" "a0"	
-MeasurementsAvg	SELECT AVG("a0"."Value") FROM "measurements" "a0"	
-MeasurementsMin	SELECT MIN("a0"."Value") FROM "measurements" "a0"	
-MeasurementsMax	SELECT MAX("a0"."Value") FROM "measurements" "a0"	
+MeasurementsSum	SELECT SUM("a1"."value") FROM (SELECT "a0"."Value" AS "value" FROM "measurements" "a0") "a1"	
+MeasurementsAvg	SELECT AVG("a1"."value") FROM (SELECT "a0"."Value" AS "value" FROM "measurements" "a0") "a1"	
+MeasurementsMin	SELECT MIN("a1"."value") FROM (SELECT "a0"."Value" AS "value" FROM "measurements" "a0") "a1"	
+MeasurementsMax	SELECT MAX("a1"."value") FROM (SELECT "a0"."Value" AS "value" FROM "measurements" "a0") "a1"	
 FromSubquery	SELECT "a0"."Id" AS "Id", ("a0"."Age" + :p0) AS "NewAge" FROM "customers" "a0"	:p0=int 1
 FromWhereSelectWhereFromNested	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE ("a0"."Age" > :p0) AND ("a0"."Id" > :p1)	:p0=int 18; :p1=long 100
 FromWhereSelectWhereNested	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE ("a0"."Age" > :p0) AND ("a0"."Id" > :p1)	:p0=int 18; :p1=long 100
-FromGroupBySelect	SELECT "a0"."Age" AS "Age", COUNT(*) AS "Count" FROM "customers" "a0" GROUP BY "a0"."Age"	
-FromGroupByMultipleSelect	SELECT "a0"."Age" AS "Age", "a0"."Name" AS "Name", COUNT(*) AS "Count" FROM "customers" "a0" GROUP BY "a0"."Age", "a0"."Name"	
-FromGroupByHavingSelect	SELECT "a0"."Age" AS "Age", COUNT(*) AS "Count" FROM "customers" "a0" GROUP BY "a0"."Age" HAVING (COUNT(*) > :p0)	:p0=int 1
-FromWhereGroupBySelect	SELECT "a0"."Age" AS "Age", COUNT(*) AS "Count" FROM "customers" "a0" WHERE ("a0"."Age" >= :p0) GROUP BY "a0"."Age"	:p0=int 18
+FromGroupBySelect	SELECT "a1"."g0" AS "Age", COUNT(*) AS "Count" FROM (SELECT "a0"."Age" AS "g0" FROM "customers" "a0") "a1" GROUP BY "a1"."g0"	
+FromGroupByMultipleSelect	SELECT "a1"."g0" AS "Age", "a1"."g1" AS "Name", COUNT(*) AS "Count" FROM (SELECT "a0"."Age" AS "g0", "a0"."Name" AS "g1" FROM "customers" "a0") "a1" GROUP BY "a1"."g0", "a1"."g1"	
+FromGroupByHavingSelect	SELECT "a1"."g0" AS "Age", COUNT(*) AS "Count" FROM (SELECT "a0"."Age" AS "g0" FROM "customers" "a0") "a1" GROUP BY "a1"."g0" HAVING (COUNT(*) > :p0)	:p0=int 1
+FromWhereGroupBySelect	SELECT "a1"."g0" AS "Age", COUNT(*) AS "Count" FROM (SELECT "a0"."Age" AS "g0" FROM "customers" "a0" WHERE ("a0"."Age" >= :p0)) "a1" GROUP BY "a1"."g0"	:p0=int 18
 InnerJoinBasic	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a1"."Id" AS "OrderId", "a1"."Amount" AS "Amount" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId")	
 InnerJoinWithSelect	SELECT "a0"."Name" AS "CustomerName", "a1"."Amount" AS "OrderAmount" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId")	
 InnerJoinWithWhere	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a0"."Age" AS "Age", "a1"."Id" AS "OrderId", "a1"."Amount" AS "Amount" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") WHERE ("a0"."Age" >= :p0) AND ("a1"."Amount" > :p1)	:p0=int 18; :p1=int 100
@@ -89,27 +89,27 @@ LeftJoinBasic	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a1"."Id" AS "Ord
 LeftJoinWithSelect	SELECT ("a0"."Name" || :p0) AS "CustomerInfo", "a1"."Amount" AS "OrderAmount" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId")	:p0=string " (Customer)"
 LeftJoinWithWhere	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a0"."Age" AS "Age", "a1"."Id" AS "OrderId", "a1"."Amount" AS "OrderAmount" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") WHERE ("a0"."Age" >= :p0) AND ("a0"."Age" < :p1)	:p0=int 21; :p1=int 65
 LeftJoinWithOrderBy	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a1"."Id" AS "OrderId", "a1"."Amount" AS "Amount" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") ORDER BY "a0"."Name" ASC NULLS FIRST, "a1"."Amount" DESC NULLS LAST	
-InnerJoinWithGroupBy	SELECT "a0"."Id" AS "CustomerId", "a0"."Name" AS "CustomerName", SUM("a1"."Amount") AS "TotalAmount" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") GROUP BY "a0"."Id", "a0"."Name"	
-LeftJoinWithAggregates	SELECT "a0"."Id" AS "CustomerId", COUNT(*) AS "OrderCount", SUM("a1"."Amount") AS "TotalSpent" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") GROUP BY "a0"."Id"	
+InnerJoinWithGroupBy	SELECT "a2"."g0" AS "CustomerId", "a2"."g1" AS "CustomerName", SUM("a2"."g2") AS "TotalAmount" FROM (SELECT "a0"."Id" AS "g0", "a0"."Name" AS "g1", "a1"."Amount" AS "g2" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId")) "a2" GROUP BY "a2"."g0", "a2"."g1"	
+LeftJoinWithAggregates	SELECT "a2"."g0" AS "CustomerId", COUNT(*) AS "OrderCount", SUM("a2"."g1") AS "TotalSpent" FROM (SELECT "a0"."Id" AS "g0", "a1"."Amount" AS "g1" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId")) "a2" GROUP BY "a2"."g0"	
 MultipleInnerJoinsFusion	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a1"."ProductId" AS "OrderProductId", "a2"."ProductName" AS "ProductName" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") INNER JOIN "products" "a2" ON ("a1"."ProductId" = "a2"."Id")	
 MixedJoinTypesFusion	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a1"."ProductId" AS "OrderProductId", "a2"."ProductName" AS "ProductName" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") LEFT JOIN "products" "a2" ON ("a1"."ProductId" = "a2"."Id")	
 JoinFusionWithWhere	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a1"."Amount" AS "Amount", "a2"."ProductName" AS "ProductName" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") INNER JOIN "products" "a2" ON ("a1"."ProductId" = "a2"."Id") WHERE ("a0"."Age" >= :p0) AND ("a1"."Amount" > :p1)	:p0=int 18; :p1=int 100
-FromGroupByOrderBySelect	SELECT "a0"."CustomerId" AS "CustomerId", SUM("a0"."Amount") AS "TotalAmount" FROM "orders" "a0" GROUP BY "a0"."CustomerId" ORDER BY SUM("a0"."Amount") DESC NULLS LAST	
-FromGroupByOrderByMultipleSelect	SELECT "a0"."CustomerId" AS "CustomerId", SUM("a0"."Amount") AS "TotalAmount", COUNT(*) AS "OrderCount" FROM "orders" "a0" GROUP BY "a0"."CustomerId" ORDER BY SUM("a0"."Amount") DESC NULLS LAST, COUNT(*) ASC NULLS FIRST	
-FromGroupByOrderByThreeKeysSelect	SELECT "a0"."CustomerId" AS "CustomerId", SUM("a0"."Amount") AS "TotalAmount", COUNT(*) AS "OrderCount" FROM "orders" "a0" GROUP BY "a0"."CustomerId" ORDER BY SUM("a0"."Amount") DESC NULLS LAST, COUNT(*) ASC NULLS FIRST, "a0"."CustomerId" ASC NULLS FIRST	
-FromGroupByMultipleOrderBySelect	SELECT "a0"."Age" AS "Age", "a0"."Name" AS "Name", COUNT(*) AS "Count" FROM "customers" "a0" GROUP BY "a0"."Age", "a0"."Name" ORDER BY COUNT(*) DESC NULLS LAST	
-FromGroupByHavingOrderBySelect	SELECT "a0"."CustomerId" AS "CustomerId", SUM("a0"."Amount") AS "TotalAmount" FROM "orders" "a0" GROUP BY "a0"."CustomerId" HAVING (COUNT(*) > :p0) ORDER BY SUM("a0"."Amount") DESC NULLS LAST	:p0=int 1
-ComplexJoinWhereGroupByHavingOrderBySelect	SELECT "a0"."Id" AS "CustomerId", "a0"."Name" AS "CustomerName", COUNT(*) AS "TotalOrders", SUM("a1"."Amount") AS "TotalSpent", (SUM("a1"."Amount") / COUNT(*)) AS "AvgOrderValue" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") WHERE (("a0"."Age" >= :p0) AND ("a1"."Amount" > :p1)) GROUP BY "a0"."Id", "a0"."Name" HAVING ((COUNT(*) > :p2) AND (SUM("a1"."Amount") > :p3)) ORDER BY SUM("a1"."Amount") DESC NULLS LAST, COUNT(*) ASC NULLS FIRST	:p0=int 18; :p1=int 50; :p2=int 2; :p3=int 500
-ComplexLeftJoinWhereGroupByOrderBySelect	SELECT "a0"."Id" AS "CustomerId", "a0"."Name" AS "CustomerName", COUNT(*) AS "OrderCount", SUM("a1"."Amount") AS "TotalSpent" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") WHERE ("a0"."Age" >= :p0) GROUP BY "a0"."Id", "a0"."Name" ORDER BY SUM("a1"."Amount") DESC NULLS LAST, "a0"."Name" ASC NULLS FIRST	:p0=int 21
-FromGroupByMinMaxSelect	SELECT "a0"."CustomerId" AS "CustomerId", MIN("a0"."Amount") AS "MinAmount", MAX("a0"."Amount") AS "MaxAmount", COUNT(*) AS "OrderCount" FROM "orders" "a0" GROUP BY "a0"."CustomerId"	
-FromGroupByAvgSelect	SELECT "a0"."CustomerId" AS "CustomerId", AVG("a0"."Amount") AS "AvgAmount", COUNT(*) AS "OrderCount" FROM "orders" "a0" GROUP BY "a0"."CustomerId"	
-FromGroupByDecimalAggregatesSelect	SELECT "a0"."ProductName" AS "ProductName", SUM("a0"."Price") AS "TotalPrice", AVG("a0"."Price") AS "AvgPrice", MIN("a0"."Price") AS "MinPrice", MAX("a0"."Price") AS "MaxPrice", COUNT(*) AS "ProductCount" FROM "products" "a0" GROUP BY "a0"."ProductName"	
-FromGroupByDecimalSumSelect	SELECT "a0"."ProductName" AS "ProductName", SUM("a0"."Price") AS "TotalPrice" FROM "products" "a0" GROUP BY "a0"."ProductName"	
-FromGroupByDecimalAvgSelect	SELECT "a0"."ProductName" AS "ProductName", AVG("a0"."Price") AS "AvgPrice" FROM "products" "a0" GROUP BY "a0"."ProductName"	
-FromSelectSum	SELECT SUM("a0"."Amount") FROM "orders" "a0"	
-FromSelectAvg	SELECT AVG("a0"."Amount") FROM "orders" "a0"	
-FromSelectMin	SELECT MIN("a0"."Amount") FROM "orders" "a0"	
-FromSelectMax	SELECT MAX("a0"."Amount") FROM "orders" "a0"	
+FromGroupByOrderBySelect	SELECT "a1"."g0" AS "CustomerId", SUM("a1"."g1") AS "TotalAmount" FROM (SELECT "a0"."CustomerId" AS "g0", "a0"."Amount" AS "g1", "a0"."Amount" AS "g2" FROM "orders" "a0") "a1" GROUP BY "a1"."g0" ORDER BY SUM("a1"."g2") DESC NULLS LAST	
+FromGroupByOrderByMultipleSelect	SELECT "a1"."g0" AS "CustomerId", SUM("a1"."g1") AS "TotalAmount", COUNT(*) AS "OrderCount" FROM (SELECT "a0"."CustomerId" AS "g0", "a0"."Amount" AS "g1", "a0"."Amount" AS "g2" FROM "orders" "a0") "a1" GROUP BY "a1"."g0" ORDER BY SUM("a1"."g2") DESC NULLS LAST, COUNT(*) ASC NULLS FIRST	
+FromGroupByOrderByThreeKeysSelect	SELECT "a1"."g0" AS "CustomerId", SUM("a1"."g1") AS "TotalAmount", COUNT(*) AS "OrderCount" FROM (SELECT "a0"."CustomerId" AS "g0", "a0"."Amount" AS "g1", "a0"."Amount" AS "g2" FROM "orders" "a0") "a1" GROUP BY "a1"."g0" ORDER BY SUM("a1"."g2") DESC NULLS LAST, COUNT(*) ASC NULLS FIRST, "a1"."g0" ASC NULLS FIRST	
+FromGroupByMultipleOrderBySelect	SELECT "a1"."g0" AS "Age", "a1"."g1" AS "Name", COUNT(*) AS "Count" FROM (SELECT "a0"."Age" AS "g0", "a0"."Name" AS "g1" FROM "customers" "a0") "a1" GROUP BY "a1"."g0", "a1"."g1" ORDER BY COUNT(*) DESC NULLS LAST	
+FromGroupByHavingOrderBySelect	SELECT "a1"."g0" AS "CustomerId", SUM("a1"."g1") AS "TotalAmount" FROM (SELECT "a0"."CustomerId" AS "g0", "a0"."Amount" AS "g1", "a0"."Amount" AS "g2" FROM "orders" "a0") "a1" GROUP BY "a1"."g0" HAVING (COUNT(*) > :p0) ORDER BY SUM("a1"."g2") DESC NULLS LAST	:p0=int 1
+ComplexJoinWhereGroupByHavingOrderBySelect	SELECT "a2"."g0" AS "CustomerId", "a2"."g1" AS "CustomerName", COUNT(*) AS "TotalOrders", SUM("a2"."g2") AS "TotalSpent", (SUM("a2"."g3") / COUNT(*)) AS "AvgOrderValue" FROM (SELECT "a0"."Id" AS "g0", "a0"."Name" AS "g1", "a1"."Amount" AS "g2", "a1"."Amount" AS "g3", "a1"."Amount" AS "g4", "a1"."Amount" AS "g5" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") WHERE (("a0"."Age" >= :p0) AND ("a1"."Amount" > :p1))) "a2" GROUP BY "a2"."g0", "a2"."g1" HAVING ((COUNT(*) > :p2) AND (SUM("a2"."g4") > :p3)) ORDER BY SUM("a2"."g5") DESC NULLS LAST, COUNT(*) ASC NULLS FIRST	:p0=int 18; :p1=int 50; :p2=int 2; :p3=int 500
+ComplexLeftJoinWhereGroupByOrderBySelect	SELECT "a2"."g0" AS "CustomerId", "a2"."g1" AS "CustomerName", COUNT(*) AS "OrderCount", SUM("a2"."g2") AS "TotalSpent" FROM (SELECT "a0"."Id" AS "g0", "a0"."Name" AS "g1", "a1"."Amount" AS "g2", "a1"."Amount" AS "g3" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") WHERE ("a0"."Age" >= :p0)) "a2" GROUP BY "a2"."g0", "a2"."g1" ORDER BY SUM("a2"."g3") DESC NULLS LAST, "a2"."g1" ASC NULLS FIRST	:p0=int 21
+FromGroupByMinMaxSelect	SELECT "a1"."g0" AS "CustomerId", MIN("a1"."g1") AS "MinAmount", MAX("a1"."g2") AS "MaxAmount", COUNT(*) AS "OrderCount" FROM (SELECT "a0"."CustomerId" AS "g0", "a0"."Amount" AS "g1", "a0"."Amount" AS "g2" FROM "orders" "a0") "a1" GROUP BY "a1"."g0"	
+FromGroupByAvgSelect	SELECT "a1"."g0" AS "CustomerId", AVG("a1"."g1") AS "AvgAmount", COUNT(*) AS "OrderCount" FROM (SELECT "a0"."CustomerId" AS "g0", "a0"."Amount" AS "g1" FROM "orders" "a0") "a1" GROUP BY "a1"."g0"	
+FromGroupByDecimalAggregatesSelect	SELECT "a1"."g0" AS "ProductName", SUM("a1"."g1") AS "TotalPrice", AVG("a1"."g2") AS "AvgPrice", MIN("a1"."g3") AS "MinPrice", MAX("a1"."g4") AS "MaxPrice", COUNT(*) AS "ProductCount" FROM (SELECT "a0"."ProductName" AS "g0", "a0"."Price" AS "g1", "a0"."Price" AS "g2", "a0"."Price" AS "g3", "a0"."Price" AS "g4" FROM "products" "a0") "a1" GROUP BY "a1"."g0"	
+FromGroupByDecimalSumSelect	SELECT "a1"."g0" AS "ProductName", SUM("a1"."g1") AS "TotalPrice" FROM (SELECT "a0"."ProductName" AS "g0", "a0"."Price" AS "g1" FROM "products" "a0") "a1" GROUP BY "a1"."g0"	
+FromGroupByDecimalAvgSelect	SELECT "a1"."g0" AS "ProductName", AVG("a1"."g1") AS "AvgPrice" FROM (SELECT "a0"."ProductName" AS "g0", "a0"."Price" AS "g1" FROM "products" "a0") "a1" GROUP BY "a1"."g0"	
+FromSelectSum	SELECT SUM("a1"."value") FROM (SELECT "a0"."Amount" AS "value" FROM "orders" "a0") "a1"	
+FromSelectAvg	SELECT AVG("a1"."value") FROM (SELECT "a0"."Amount" AS "value" FROM "orders" "a0") "a1"	
+FromSelectMin	SELECT MIN("a1"."value") FROM (SELECT "a0"."Amount" AS "value" FROM "orders" "a0") "a1"	
+FromSelectMax	SELECT MAX("a1"."value") FROM (SELECT "a0"."Amount" AS "value" FROM "orders" "a0") "a1"	
 ParameterAsIntParam	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE ("a0"."Age" > :minAge)	:minAge=null
 ParameterAsStringParam	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age" FROM "customers" "a0" WHERE ("a0"."Name" = :customerName)	:customerName=null
 ParameterAsBoolParam	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a0"."Age" AS "Age" FROM "customers" "a0" WHERE (("a0"."Age" > :p0) = :isAdult)	:p0=int 18; :isAdult=null
@@ -194,10 +194,10 @@ Except	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" EXC
 LinqJoin	SELECT "a0"."Name" AS "Name", "a1"."Amount" AS "Amount" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId")	
 LinqLeftJoin	SELECT "a0"."Name" AS "Name", "a1"."Amount" AS "Amount" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId")	
 LinqOrderBy	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" ORDER BY "a0"."Name" ASC NULLS FIRST, "a0"."Age" DESC NULLS LAST	
-LinqGroupBy	SELECT "a0"."CustomerId" AS "CustomerId", SUM("a0"."Amount") AS "Total" FROM "orders" "a0" GROUP BY "a0"."CustomerId"	
-LinqGroupByHaving	SELECT "a0"."CustomerId" AS "CustomerId", SUM("a0"."Amount") AS "Total" FROM "orders" "a0" GROUP BY "a0"."CustomerId" HAVING (COUNT(*) > :p0)	:p0=int 1
+LinqGroupBy	SELECT "a1"."g0" AS "CustomerId", SUM("a1"."g1") AS "Total" FROM (SELECT "a0"."CustomerId" AS "g0", "a0"."Amount" AS "g1" FROM "orders" "a0") "a1" GROUP BY "a1"."g0"	
+LinqGroupByHaving	SELECT "a1"."g0" AS "CustomerId", SUM("a1"."g1") AS "Total" FROM (SELECT "a0"."CustomerId" AS "g0", "a0"."Amount" AS "g1" FROM "orders" "a0") "a1" GROUP BY "a1"."g0" HAVING (COUNT(*) > :p0)	:p0=int 1
 LinqDistinctLimit	SELECT DISTINCT "a0"."Name" AS "Name" FROM "customers" "a0" WHERE ("a0"."Age" > :p0) ORDER BY "a0"."Name" ASC NULLS FIRST LIMIT 2	:p0=int 18
-LinqComplex	SELECT "a0"."Id" AS "CustomerId", "a0"."Name" AS "CustomerName", SUM("a1"."Amount") AS "TotalSpent" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") WHERE ("a0"."Age" >= :p0) GROUP BY "a0"."Id", "a0"."Name" HAVING (COUNT(*) > :p1) ORDER BY SUM("a1"."Amount") DESC NULLS LAST	:p0=int 18; :p1=int 1
+LinqComplex	SELECT "a2"."g0" AS "CustomerId", "a2"."g1" AS "CustomerName", SUM("a2"."g2") AS "TotalSpent" FROM (SELECT "a0"."Id" AS "g0", "a0"."Name" AS "g1", "a1"."Amount" AS "g2", "a1"."Amount" AS "g3" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") WHERE ("a0"."Age" >= :p0)) "a2" GROUP BY "a2"."g0", "a2"."g1" HAVING (COUNT(*) > :p1) ORDER BY SUM("a2"."g3") DESC NULLS LAST	:p0=int 18; :p1=int 1
 LinqLimitOffset	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" ORDER BY "a0"."Id" ASC NULLS FIRST LIMIT 2 OFFSET 1	
 CFrom	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0"	
 CFromStatic	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0"	
@@ -236,17 +236,17 @@ CFromWhereIsNotNull	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" A
 CFromWhereIsNullInt	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE "a0"."Age" IS NULL	
 CFromWhereIsNotNullInt	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE "a0"."Age" IS NOT NULL	
 CFromWhereIsNullCombined	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Name" IS NULL AND "a0"."Age" IS NOT NULL)	
-CFromWhereAgeGreaterThanSum	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Age" > (SELECT SUM("a1"."Age") FROM "customers" "a1"))	
-CSumAges	SELECT SUM("a0"."Age") FROM "customers" "a0"	
+CFromWhereAgeGreaterThanSum	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Age" > (SELECT SUM("a2"."value") FROM (SELECT "a1"."Age" AS "value" FROM "customers" "a1") "a2"))	
+CSumAges	SELECT SUM("a1"."value") FROM (SELECT "a0"."Age" AS "value" FROM "customers" "a0") "a1"	
 CCountCustomers	SELECT COUNT(*) FROM "customers" "a0"	
 CCountActiveCustomers	SELECT COUNT(*) FROM "customers" "a0" WHERE ("a0"."Age" >= :p0)	:p0=int 18
-CSumPrices	SELECT SUM("a0"."Price") FROM "products" "a0"	
-CAvgPrices	SELECT AVG("a0"."Price") FROM "products" "a0"	
-CMinPrice	SELECT MIN("a0"."Price") FROM "products" "a0"	
-CMaxPrice	SELECT MAX("a0"."Price") FROM "products" "a0"	
-CSumExpensivePrices	SELECT SUM("a0"."Price") FROM "products" "a0" WHERE ("a0"."Price" > :p0)	:p0=decimal 100.0
-CAvgExpensivePrices	SELECT AVG("a0"."Price") FROM "products" "a0" WHERE ("a0"."Price" > :p0)	:p0=decimal 100.0
-CFromWhereAgeGreaterThanAverageAge	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Age" > (SELECT SUM("a1"."Age") FROM "customers" "a1"))	
+CSumPrices	SELECT SUM("a1"."value") FROM (SELECT "a0"."Price" AS "value" FROM "products" "a0") "a1"	
+CAvgPrices	SELECT AVG("a1"."value") FROM (SELECT "a0"."Price" AS "value" FROM "products" "a0") "a1"	
+CMinPrice	SELECT MIN("a1"."value") FROM (SELECT "a0"."Price" AS "value" FROM "products" "a0") "a1"	
+CMaxPrice	SELECT MAX("a1"."value") FROM (SELECT "a0"."Price" AS "value" FROM "products" "a0") "a1"	
+CSumExpensivePrices	SELECT SUM("a1"."value") FROM (SELECT "a0"."Price" AS "value" FROM "products" "a0" WHERE ("a0"."Price" > :p0)) "a1"	:p0=decimal 100.0
+CAvgExpensivePrices	SELECT AVG("a1"."value") FROM (SELECT "a0"."Price" AS "value" FROM "products" "a0" WHERE ("a0"."Price" > :p0)) "a1"	:p0=decimal 100.0
+CFromWhereAgeGreaterThanAverageAge	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Age" > (SELECT SUM("a2"."value") FROM (SELECT "a1"."Age" AS "value" FROM "customers" "a1") "a2"))	
 CFromWhereAgeIn	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE "a0"."Age" IN (:p0, :p1, :p2, :p3)	:p0=int 18; :p1=int 21; :p2=int 25; :p3=int 30
 CFromWhereAgeInSubquery	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE "a0"."Age" IN (SELECT "a1"."Age" AS "Age" FROM "customers" "a1" WHERE ("a1"."Name" = :p0))	:p0=string "VIP"
 CFromWhereAgeInSubqueryWithClosure	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE "a0"."Age" IN (SELECT "a1"."Age" AS "Age" FROM "customers" "a1" WHERE ("a1"."Name" = ("a0"."Name" || :p0)))	:p0=string "_VIP"
@@ -270,10 +270,10 @@ CMeasurementsOrderByFactor	SELECT "a0"."Id" AS "Id", "a0"."Factor" AS "Factor" F
 CFromSubquery	SELECT "a0"."Id" AS "Id", ("a0"."Age" + :p0) AS "NewAge" FROM "customers" "a0"	:p0=int 1
 CFromWhereSelectWhereFromNested	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE ("a0"."Age" > :p0) AND ("a0"."Id" > :p1)	:p0=int 18; :p1=long 100
 CFromWhereSelectWhereNested	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE ("a0"."Age" > :p0) AND ("a0"."Id" > :p1)	:p0=int 18; :p1=long 100
-CFromGroupBySelect	SELECT "a0"."Age" AS "Age", COUNT(*) AS "Count" FROM "customers" "a0" GROUP BY "a0"."Age"	
-CFromGroupByMultipleSelect	SELECT "a0"."Age" AS "Age", "a0"."Name" AS "Name", COUNT(*) AS "Count" FROM "customers" "a0" GROUP BY "a0"."Age", "a0"."Name"	
-CFromGroupByHavingSelect	SELECT "a0"."Age" AS "Age", COUNT(*) AS "Count" FROM "customers" "a0" GROUP BY "a0"."Age" HAVING (COUNT(*) > :p0)	:p0=int 1
-CFromWhereGroupBySelect	SELECT "a0"."Age" AS "Age", COUNT(*) AS "Count" FROM "customers" "a0" WHERE ("a0"."Age" >= :p0) GROUP BY "a0"."Age"	:p0=int 18
+CFromGroupBySelect	SELECT "a1"."g0" AS "Age", COUNT(*) AS "Count" FROM (SELECT "a0"."Age" AS "g0" FROM "customers" "a0") "a1" GROUP BY "a1"."g0"	
+CFromGroupByMultipleSelect	SELECT "a1"."g0" AS "Age", "a1"."g1" AS "Name", COUNT(*) AS "Count" FROM (SELECT "a0"."Age" AS "g0", "a0"."Name" AS "g1" FROM "customers" "a0") "a1" GROUP BY "a1"."g0", "a1"."g1"	
+CFromGroupByHavingSelect	SELECT "a1"."g0" AS "Age", COUNT(*) AS "Count" FROM (SELECT "a0"."Age" AS "g0" FROM "customers" "a0") "a1" GROUP BY "a1"."g0" HAVING (COUNT(*) > :p0)	:p0=int 1
+CFromWhereGroupBySelect	SELECT "a1"."g0" AS "Age", COUNT(*) AS "Count" FROM (SELECT "a0"."Age" AS "g0" FROM "customers" "a0" WHERE ("a0"."Age" >= :p0)) "a1" GROUP BY "a1"."g0"	:p0=int 18
 CInnerJoinBasic	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a1"."Id" AS "OrderId", "a1"."Amount" AS "Amount" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId")	
 CInnerJoinWithSelect	SELECT "a0"."Name" AS "CustomerName", "a1"."Amount" AS "OrderAmount" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId")	
 CInnerJoinWithWhere	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a0"."Age" AS "Age", "a1"."Id" AS "OrderId", "a1"."Amount" AS "Amount" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") WHERE ("a0"."Age" >= :p0) AND ("a1"."Amount" > :p1)	:p0=int 18; :p1=int 100
@@ -282,27 +282,27 @@ CLeftJoinBasic	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a1"."Id" AS "Or
 CLeftJoinWithSelect	SELECT ("a0"."Name" || :p0) AS "CustomerInfo", "a1"."Amount" AS "OrderAmount" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId")	:p0=string " (Customer)"
 CLeftJoinWithWhere	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a0"."Age" AS "Age", "a1"."Id" AS "OrderId", "a1"."Amount" AS "OrderAmount" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") WHERE ("a0"."Age" >= :p0) AND ("a0"."Age" < :p1)	:p0=int 21; :p1=int 65
 CLeftJoinWithOrderBy	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a1"."Id" AS "OrderId", "a1"."Amount" AS "Amount" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") ORDER BY "a0"."Name" ASC NULLS FIRST, "a1"."Amount" DESC NULLS LAST	
-CInnerJoinWithGroupBy	SELECT "a0"."Id" AS "CustomerId", "a0"."Name" AS "CustomerName", SUM("a1"."Amount") AS "TotalAmount" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") GROUP BY "a0"."Id", "a0"."Name"	
-CLeftJoinWithAggregates	SELECT "a0"."Id" AS "CustomerId", COUNT(*) AS "OrderCount", SUM("a1"."Amount") AS "TotalSpent" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") GROUP BY "a0"."Id"	
+CInnerJoinWithGroupBy	SELECT "a2"."g0" AS "CustomerId", "a2"."g1" AS "CustomerName", SUM("a2"."g2") AS "TotalAmount" FROM (SELECT "a0"."Id" AS "g0", "a0"."Name" AS "g1", "a1"."Amount" AS "g2" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId")) "a2" GROUP BY "a2"."g0", "a2"."g1"	
+CLeftJoinWithAggregates	SELECT "a2"."g0" AS "CustomerId", COUNT(*) AS "OrderCount", SUM("a2"."g1") AS "TotalSpent" FROM (SELECT "a0"."Id" AS "g0", "a1"."Amount" AS "g1" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId")) "a2" GROUP BY "a2"."g0"	
 CMultipleInnerJoinsFusion	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a1"."ProductId" AS "OrderProductId", "a2"."ProductName" AS "ProductName" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") INNER JOIN "products" "a2" ON ("a1"."ProductId" = "a2"."Id")	
 CMixedJoinTypesFusion	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a1"."ProductId" AS "OrderProductId", "a2"."ProductName" AS "ProductName" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") LEFT JOIN "products" "a2" ON ("a1"."ProductId" = "a2"."Id")	
 CJoinFusionWithWhere	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a1"."Amount" AS "Amount", "a2"."ProductName" AS "ProductName" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") INNER JOIN "products" "a2" ON ("a1"."ProductId" = "a2"."Id") WHERE ("a0"."Age" >= :p0) AND ("a1"."Amount" > :p1)	:p0=int 18; :p1=int 100
-CFromGroupByOrderBySelect	SELECT "a0"."CustomerId" AS "CustomerId", SUM("a0"."Amount") AS "TotalAmount" FROM "orders" "a0" GROUP BY "a0"."CustomerId" ORDER BY SUM("a0"."Amount") DESC NULLS LAST	
-CFromGroupByOrderByMultipleSelect	SELECT "a0"."CustomerId" AS "CustomerId", SUM("a0"."Amount") AS "TotalAmount", COUNT(*) AS "OrderCount" FROM "orders" "a0" GROUP BY "a0"."CustomerId" ORDER BY SUM("a0"."Amount") DESC NULLS LAST, COUNT(*) ASC NULLS FIRST	
-CFromGroupByOrderByThreeKeysSelect	SELECT "a0"."CustomerId" AS "CustomerId", SUM("a0"."Amount") AS "TotalAmount", COUNT(*) AS "OrderCount" FROM "orders" "a0" GROUP BY "a0"."CustomerId" ORDER BY SUM("a0"."Amount") DESC NULLS LAST, COUNT(*) ASC NULLS FIRST, "a0"."CustomerId" ASC NULLS FIRST	
-CFromGroupByMultipleOrderBySelect	SELECT "a0"."Age" AS "Age", "a0"."Name" AS "Name", COUNT(*) AS "Count" FROM "customers" "a0" GROUP BY "a0"."Age", "a0"."Name" ORDER BY COUNT(*) DESC NULLS LAST	
-CFromGroupByHavingOrderBySelect	SELECT "a0"."CustomerId" AS "CustomerId", SUM("a0"."Amount") AS "TotalAmount" FROM "orders" "a0" GROUP BY "a0"."CustomerId" HAVING (COUNT(*) > :p0) ORDER BY SUM("a0"."Amount") DESC NULLS LAST	:p0=int 1
-CComplexJoinWhereGroupByHavingOrderBySelect	SELECT "a0"."Id" AS "CustomerId", "a0"."Name" AS "CustomerName", COUNT(*) AS "TotalOrders", SUM("a1"."Amount") AS "TotalSpent", (SUM("a1"."Amount") / COUNT(*)) AS "AvgOrderValue" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") WHERE (("a0"."Age" >= :p0) AND ("a1"."Amount" > :p1)) GROUP BY "a0"."Id", "a0"."Name" HAVING ((COUNT(*) > :p2) AND (SUM("a1"."Amount") > :p3)) ORDER BY SUM("a1"."Amount") DESC NULLS LAST, COUNT(*) ASC NULLS FIRST	:p0=int 18; :p1=int 50; :p2=int 2; :p3=int 500
-CComplexLeftJoinWhereGroupByOrderBySelect	SELECT "a0"."Id" AS "CustomerId", "a0"."Name" AS "CustomerName", COUNT(*) AS "OrderCount", SUM("a1"."Amount") AS "TotalSpent" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") WHERE ("a0"."Age" >= :p0) GROUP BY "a0"."Id", "a0"."Name" ORDER BY SUM("a1"."Amount") DESC NULLS LAST, "a0"."Name" ASC NULLS FIRST	:p0=int 21
-CFromGroupByMinMaxSelect	SELECT "a0"."CustomerId" AS "CustomerId", MIN("a0"."Amount") AS "MinAmount", MAX("a0"."Amount") AS "MaxAmount", COUNT(*) AS "OrderCount" FROM "orders" "a0" GROUP BY "a0"."CustomerId"	
-CFromGroupByAvgSelect	SELECT "a0"."CustomerId" AS "CustomerId", AVG("a0"."Amount") AS "AvgAmount", COUNT(*) AS "OrderCount" FROM "orders" "a0" GROUP BY "a0"."CustomerId"	
-CFromGroupByDecimalAggregatesSelect	SELECT "a0"."ProductName" AS "ProductName", SUM("a0"."Price") AS "TotalPrice", AVG("a0"."Price") AS "AvgPrice", MIN("a0"."Price") AS "MinPrice", MAX("a0"."Price") AS "MaxPrice", COUNT(*) AS "ProductCount" FROM "products" "a0" GROUP BY "a0"."ProductName"	
-CFromGroupByDecimalSumSelect	SELECT "a0"."ProductName" AS "ProductName", SUM("a0"."Price") AS "TotalPrice" FROM "products" "a0" GROUP BY "a0"."ProductName"	
-CFromGroupByDecimalAvgSelect	SELECT "a0"."ProductName" AS "ProductName", AVG("a0"."Price") AS "AvgPrice" FROM "products" "a0" GROUP BY "a0"."ProductName"	
-CFromSelectSum	SELECT SUM("a0"."Amount") FROM "orders" "a0"	
-CFromSelectAvg	SELECT AVG("a0"."Amount") FROM "orders" "a0"	
-CFromSelectMin	SELECT MIN("a0"."Amount") FROM "orders" "a0"	
-CFromSelectMax	SELECT MAX("a0"."Amount") FROM "orders" "a0"	
+CFromGroupByOrderBySelect	SELECT "a1"."g0" AS "CustomerId", SUM("a1"."g1") AS "TotalAmount" FROM (SELECT "a0"."CustomerId" AS "g0", "a0"."Amount" AS "g1", "a0"."Amount" AS "g2" FROM "orders" "a0") "a1" GROUP BY "a1"."g0" ORDER BY SUM("a1"."g2") DESC NULLS LAST	
+CFromGroupByOrderByMultipleSelect	SELECT "a1"."g0" AS "CustomerId", SUM("a1"."g1") AS "TotalAmount", COUNT(*) AS "OrderCount" FROM (SELECT "a0"."CustomerId" AS "g0", "a0"."Amount" AS "g1", "a0"."Amount" AS "g2" FROM "orders" "a0") "a1" GROUP BY "a1"."g0" ORDER BY SUM("a1"."g2") DESC NULLS LAST, COUNT(*) ASC NULLS FIRST	
+CFromGroupByOrderByThreeKeysSelect	SELECT "a1"."g0" AS "CustomerId", SUM("a1"."g1") AS "TotalAmount", COUNT(*) AS "OrderCount" FROM (SELECT "a0"."CustomerId" AS "g0", "a0"."Amount" AS "g1", "a0"."Amount" AS "g2" FROM "orders" "a0") "a1" GROUP BY "a1"."g0" ORDER BY SUM("a1"."g2") DESC NULLS LAST, COUNT(*) ASC NULLS FIRST, "a1"."g0" ASC NULLS FIRST	
+CFromGroupByMultipleOrderBySelect	SELECT "a1"."g0" AS "Age", "a1"."g1" AS "Name", COUNT(*) AS "Count" FROM (SELECT "a0"."Age" AS "g0", "a0"."Name" AS "g1" FROM "customers" "a0") "a1" GROUP BY "a1"."g0", "a1"."g1" ORDER BY COUNT(*) DESC NULLS LAST	
+CFromGroupByHavingOrderBySelect	SELECT "a1"."g0" AS "CustomerId", SUM("a1"."g1") AS "TotalAmount" FROM (SELECT "a0"."CustomerId" AS "g0", "a0"."Amount" AS "g1", "a0"."Amount" AS "g2" FROM "orders" "a0") "a1" GROUP BY "a1"."g0" HAVING (COUNT(*) > :p0) ORDER BY SUM("a1"."g2") DESC NULLS LAST	:p0=int 1
+CComplexJoinWhereGroupByHavingOrderBySelect	SELECT "a2"."g0" AS "CustomerId", "a2"."g1" AS "CustomerName", COUNT(*) AS "TotalOrders", SUM("a2"."g2") AS "TotalSpent", (SUM("a2"."g3") / COUNT(*)) AS "AvgOrderValue" FROM (SELECT "a0"."Id" AS "g0", "a0"."Name" AS "g1", "a1"."Amount" AS "g2", "a1"."Amount" AS "g3", "a1"."Amount" AS "g4", "a1"."Amount" AS "g5" FROM "customers" "a0" INNER JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") WHERE (("a0"."Age" >= :p0) AND ("a1"."Amount" > :p1))) "a2" GROUP BY "a2"."g0", "a2"."g1" HAVING ((COUNT(*) > :p2) AND (SUM("a2"."g4") > :p3)) ORDER BY SUM("a2"."g5") DESC NULLS LAST, COUNT(*) ASC NULLS FIRST	:p0=int 18; :p1=int 50; :p2=int 2; :p3=int 500
+CComplexLeftJoinWhereGroupByOrderBySelect	SELECT "a2"."g0" AS "CustomerId", "a2"."g1" AS "CustomerName", COUNT(*) AS "OrderCount", SUM("a2"."g2") AS "TotalSpent" FROM (SELECT "a0"."Id" AS "g0", "a0"."Name" AS "g1", "a1"."Amount" AS "g2", "a1"."Amount" AS "g3" FROM "customers" "a0" LEFT JOIN "orders" "a1" ON ("a0"."Id" = "a1"."CustomerId") WHERE ("a0"."Age" >= :p0)) "a2" GROUP BY "a2"."g0", "a2"."g1" ORDER BY SUM("a2"."g3") DESC NULLS LAST, "a2"."g1" ASC NULLS FIRST	:p0=int 21
+CFromGroupByMinMaxSelect	SELECT "a1"."g0" AS "CustomerId", MIN("a1"."g1") AS "MinAmount", MAX("a1"."g2") AS "MaxAmount", COUNT(*) AS "OrderCount" FROM (SELECT "a0"."CustomerId" AS "g0", "a0"."Amount" AS "g1", "a0"."Amount" AS "g2" FROM "orders" "a0") "a1" GROUP BY "a1"."g0"	
+CFromGroupByAvgSelect	SELECT "a1"."g0" AS "CustomerId", AVG("a1"."g1") AS "AvgAmount", COUNT(*) AS "OrderCount" FROM (SELECT "a0"."CustomerId" AS "g0", "a0"."Amount" AS "g1" FROM "orders" "a0") "a1" GROUP BY "a1"."g0"	
+CFromGroupByDecimalAggregatesSelect	SELECT "a1"."g0" AS "ProductName", SUM("a1"."g1") AS "TotalPrice", AVG("a1"."g2") AS "AvgPrice", MIN("a1"."g3") AS "MinPrice", MAX("a1"."g4") AS "MaxPrice", COUNT(*) AS "ProductCount" FROM (SELECT "a0"."ProductName" AS "g0", "a0"."Price" AS "g1", "a0"."Price" AS "g2", "a0"."Price" AS "g3", "a0"."Price" AS "g4" FROM "products" "a0") "a1" GROUP BY "a1"."g0"	
+CFromGroupByDecimalSumSelect	SELECT "a1"."g0" AS "ProductName", SUM("a1"."g1") AS "TotalPrice" FROM (SELECT "a0"."ProductName" AS "g0", "a0"."Price" AS "g1" FROM "products" "a0") "a1" GROUP BY "a1"."g0"	
+CFromGroupByDecimalAvgSelect	SELECT "a1"."g0" AS "ProductName", AVG("a1"."g1") AS "AvgPrice" FROM (SELECT "a0"."ProductName" AS "g0", "a0"."Price" AS "g1" FROM "products" "a0") "a1" GROUP BY "a1"."g0"	
+CFromSelectSum	SELECT SUM("a1"."value") FROM (SELECT "a0"."Amount" AS "value" FROM "orders" "a0") "a1"	
+CFromSelectAvg	SELECT AVG("a1"."value") FROM (SELECT "a0"."Amount" AS "value" FROM "orders" "a0") "a1"	
+CFromSelectMin	SELECT MIN("a1"."value") FROM (SELECT "a0"."Amount" AS "value" FROM "orders" "a0") "a1"	
+CFromSelectMax	SELECT MAX("a1"."value") FROM (SELECT "a0"."Amount" AS "value" FROM "orders" "a0") "a1"	
 CParameterAsIntParam	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE ("a0"."Age" > :minAge)	:minAge=null
 CParameterAsStringParam	SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age" FROM "customers" "a0" WHERE ("a0"."Name" = :customerName)	:customerName=null
 CParameterAsBoolParam	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name", "a0"."Age" AS "Age" FROM "customers" "a0" WHERE (("a0"."Age" > :p0) = :isAdult)	:p0=int 18; :isAdult=null
@@ -382,24 +382,24 @@ CUnion	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHE
 CIntersect	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" WHERE ("a0"."Age" > :p0) INTERSECT SELECT "a1"."Id" AS "Id", "a1"."Name" AS "Name" FROM "customers" "a1" WHERE ("a1"."Name" = :p1)	:p0=int 25; :p1=string "John"
 CExcept	SELECT "a0"."Id" AS "Id", "a0"."Name" AS "Name" FROM "customers" "a0" EXCEPT SELECT "a1"."Id" AS "Id", "a1"."Name" AS "Name" FROM "customers" "a1" WHERE ("a1"."Age" < :p0)	:p0=int 18
 InsertBasic	INSERT INTO "customers" ("Id", "Age", "Name") VALUES (:p0, :p1, :p2)	:p0=long 200; :p1=int 25; :p2=string "John Doe"
-UpdateBasic	UPDATE "customers" SET "Age" = :p0 WHERE ("Id" = :p1)	:p0=int 26; :p1=long 200
-UpdateMultiple	UPDATE "customers" SET "Age" = :p0, "Name" = :p1 WHERE ("Id" = :p2)	:p0=int 27; :p1=string "John Smith"; :p2=long 200
-UpdateConditional	UPDATE "customers" SET "Age" = ("Age" + :p0) WHERE (("Age" >= :p1) AND ("Name" <> :p2))	:p0=int 1; :p1=int 18; :p2=string "Admin"
-DeleteBasic	DELETE FROM "customers" WHERE ("Id" = :p0)	:p0=long 200
-DeleteConditional	DELETE FROM "customers" WHERE (("Age" < :p0) OR ("Name" = :p1))	:p0=int 18; :p1=string "Temp"
-DeleteAll	DELETE FROM "customers"	
-UpdateSetNull	UPDATE "customers" SET "Name" = NULL	
-UpdateSetNullInt	UPDATE "customers" SET "Age" = NULL	
-UpdateSetNullMixed	UPDATE "customers" SET "Name" = :p0, "Age" = NULL	:p0=string "John"
-UpdateSetNullWhere	UPDATE "customers" SET "Name" = NULL WHERE ("Id" = :p0)	:p0=long 200
+UpdateBasic	UPDATE "customers" AS "a0" SET "Age" = :p0 WHERE ("a0"."Id" = :p1)	:p0=int 26; :p1=long 200
+UpdateMultiple	UPDATE "customers" AS "a0" SET "Age" = :p0, "Name" = :p1 WHERE ("a0"."Id" = :p2)	:p0=int 27; :p1=string "John Smith"; :p2=long 200
+UpdateConditional	UPDATE "customers" AS "a0" SET "Age" = ("a0"."Age" + :p0) WHERE (("a0"."Age" >= :p1) AND ("a0"."Name" <> :p2))	:p0=int 1; :p1=int 18; :p2=string "Admin"
+DeleteBasic	DELETE FROM "customers" AS "a0" WHERE ("a0"."Id" = :p0)	:p0=long 200
+DeleteConditional	DELETE FROM "customers" AS "a0" WHERE (("a0"."Age" < :p0) OR ("a0"."Name" = :p1))	:p0=int 18; :p1=string "Temp"
+DeleteAll	DELETE FROM "customers" AS "a0"	
+UpdateSetNull	UPDATE "customers" AS "a0" SET "Name" = NULL	
+UpdateSetNullInt	UPDATE "customers" AS "a0" SET "Age" = NULL	
+UpdateSetNullMixed	UPDATE "customers" AS "a0" SET "Name" = :p0, "Age" = NULL	:p0=string "John"
+UpdateSetNullWhere	UPDATE "customers" AS "a0" SET "Name" = NULL WHERE ("a0"."Id" = :p0)	:p0=long 200
 InsertWithNull	INSERT INTO "customers" ("Id", "Name", "Age") VALUES (:p0, NULL, :p1)	:p0=long 202; :p1=int 25
 InsertWithNullInt	INSERT INTO "customers" ("Id", "Name", "Age") VALUES (:p0, :p1, NULL)	:p0=long 203; :p1=string "John"
 InsertWithNewColumns	INSERT INTO "products" ("Id", "ProductName", "Price", "CreatedDate", "UniqueId") VALUES (:p0, :p1, :p2, :p3, :p4)	:p0=long 200; :p1=string "Test Product"; :p2=decimal 99.99; :p3=dateTime "2024-08-18 00:00:00"; :p4=guid "12345678-1234-1234-1234-123456789012"
-UpdateWithNewColumns	UPDATE "products" SET "Price" = :p0, "CreatedDate" = :p1, "UniqueId" = :p2 WHERE ("Id" = :p3)	:p0=decimal 119.99; :p1=dateTime "2024-12-25 00:00:00"; :p2=guid "87654321-4321-4321-4321-210987654321"; :p3=long 100
+UpdateWithNewColumns	UPDATE "products" AS "a0" SET "Price" = :p0, "CreatedDate" = :p1, "UniqueId" = :p2 WHERE ("a0"."Id" = :p3)	:p0=decimal 119.99; :p1=dateTime "2024-12-25 00:00:00"; :p2=guid "87654321-4321-4321-4321-210987654321"; :p3=long 100
 InsertWithNewColumnsNull	INSERT INTO "products" ("Id", "ProductName", "Price", "CreatedDate", "UniqueId") VALUES (:p0, :p1, NULL, NULL, NULL)	:p0=long 201; :p1=string "Null Test"
-UpdateSetNewColumnsNull	UPDATE "products" SET "Price" = NULL, "CreatedDate" = NULL, "UniqueId" = NULL WHERE ("Id" = :p0)	:p0=long 101
+UpdateSetNewColumnsNull	UPDATE "products" AS "a0" SET "Price" = NULL, "CreatedDate" = NULL, "UniqueId" = NULL WHERE ("a0"."Id" = :p0)	:p0=long 101
 MeasurementsInsert	INSERT INTO "measurements" ("Id", "Value", "Factor") VALUES (:p0, :p1, :p2)	:p0=long 200; :p1=double 12.500000; :p2=double 0.250000
-MeasurementsUpdate	UPDATE "measurements" SET "Value" = ("Value" * :p0) WHERE ("Id" = :p1)	:p0=double 2.000000; :p1=long 1
+MeasurementsUpdate	UPDATE "measurements" AS "a0" SET "Value" = ("a0"."Value" * :p0) WHERE ("a0"."Id" = :p1)	:p0=double 2.000000; :p1=long 1
 InsertSelectAdults	INSERT INTO "customers" ("Id", "Age", "Name", "IsActive") SELECT ("a0"."Id" + :p1) AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" WHERE ("a0"."Age" >= :minAge)	:minAge=null; :p1=long 1000
 InsertSelectLimited	INSERT INTO "customers" ("Id", "Age", "Name", "IsActive") SELECT ("a1"."Id" + :p0) AS "Id", "a1"."Age" AS "Age", "a1"."Name" AS "Name", "a1"."IsActive" AS "IsActive" FROM (SELECT "a0"."Id" AS "Id", "a0"."Age" AS "Age", "a0"."Name" AS "Name", "a0"."IsActive" AS "IsActive" FROM "customers" "a0" ORDER BY "a0"."Id" ASC NULLS FIRST LIMIT 2) "a1"	:p0=long 2000
 InsertValuesBatch	INSERT INTO "customers" ("Id", "Age", "Name", "IsActive") VALUES (:p0, :p1, :p2, :p3), (:p4, NULL, :p5, :p6), (:p7, :p8, NULL, NULL)	:p0=long 300; :p1=int 41; :p2=string "Batch One"; :p3=bool true; :p4=long 301; :p5=string "Batch Two"; :p6=bool false; :p7=long 302; :p8=int 43

@@ -6,20 +6,12 @@ namespace LeanLinq
 native execution boundaries; the evaluator may still interpret the tree. -/
 inductive CompileError where
   | correlatedDerivedTable (alias column : String)
-  | invalidAggregate (reason : String)
   deriving Repr, BEq
 
 instance : ToString CompileError where
   toString
     | .correlatedDerivedTable alias column =>
         s!"correlated derived-table source is unsupported: {alias}.{column} references a source in the containing statement"
-    | .invalidAggregate reason => s!"invalid aggregate: {reason}"
-
-/-- Preprojection for grouping keys that must become real columns before
-grouping, rather than repeated parameterized expressions. -/
-structure GroupProjection where
-  alias : String
-  items : Array (String × String) := #[]
 
 /-- State threaded through SQL generation: a counter for source aliases and
 the accumulated named parameters. -/
@@ -32,9 +24,8 @@ structure CompileState where
   Outer expression-subquery scopes remain visible and are not in this range. -/
   forbiddenAliases : List (Nat × Nat) := []
   derivedDepth : Nat := 0
-  /-- Aggregate argument ownership survives nested expression subqueries. -/
-  aggregateOwners : List Nat := []
-  groupProjection : Option GroupProjection := none
+  /-- Items of the current grouped query's mandatory source projection. -/
+  groupItems : Array (String × String) := #[]
   error? : Option CompileError := none
 
 /-- Compilation reads the target dialect and threads `CompileState`. -/
@@ -49,11 +40,11 @@ def withCompileStatement (m : CompileM α) : CompileM α := do
   let outer ← get
   modify fun st => { st with
     statementStart := st.aliasCounter
-    groupProjection := none }
+    groupItems := #[] }
   let result ← m
   modify fun st => { st with
     statementStart := outer.statementStart
-    groupProjection := outer.groupProjection }
+    groupItems := outer.groupItems }
   return result
 
 /-- FROM-derived tables cannot capture sibling FROM sources without LATERAL
@@ -64,22 +55,23 @@ def withDerivedSource (m : CompileM α) : CompileM α := do
     statementStart := st.aliasCounter
     forbiddenAliases := (outer.statementStart, outer.aliasCounter) :: outer.forbiddenAliases
     derivedDepth := outer.derivedDepth + 1
-    groupProjection := none }
+    groupItems := #[] }
   let result ← m
   modify fun st => { st with
     statementStart := outer.statementStart
     forbiddenAliases := outer.forbiddenAliases
     derivedDepth := outer.derivedDepth
-    groupProjection := outer.groupProjection }
+    groupItems := outer.groupItems }
   return result
 
-/-- Key expressions and aggregate arguments belong to the source projection,
-so their own children must compile against the original source aliases. -/
-def withoutGroupProjection (m : CompileM α) : CompileM α := do
-  let outer := (← get).groupProjection
-  modify fun st => { st with groupProjection := none }
+/-- A generated grouping projection contains the statement's existing sources,
+so their aliases remain visible. Unqualified raw fields remain ambiguous under
+the new derived boundary and are rejected by the ordinary scope check. -/
+def withProjectedSource (m : CompileM α) : CompileM α := do
+  let outer := (← get).derivedDepth
+  modify fun st => { st with derivedDepth := outer + 1 }
   let result ← m
-  modify fun st => { st with groupProjection := outer }
+  modify fun st => { st with derivedDepth := outer }
   return result
 
 def checkFieldScope (alias column : String) : CompileM Unit := do
@@ -91,23 +83,6 @@ def checkFieldScope (alias column : String) : CompileM Unit := do
       | none => false
       | some n => st.forbiddenAliases.any (fun (lo, hi) => lo ≤ n && n < hi)
   if forbidden then recordCompileError (.correlatedDerivedTable alias column)
-  -- SQL can hoist an aggregate whose argument only mentions outer rows to
-  -- that outer query, changing even its empty-input cardinality. Conservatively
-  -- reject all outer captures inside aggregate arguments; correlations in
-  -- the scalar query's WHERE/ON remain supported.
-  let outerAggregate : Bool := st.aggregateOwners.any fun owner =>
-    alias.isEmpty || index?.any (· < owner)
-  if outerAggregate then
-    recordCompileError (.invalidAggregate "aggregate arguments cannot capture an outer query row")
-
-def withAggregateArgument (m : CompileM α) : CompileM α := do
-  let outer ← get
-  modify fun st => { st with
-    aggregateOwners := st.statementStart :: st.aggregateOwners }
-  let result ← m
-  modify fun st => { st with
-    aggregateOwners := outer.aggregateOwners }
-  return result
 
 /-- Allocate a fresh source alias: `a0`, `a1`, … -/
 def freshAlias : CompileM String := fun _ =>

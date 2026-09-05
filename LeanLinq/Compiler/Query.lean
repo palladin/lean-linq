@@ -70,13 +70,16 @@ end Query
 /-- What a *plain* terminal renders as its SELECT list, defunctionalized
 (the compile walk is one structural mutual ring with the expression
 compiler, so a function-valued callback would defeat the termination
-argument): the yielded row itself, `COUNT(*)`, or an aggregate over the
-row's single column. The schema index keeps the aggregate input type tied to
-that column. Grouped terminals own their projection and ignore this. -/
+argument): the yielded row itself, `COUNT(*)`, or the projected input of a
+scalar aggregate. Input modes discard ordering until a LIMIT/OFFSET boundary
+requires it. Grouped terminals own their projection. -/
 inductive SelSpec : Schema → Type where
   | defaultSel : SelSpec s
   | countSel : SelSpec s
-  | aggSel (op : Aggregate t) : SelSpec [(name, ⟨t, nullable⟩)]
+  /-- Intermediate input sources retain their schema names. -/
+  | inputSel : SelSpec s
+  /-- The final scalar input discards its public name in favor of `value`. -/
+  | scalarInputSel : SelSpec [(name, c)]
 
 /-- The SELECT list of a boundary derived table: every column of the
 marker row `alias.col AS col` — rendered textually (a marker `field`
@@ -106,18 +109,6 @@ def valueWrap (isPred : Bool) (s : String) : CompileM String := do
   else
     return s
 
-/-- Simple field keys need no preprojection. MySQL's positional prepared
-parameters are distinct occurrences; SQL Server also rejects constant-only
-GROUP BY expressions. Named computed keys become source columns on both. -/
-private def simpleGroupKey : SqlExpr ts c → Bool
-  | .field .. => true
-  | .widen e => simpleGroupKey e
-  | _ => false
-
-private def RowP.hasComputedKey : Row ts ks → Bool
-  | .nil => false
-  | .cons e tail => !simpleGroupKey e || tail.hasComputedKey
-
 /-- The current key binding is total and indexed by its actual schema. -/
 structure CompiledGroupKey where
   sql : String
@@ -139,14 +130,26 @@ def GroupKeyEnv.groupByItems : GroupKeyEnv ks → CompileM (List String)
   | .cons key rest => do
       return (← valueWrap key.isPredicate key.sql) :: (← rest.groupByItems)
 
-private def projectGroupValue (sql : String) : CompileM String := do
-  match (← get).groupProjection with
-  | none => pure sql
-  | some projection =>
-      let name := s!"g{projection.items.size}"
-      modify fun st => { st with groupProjection := st.groupProjection.map fun p =>
-        { p with items := p.items.push (name, sql) } }
-      return s!"{← quote projection.alias}.{← quote name}"
+/-- Grouped compilation always has an explicit source-projection binding. -/
+structure GroupCompileEnv (ks : Schema) where
+  projectionAlias : String
+  keys : GroupKeyEnv ks
+
+def GroupCompileEnv.get (env : GroupCompileEnv ks) (ref : KeyRef ks c) : CompiledGroupKey :=
+  env.keys.get ref
+
+def GroupCompileEnv.isPredicate (env : GroupCompileEnv ks) {c : SqlType} (ref : KeyRef ks c) : Bool :=
+  (env.get ref).isPredicate
+
+private def projectGroupValue (alias sql : String) : CompileM String := do
+  let name := s!"g{(← get).groupItems.size}"
+  modify fun st => { st with groupItems := st.groupItems.push (name, sql) }
+  return s!"{← quote alias}.{← quote name}"
+
+/-- MySQL must retain the derived projection through prepared comparisons and
+aggregate arguments instead of merging it into the containing statement. -/
+private def projectionBarrier : CompileM String := do
+  return if (← read) == .mysql then " LIMIT 18446744073709551615" else ""
 
 mutual
 
@@ -283,7 +286,7 @@ def SqlExprP.compile : SqlExpr ts c → CompileM String
           | .year => s!"(YEAR({y}) - YEAR({x}))"
 
 
-def GroupedExprP.compile (keys : GroupKeyEnv ks) :
+def GroupedExprP.compile (keys : GroupCompileEnv ks) :
     GroupedExprP AliasOf ts ks c → CompileM String
   | .intC i        => pushParam (.int i)
   | .longC i       => pushParam (.long i)
@@ -326,9 +329,8 @@ def GroupedExprP.compile (keys : GroupKeyEnv ks) :
   | .caseWhen c a b =>
       return s!"CASE WHEN {← predWrap (c.isPredicate keys.isPredicate) (← c.compile keys)} THEN {← valueWrap (a.isPredicate keys.isPredicate) (← a.compile keys)} ELSE {← valueWrap (b.isPredicate keys.isPredicate) (← b.compile keys)} END"
   | .aggE op e => do
-      let sourceArg ← withAggregateArgument do
-        withoutGroupProjection do valueWrap e.isPredicate (← e.compile)
-      let arg ← projectGroupValue sourceArg
+      let sourceArg ← withProjectedSource do valueWrap e.isPredicate (← e.compile)
+      let arg ← projectGroupValue keys.projectionAlias sourceArg
       return s!"{op.token}({arg})"
   | .countAll => pure "COUNT(*)"
   | .abs (numeric := _) e => return s!"ABS({← valueWrap (e.isPredicate keys.isPredicate) (← e.compile keys)})"
@@ -439,38 +441,36 @@ def compileOrderKeyItems : List (OrderKey ts) → CompileM (List String)
       let item := s!"{x} {if dir == .asc then "ASC" else "DESC"}{nulls}"
       return item :: (← compileOrderKeyItems ks)
 
-/-- Render each key once; the indexed environment has no missing-key case. -/
-def RowP.compileGroupKeys : Row ts ks → CompileM (GroupKeyEnv ks)
+/-- Render each key once as a local projected column; lookup remains total. -/
+def RowP.compileGroupKeys (alias : String) : Row ts ks → CompileM (GroupKeyEnv ks)
   | .nil => pure .nil
   | .cons e rest => do
-      let materializing := (← get).groupProjection.isSome
-      let sourceSql ← withoutGroupProjection e.compile
-      let scalarSql ← if materializing then valueWrap e.isPredicate sourceSql else pure sourceSql
-      let sql ← projectGroupValue scalarSql
-      let tail ← rest.compileGroupKeys
-      return .cons { sql, isPredicate := !materializing && e.isPredicate } tail
+      let scalarSql ← withProjectedSource do valueWrap e.isPredicate (← e.compile)
+      let sql ← projectGroupValue alias scalarSql
+      let tail ← rest.compileGroupKeys alias
+      return .cons { sql, isPredicate := false } tail
 
-def GroupedExprsP.compileList (keys : GroupKeyEnv ks) :
+def GroupedExprsP.compileList (keys : GroupCompileEnv ks) :
     GroupedExprsP AliasOf ts ks → CompileM (List String)
   | .nil => pure []
   | .cons e rest => do
       return (← valueWrap (e.isPredicate keys.isPredicate) (← e.compile keys)) ::
         (← rest.compileList keys)
 
-def GroupedRowP.selectList (keys : GroupKeyEnv ks) :
+def GroupedRowP.selectList (keys : GroupCompileEnv ks) :
     {s : Schema} → GroupedRowP AliasOf ts ks s → CompileM (List String)
   | [], .nil => pure []
   | (name, _) :: _, .cons e rest => do
       let item ← valueWrap (e.isPredicate keys.isPredicate) (← e.compile keys)
       return s!"{item} AS {← quote name}" :: (← rest.selectList keys)
 
-def GroupedHavingP.compileClause (keys : GroupKeyEnv ks) :
+def GroupedHavingP.compileClause (keys : GroupCompileEnv ks) :
     GroupedHavingP AliasOf ts ks → CompileM String
   | .none => pure ""
   | .some e => do
       return s!" HAVING {← predWrap (e.isPredicate keys.isPredicate) (← e.compile keys)}"
 
-def GroupedOrdersP.compileItems (keys : GroupKeyEnv ks) :
+def GroupedOrdersP.compileItems (keys : GroupCompileEnv ks) :
     GroupedOrdersP AliasOf ts ks → CompileM (List String)
   | .nil => pure []
   | .cons e dir rest => do
@@ -480,22 +480,23 @@ def GroupedOrdersP.compileItems (keys : GroupKeyEnv ks) :
       let item := s!"{x} {if dir == .asc then "ASC" else "DESC"}{nulls}"
       return item :: (← rest.compileItems keys)
 
-/-- Compile a full query. Boundary clauses (DISTINCT, LIMIT, set ops,
-GROUP BY) decorate the statement produced by the spine underneath. -/
-def QueryP.compileStmt : QueryA ts s → CompileM String
-  | .spine sp => sp.compileSpine {} .defaultSel
+/-- Compile a full query. Aggregate inputs discard dead ordering through
+projection/DISTINCT boundaries; LIMIT restores ordering needed to choose rows. -/
+def QueryP.compileStmt (dropOrders : Bool := false) : QueryA ts s → CompileM String
+  | .spine sp => sp.compileSpine {} (if dropOrders then .inputSel else .defaultSel)
   -- spines assemble with the DISTINCT flag …
-  | .distinctC (.spine sp) => sp.compileSpine { distinct := true } .defaultSel
+  | .distinctC (.spine sp) =>
+      sp.compileSpine { distinct := true } (if dropOrders then .inputSel else .defaultSel)
   -- … other boundary queries become a derived table under a distinct SELECT
   -- (structural recursion forbids `asSpine` here: it can wrap `q`, producing
   -- a larger term)
   | .distinctC (s := s₀) q => do
-      let sub ← withCompileStatement q.compileStmt
+      let sub ← withCompileStatement (q.compileStmt dropOrders)
       let alias ← freshAlias
       let sel := String.intercalate ", " (← aliasSelect alias s₀)
       return s!"SELECT DISTINCT {sel} FROM ({sub}) {← quote alias}"
   | .limitC (s := s₀) q lim? off? => do
-      let inner ← q.compileStmt
+      let inner ← q.compileStmt false
       match (← read) with
       | .sqlServer =>
           let ob := if q.hasOrderBy then "" else " ORDER BY (SELECT NULL)"
@@ -537,16 +538,16 @@ def QueryP.compileStmt : QueryA ts s → CompileM String
       -- derived table. Plain spines compile flat with their (dead) ORDER
       -- BY stripped: an operand's order is discarded by the operation.
       let ca ← match a with
-        | .spine sp => withCompileStatement (sp.compileSpine {} .defaultSel)
+        | .spine sp => withCompileStatement (sp.compileSpine {} (if dropOrders then .inputSel else .defaultSel))
         | qa => do
-            let sub ← withCompileStatement qa.compileStmt
+            let sub ← withCompileStatement (qa.compileStmt dropOrders)
             let alias ← freshAlias
             let sel := String.intercalate ", " (← aliasSelect alias s₀)
             pure s!"SELECT {sel} FROM ({sub}) {← quote alias}"
       let cb ← match b with
-        | .spine sp => withCompileStatement (sp.compileSpine {} .defaultSel)
+        | .spine sp => withCompileStatement (sp.compileSpine {} (if dropOrders then .inputSel else .defaultSel))
         | qb => do
-            let sub ← withCompileStatement qb.compileStmt
+            let sub ← withCompileStatement (qb.compileStmt dropOrders)
             let alias ← freshAlias
             let sel := String.intercalate ", " (← aliasSelect alias s₀)
             pure s!"SELECT {sel} FROM ({sub}) {← quote alias}"
@@ -555,54 +556,44 @@ def QueryP.compileStmt : QueryA ts s → CompileM String
 /-- Walk a comprehension spine accumulating FROM sources, JOIN clauses, and
 WHERE conjuncts until the terminal, then assemble one flat SELECT. The third
 argument (`SelSpec`) tells a *plain* terminal what to render as its SELECT
-list; grouped terminals own their projection and ignore it. -/
+list. Grouped terminals own their projection; input modes also suppress their
+dead ordering. -/
 def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec s → CompileM String
   | .yield r, acc, k => do
-      let (sel, tail) ← match k, r with
-        | .defaultSel, r => do
-            pure (String.intercalate ", " (← r.selectList), "")
-        | .countSel, _ => pure ("COUNT(*)", "")
-        | .aggSel op, .cons e .nil => do
-            let arg ← withAggregateArgument do valueWrap e.isPredicate (← e.compile)
-            pure (s!"{op.token}({arg})", "")
+      let sel ← match k with
+        | .defaultSel | .inputSel => do
+            pure (String.intercalate ", " (← r.selectList))
+        | .countSel => pure "COUNT(*)"
+        | .scalarInputSel => match r with
+          | .cons e .nil => do
+              let value ← valueWrap e.isPredicate (← e.compile)
+              pure s!"{value} AS {← quote "value"}"
       let head := if acc.distinct then "SELECT DISTINCT" else "SELECT"
       let orderClause :=
         if acc.orders.isEmpty then ""
         else s!" ORDER BY {String.intercalate ", " acc.orders.toList}"
-      return s!"{head} {sel}{renderFroms acc.froms}{renderWheres acc.wheres}{tail}{orderClause}"
-  -- the grouped terminal carries its own projection and GROUP BY/HAVING/
-  -- ORDER BY tail; the projection spec is plain-only and ignored here
-  | .groupYield rowKeys _ hv ord r, acc, _ => do
-      let outerProjection := (← get).groupProjection
-      let dialect ← read
-      let materialize := (dialect == .mysql || dialect == .sqlServer) && rowKeys.hasComputedKey
-      let projection ← if materialize then do
-          pure (some ({ alias := ← freshAlias } : GroupProjection))
-        else pure none
-      modify fun st => { st with groupProjection := projection }
-      let keys ← rowKeys.compileGroupKeys
+      return s!"{head} {sel}{renderFroms acc.froms}{renderWheres acc.wheres}{orderClause}"
+  -- The grouped terminal owns its projection and GROUP BY/HAVING tail.
+  -- Input modes discard ORDER BY when no LIMIT needs it.
+  | .groupYield rowKeys _ hv ord r, acc, k => do
+      let outerItems := (← get).groupItems
+      let alias ← freshAlias
+      modify fun st => { st with groupItems := #[] }
+      let boundKeys ← rowKeys.compileGroupKeys alias
+      let keys : GroupCompileEnv _ := { projectionAlias := alias, keys := boundKeys }
       let items ← r.selectList keys
-      let ksStr := String.intercalate ", " (← keys.groupByItems)
+      let ksStr := String.intercalate ", " (← boundKeys.groupByItems)
       let hvStr ← hv.compileClause keys
-      let ownOb ← if ord.isEmpty then pure "" else do
-        pure s!" ORDER BY {String.intercalate ", " (← ord.compileItems keys)}"
+      let ownOb ← match k with
+        | .inputSel | .scalarInputSel => pure ""
+        | _ => if ord.isEmpty then pure "" else do
+            pure s!" ORDER BY {String.intercalate ", " (← ord.compileItems keys)}"
       let head := if acc.distinct then "SELECT DISTINCT" else "SELECT"
-      let orderClause :=
-        if acc.orders.isEmpty then ""
-        else s!" ORDER BY {String.intercalate ", " acc.orders.toList}"
-      let gb := s!" GROUP BY {ksStr}"
-      let fromClause ← match (← get).groupProjection with
-        | none => pure (renderFroms acc.froms ++ renderWheres acc.wheres)
-        | some projection => do
-            let innerItems ← projection.items.toList.mapM fun (name, sql) => do
-              pure s!"{sql} AS {← quote name}"
-            -- Preserve MySQL's projection boundary: prepared key comparisons in
-            -- HAVING can change meaning if the derived query is merged/pushed down.
-            let boundary := if dialect == .mysql then " LIMIT 18446744073709551615" else ""
-            let inner := s!"SELECT {String.intercalate ", " innerItems}{renderFroms acc.froms}{renderWheres acc.wheres}{boundary}"
-            pure s!" FROM ({inner}) {← quote projection.alias}"
-      modify fun st => { st with groupProjection := outerProjection }
-      return s!"{head} {String.intercalate ", " items}{fromClause}{gb}{hvStr}{ownOb}{orderClause}"
+      let innerItems ← (← get).groupItems.toList.mapM fun (name, sql) => do
+        pure s!"{sql} AS {← quote name}"
+      let inner := s!"SELECT {String.intercalate ", " innerItems}{renderFroms acc.froms}{renderWheres acc.wheres}{← projectionBarrier}"
+      modify fun st => { st with groupItems := outerItems }
+      return s!"{head} {String.intercalate ", " items} FROM ({inner}) {← quote alias} GROUP BY {ksStr}{hvStr}{ownOb}"
   | .guard b rest, acc, k => do
       let w ← predWrap b.isPredicate (← b.compile)
       rest.compileSpine { acc with wheres := acc.wheres.push w } k
@@ -610,7 +601,8 @@ def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec s → CompileM 
       if ks.isEmpty then return ← rest.compileSpine acc k
       match k with
       | .countSel => rest.compileSpine acc .countSel
-      | .aggSel op => rest.compileSpine acc (.aggSel op)
+      | .inputSel => rest.compileSpine acc .inputSel
+      | .scalarInputSel => rest.compileSpine acc .scalarInputSel
       | .defaultSel =>
           let rendered := String.intercalate ", " (← compileOrderKeyItems ks)
           rest.compileSpine { acc with orders := acc.orders.push rendered } .defaultSel
@@ -632,7 +624,8 @@ def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec s → CompileM 
       let item := s!"{JoinKind.left.token} {← quote nm} {← quote alias} ON {onStr}"
       (f ⟨alias⟩).compileSpine { acc with froms := acc.froms.push (true, item) } k
   | .fromQ q f, acc, k => do
-      let sub ← withDerivedSource q.compileStmt
+      let dropOrders := match k with | .inputSel | .scalarInputSel => true | _ => false
+      let sub ← withDerivedSource (q.compileStmt dropOrders)
       let alias ← freshAlias
       let item := s!"({sub}) {← quote alias}"
       (f ⟨alias⟩).compileSpine
@@ -641,7 +634,13 @@ def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec s → CompileM 
 /-- Compile a scalar aggregate query. -/
 def ScalarQueryP.compileScalar : ScalarA ts c → CompileM String
   | .countQ sp => sp.compileSpine {} .countSel
-  | .aggQ op sp => sp.compileSpine {} (.aggSel op)
+  | .aggQ op sp => do
+      -- Preserve the query's input projection before applying the aggregate.
+      -- The operand is now a local column even when its source expression
+      -- captures outer rows, so SQL cannot move the aggregate to that scope.
+      let input ← withDerivedSource (sp.compileSpine {} .scalarInputSel)
+      let alias ← freshAlias
+      return s!"SELECT {op.token}({← quote alias}.{← quote "value"}) FROM ({input}{← projectionBarrier}) {← quote alias}"
 
 end
 

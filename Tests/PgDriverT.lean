@@ -24,6 +24,13 @@ def main : IO UInt32 := do
   | some conn =>
       DriverRegressions.checkDoubleQueries (fun q ps => conn.query q ps)
       DriverRegressions.checkCompilerQueries .postgres (fun q => conn.query q) conn.execRaw
+      DriverRegressions.checkAggregateDml .postgres {
+        query := fun q => conn.query q
+        update := fun q => conn.execUpdate q
+        delete := fun q => conn.execDelete q
+        queryAlias := fun q => conn.query q
+        updateAlias := fun q => conn.execUpdate q
+        execRaw := conn.execRaw }
       conn.execRaw (setupSql .postgres)
       let ops : DriverOps := {
         query := fun q => conn.query q seedParams

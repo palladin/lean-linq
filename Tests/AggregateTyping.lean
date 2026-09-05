@@ -35,11 +35,15 @@ example {ρ : Schema → Type} {t : SqlPrim} {n : Bool} :
     Aggregate t → SpineQP ρ C .plain [("Value", ⟨t, n⟩)] → ScalarQueryP ρ C ⟨t, true⟩ :=
   ScalarQueryP.aggQ
 
--- Compiler projection specifications retain the same type and singleton-row
--- invariant rather than erasing the aggregate's input primitive.
-example : SelSpec [("Value", .int)] := .aggSel (Aggregate.sum : Aggregate .int)
-#check_failure (SelSpec.aggSel (Aggregate.sum : Aggregate .int) : SelSpec [("Value", .string)])
-#check_failure (SelSpec.aggSel (Aggregate.sum : Aggregate .int) : SelSpec [])
+-- Input mode also traverses intervening sources with several columns. The
+-- aggregate's singleton input and primitive linkage remain in aggQ itself.
+example {s : Schema} : SelSpec s := .inputSel
+#check_failure (ScalarQueryP.aggQ .sum
+  (.yield (RowP.nil : RowP AliasOf C [])) : ScalarQueryP AliasOf C (.null .int))
+#check_failure (ScalarQueryP.aggQ .sum
+  (.yield (.cons (.intC 1) (.cons (.intC 2) .nil)) :
+    SpineQP AliasOf C .plain [("First", .int), ("Second", .int)]) :
+  ScalarQueryP AliasOf C (.null .int))
 
 private def numericNodes {t : SqlPrim} {n : Bool} [SqlNumeric t]
     (e : SqlExpr C ⟨t, n⟩) (sp : SpineQP AliasOf C .plain [("Value", ⟨t, n⟩)]) :

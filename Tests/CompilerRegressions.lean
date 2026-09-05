@@ -64,9 +64,8 @@ def correlatedProjection := source.where' (fun outer => SqlExpr.exists' (
 #guard correlatedNestedExpression.toSqlChecked.isOk
 #guard correlatedProjection.toSqlChecked.isOk
 
--- Some SQL engines hoist an outer-only aggregate out of a scalar subquery,
--- producing one row even when the outer source has LIMIT 0. Reject captures
--- in aggregate arguments so query-derived round budgets stay sound.
+-- Aggregate inputs are projected inside their owning query before aggregation.
+-- Outer captures therefore preserve the declared empty-input cardinality.
 def outerAggregate := (source.limit 0).select (fun outer =>
   ![((QueryP.from' (ts := C) items
     |>.select (fun _ => ![outer["Id"].as "Id"])
@@ -78,13 +77,13 @@ def correlatedLocalAggregate := source.select (fun outer =>
     |>.sum).embed).as "Sum"])
 #guard outerAggregate.gcard.eval (fun _ => 99) == 0
 #guard [DatabaseType.sqlite, .postgres, .mysql, .sqlServer].all fun db =>
-  match outerAggregate.toSqlChecked db with
-  | .error (.invalidAggregate "aggregate arguments cannot capture an outer query row") => true
-  | _ => false
+  (outerAggregate.toSqlChecked db).isOk
+#guard (outerAggregate.run env).toOption == some []
 #guard correlatedLocalAggregate.toSqlChecked.isOk
+#guard (correlatedLocalAggregate.run env).toOption ==
+  some [.cons (some 3) .nil, .cons (some 3) .nil, .cons (some 3) .nil]
 
--- The intrinsically grouped aggregate path retains the same outer-capture
--- check. Its aggregate is in HAVING, so EXISTS must demand it.
+-- The grouped aggregate path uses the same projection rule for HAVING.
 def groupedOuterAggregate := (source.limit 0).where' (fun outer => SqlExpr.exists' (
   QueryP.from' (ts := C) items
     |>.groupBy (fun inner => ![inner["Bucket"].as "Bucket"])
@@ -92,11 +91,10 @@ def groupedOuterAggregate := (source.limit 0).where' (fun outer => SqlExpr.exist
     |>.select (fun keys _ => ![keys["Bucket"].as "Bucket"])))
 #guard groupedOuterAggregate.gcard.eval (fun _ => 99) == 0
 #guard [DatabaseType.sqlite, .postgres, .mysql, .sqlServer].all fun db =>
-  match groupedOuterAggregate.toSqlChecked db with
-  | .error (.invalidAggregate "aggregate arguments cannot capture an outer query row") => true
-  | _ => false
+  (groupedOuterAggregate.toSqlChecked db).isOk
+#guard (groupedOuterAggregate.run env).toOption == some []
 
--- A nested expression subquery must not hide the aggregate's outer capture.
+-- Captures inside nested expression subqueries preserve the same semantics.
 def hiddenOuterAggregate := (source.limit 0).select (fun outer =>
   ![((QueryP.from' (ts := C) items |>.select (fun _ =>
     ![(SqlExpr.caseWhen (SqlExpr.exists' (QueryP.from' (ts := C) items
@@ -111,10 +109,11 @@ def hiddenLocalAggregate := source.select (fun _ =>
       |>.sum).embed).as "Sum"])
 #guard hiddenOuterAggregate.gcard.eval (fun _ => 99) == 0
 #guard [DatabaseType.sqlite, .postgres, .mysql, .sqlServer].all fun db =>
-  match hiddenOuterAggregate.toSqlChecked db with
-  | .error (.invalidAggregate "aggregate arguments cannot capture an outer query row") => true
-  | _ => false
+  (hiddenOuterAggregate.toSqlChecked db).isOk
+#guard (hiddenOuterAggregate.run env).toOption == some []
 #guard hiddenLocalAggregate.toSqlChecked.isOk
+#guard (hiddenLocalAggregate.run env).toOption ==
+  some [.cons (some 3) .nil, .cons (some 3) .nil, .cons (some 3) .nil]
 
 abbrev QuotedS : Schema := [("a\"b", .int)]
 abbrev QuotedC : Ctx := { tables := [("compiler_quoted", QuotedS)] }
@@ -148,7 +147,7 @@ def updateFlag : UpdateStmt FlagC "compiler_flags" FlagS :=
 def insertFlag : InsertStmt FlagC "compiler_flags" FlagS :=
   flags.insert |>.value "Flag" ((SqlExpr.int 1) >. 0)
 #guard (updateFlag.toSql .sqlServer).sql ==
-  "UPDATE [compiler_flags] SET [Flag] = CASE WHEN [Flag] IS NULL THEN 1 WHEN NOT ([Flag] IS NULL) THEN 0 ELSE NULL END WHERE ([Flag] = 1)"
+  "UPDATE [a0] SET [Flag] = CASE WHEN [a0].[Flag] IS NULL THEN 1 WHEN NOT ([a0].[Flag] IS NULL) THEN 0 ELSE NULL END FROM [compiler_flags] [a0] WHERE ([a0].[Flag] = 1)"
 #guard ((insertFlag.toSql .sqlServer).sql.splitOn "THEN 0 ELSE NULL END").length == 2
 #guard updateFlag.toSqlChecked.isOk
 #guard insertFlag.toSqlChecked.isOk

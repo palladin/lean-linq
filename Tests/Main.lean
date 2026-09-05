@@ -8,6 +8,8 @@ import Tests.GroupedRegressions
 import Tests.ScalarTyping
 import Tests.AggregateTyping
 import Tests.GroupedAstTyping
+import Tests.AggregateProjection
+import Tests.AggregateDml
 
 /-! # Golden-test runner
 

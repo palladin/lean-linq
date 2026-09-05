@@ -69,11 +69,12 @@ def DeleteStmt.where' (d : DeleteStmt ts n s)
     (p : Row ts s → SqlExpr ts ⟨.bool, nb⟩) : DeleteStmt ts n s :=
   { d with where? := some (fun r => (p r).anyNull) }
 
-private def whereClause {s : Schema} (p? : Option (Row ts s → SqlExpr ts ⟨.bool, true⟩)) :
+private def whereClause {s : Schema} (alias : String)
+    (p? : Option (Row ts s → SqlExpr ts ⟨.bool, true⟩)) :
     CompileM String :=
   match p? with
   | none => pure ""
-  | some p => do return s!" WHERE {← (p (Row.ofAlias "" s)).compilePred}"
+  | some p => do return s!" WHERE {← (p (Row.ofAlias alias s)).compilePred}"
 
 def InsertStmt.compile (i : InsertStmt ts n s) : CompileM String := do
   let cols ← i.values.mapM fun (nm, _) => quote nm
@@ -81,14 +82,29 @@ def InsertStmt.compile (i : InsertStmt ts n s) : CompileM String := do
   return s!"INSERT INTO {← quote n} ({String.intercalate ", " cols}) VALUES ({String.intercalate ", " vals})"
 
 def UpdateStmt.compile (u : UpdateStmt ts n s) : CompileM String := do
-  let row := Row.ofAlias "" s
+  -- Reserve the target binding before compiling nested queries, whose source
+  -- aliases must remain distinct even when their columns have the same names.
+  let alias ← freshAlias
+  let row := Row.ofAlias alias s
   let sets ← u.sets.mapM fun (nm, f) => do
     let ⟨_, e⟩ := f row
     return s!"{← quote nm} = {← e.compileValue}"
-  return s!"UPDATE {← quote n} SET {String.intercalate ", " sets}{← whereClause u.where?}"
+  let target ← quote n
+  let targetAlias ← quote alias
+  let filter ← whereClause alias u.where?
+  if (← read) == .sqlServer then
+    return s!"UPDATE {targetAlias} SET {String.intercalate ", " sets} FROM {target} {targetAlias}{filter}"
+  else
+    return s!"UPDATE {target} AS {targetAlias} SET {String.intercalate ", " sets}{filter}"
 
 def DeleteStmt.compile (d : DeleteStmt ts n s) : CompileM String := do
-  return s!"DELETE FROM {← quote n}{← whereClause d.where?}"
+  let alias ← freshAlias
+  let target ← quote n
+  let targetAlias ← quote alias
+  let filter ← whereClause alias d.where?
+  match (← read) with
+  | .sqlite | .postgres => return s!"DELETE FROM {target} AS {targetAlias}{filter}"
+  | .sqlServer | .mysql => return s!"DELETE {targetAlias} FROM {target} {targetAlias}{filter}"
 
 def InsertStmt.toSql (i : InsertStmt ts n s) (db : DatabaseType := .sqlite) : CompiledSql :=
   let (sql, st) := Id.run ((i.compile.run db).run {})

@@ -4,6 +4,8 @@ import LeanLinq.Driver.Mysql
 import Tests.CompilerRegressions
 import Tests.GroupedRegressions
 import Tests.GroupedAstTyping
+import Tests.AggregateProjection
+import Tests.AggregateDml
 
 /-! Driver boundary regressions. The wire preparation checks need no servers;
 SQLite runs against an isolated in-memory database. Expected values are explicit,
@@ -86,6 +88,41 @@ def checkDoubleQueries
 private def sameRows (got expected : List (Values s)) : Bool :=
   got.length == expected.length && expected.all (fun row => got.count row == expected.count row)
 
+structure AggregateDmlOps where
+  query : Query AggregateDml.C AggregateDml.TargetS → IO (List (Values AggregateDml.TargetS))
+  update : UpdateStmt AggregateDml.C "aggregate_dml_target" AggregateDml.TargetS → IO Nat
+  delete : DeleteStmt AggregateDml.C "aggregate_dml_target" AggregateDml.TargetS → IO Nat
+  queryAlias : Query AggregateDml.AliasC AggregateDml.TargetS → IO (List (Values AggregateDml.TargetS))
+  updateAlias : UpdateStmt AggregateDml.AliasC "a0" AggregateDml.TargetS → IO Nat
+  execRaw : String → IO Unit
+
+/-- Each aggregate DML case starts from the same dedicated two-table fixture.
+Both affected-row counts and the resulting target rows are independently checked. -/
+def checkAggregateDml (db : DatabaseType) (ops : AggregateDmlOps) : IO Unit := do
+  let quote := db.quoteIdent
+  let target := quote "aggregate_dml_target"
+  let inner := quote "aggregate_dml_inner"
+  let alias := quote "a0"
+  ops.execRaw s!"DROP TABLE IF EXISTS {target}; DROP TABLE IF EXISTS {inner}; DROP TABLE IF EXISTS {alias}; CREATE TABLE {target} ({quote "Id"} INTEGER, {quote "Value"} INTEGER); CREATE TABLE {alias} ({quote "Id"} INTEGER, {quote "Value"} INTEGER); CREATE TABLE {inner} ({quote "Id"} INTEGER)"
+  let reset (table : String) : IO Unit :=
+    ops.execRaw s!"DELETE FROM {table}; INSERT INTO {table} VALUES (10,0),(20,0); DELETE FROM {inner}; INSERT INTO {inner} VALUES (1),(2)"
+  try
+    for (name, statement, expected) in AggregateDml.updateCases do
+      reset target
+      check ((← ops.update statement) == 2) s!"aggregate UPDATE affected rows: {name}"
+      check (sameRows (← ops.query AggregateDml.targetQuery) expected) s!"aggregate UPDATE: {name}"
+    for (name, statement, expected) in AggregateDml.deleteCases do
+      reset target
+      check ((← ops.delete statement) == 1) s!"aggregate DELETE affected rows: {name}"
+      check (sameRows (← ops.query AggregateDml.targetQuery) expected) s!"aggregate DELETE: {name}"
+    reset alias
+    check ((← ops.updateAlias AggregateDml.updateAliasNamedTarget) == 2)
+      "aggregate UPDATE alias-named target affected rows"
+    check (sameRows (← ops.queryAlias (Query.from' AggregateDml.aliasNamedTarget))
+      AggregateDml.expectedUpdated) "aggregate UPDATE alias-named target"
+  finally
+    ops.execRaw s!"DROP TABLE {target}; DROP TABLE {inner}; DROP TABLE {alias}"
+
 /-- Execute the compiler regressions through each engine, including SQL Server's
 predicate-to-value conversion for UNKNOWN, false, and true. The fixture uses a
 dedicated test table and does not affect the main differential sweep's seeds. -/
@@ -97,6 +134,14 @@ def checkCompilerQueries
   let table := quote "compiler_items"
   execRaw s!"DROP TABLE IF EXISTS {table}; CREATE TABLE {table} ({quote "Id"} INTEGER, {quote "Bucket"} INTEGER, {quote "Value"} INTEGER); INSERT INTO {table} VALUES (1,1,NULL),(2,1,0),(3,2,2)"
   try
+    for test in AggregateProjection.cases do
+      let rows ← try query test.query catch e =>
+        throw (IO.userError s!"aggregate projection {test.name}: {e}")
+      check (sameRows rows test.expected) s!"aggregate projection: {test.name}"
+    for q in [CompilerRegressions.outerAggregate, CompilerRegressions.hiddenOuterAggregate] do
+      check ((← query q) == []) "captured aggregate with empty outer source"
+    check ((← query CompilerRegressions.groupedOuterAggregate) == [])
+      "captured grouped HAVING with empty outer source"
     check (sameRows (← query GroupedAstTyping.rawQuery)
       [.cons 11 (.cons 2 (.cons (some 0) .nil)), .cons 12 (.cons 3 (.cons (some 2) .nil))])
       "two computed raw grouping keys retain their positions"
@@ -190,6 +235,13 @@ private def checkSqlite : IO Unit := do
     -- can overflow exact DBL_MAX text; the driver binds doubles in binary.
     checkDoubleQueries (fun q ps => conn.query q ps) (finiteBits.toList.map Float.ofBits)
     checkCompilerQueries .sqlite (fun q => conn.query q) conn.execRaw
+    checkAggregateDml .sqlite {
+      query := fun q => conn.query q
+      update := fun q => conn.execUpdate q
+      delete := fun q => conn.execDelete q
+      queryAlias := fun q => conn.query q
+      updateAlias := fun q => conn.execUpdate q
+      execRaw := conn.execRaw }
     conn.execRaw "CREATE TABLE compiler_quoted (\"a\"\"b\" INTEGER); INSERT INTO compiler_quoted VALUES (7)"
     check ((← conn.query CompilerRegressions.quoted) == [.cons 7 .nil]) "escaped identifier"
     conn.execRaw "CREATE TABLE driver_codec (I INTEGER, T TEXT, F REAL); INSERT INTO driver_codec VALUES (1, '', 0.0)"
@@ -220,15 +272,14 @@ private def checkSqlite : IO Unit := do
       expectRangeError (conn.query namedInt (params i))
     check ((← conn.query emptyGrouped) == []) "grouping an empty source produced a row"
     check ((← emptyGroupedBudget.execIO conn 1) == 0) "empty grouped fetch exceeded its cardinality budget"
-    -- Unsupported outer captures must fail compilation before engine access.
+    -- Unsupported derived correlation must fail before engine access.
     -- A closed connection makes accidental execution observable.
     conn.close
     let error ← try
-      let _ ← conn.query CompilerRegressions.outerAggregate
+      let _ ← conn.query CompilerRegressions.correlatedSource
       pure ""
     catch e => pure (toString e)
-    check (error.startsWith
-      "SQL compilation: invalid aggregate: aggregate arguments cannot capture an outer query row")
+    check (error.startsWith "SQL compilation: correlated derived-table source is unsupported:")
       "SQLite executed a query that failed checked compilation"
   finally
     conn.close
