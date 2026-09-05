@@ -4,7 +4,8 @@ import LeanLinq.Core.Grade
 namespace LeanLinq
 
 instance : Inhabited (SpineQ ts .plain s) := ⟨.yield default⟩
-instance : Inhabited (SpineQ ts .grouped s) := ⟨.groupYield [] none [] default⟩
+instance : Inhabited (SpineQ ts .grouped s) :=
+  ⟨.groupYield ⟨.int, .intC 0⟩ [] none [] default⟩
 instance : Inhabited (QueryA ts s) := ⟨.spine (.yield default)⟩
 
 namespace SpineQ
@@ -50,7 +51,7 @@ aligned with it. -/
 def _root_.LeanLinq.SpineQP.dropOrders {ρ : Schema → Type} :
     SpineQP ρ ts g s → SpineQP ρ ts g s
   | .yield r => .yield r
-  | .groupYield ks hv ord r => .groupYield ks hv ord r
+  | .groupYield key ks hv _ r => .groupYield key ks hv [] r
   | .guard b rest => .guard b rest.dropOrders
   | .order _ rest => rest.dropOrders
   | .fromT (inst := i) t f => .fromT (inst := i) t fun a => (f a).dropOrders
@@ -250,13 +251,15 @@ are unrepresentable). -/
 structure GroupedQueryP (ρ : Schema → Type) (ts : Ctx) (s : Schema) where
   query : QueryP ρ ts s
   keys : RowP ρ ts s → List (KeyExprP ρ ts)
+  nonempty : ∀ r, keys r ≠ []
   having? : Option (RowP ρ ts s → SqlExprP ρ ts ⟨.bool, true⟩) := none
   orderKeys? : Option (RowP ρ ts s → List (OrderKeyP ρ ts)) := none
 
 /-- `GROUP BY` one or more keys: `q.groupBy (fun c => [c["Age"].key])`. -/
-def QueryP.groupBy (q : QueryP ρ ts s) (keys : RowP ρ ts s → List (KeyExprP ρ ts)) :
+def QueryP.groupBy (q : QueryP ρ ts s) (keys : RowP ρ ts s → List (KeyExprP ρ ts))
+    (nonempty : ∀ r, keys r ≠ [] := by intro r; simp) :
     GroupedQueryP ρ ts s :=
-  ⟨q, keys, none, none⟩
+  ⟨q, keys, nonempty, none, none⟩
 
 /-- `HAVING` over the grouped rows; the `Agg` token builds aggregates:
 `g.having (fun c a => 1 <. a.count)`. -/
@@ -276,15 +279,15 @@ def GroupedQueryP.orderBy (g : GroupedQueryP ρ ts s)
 def GroupedQueryP.select (g : GroupedQueryP ρ ts s) (f : RowP ρ ts s → Agg → RowP ρ ts s') :
     QueryP ρ ts s' :=
   .spine (g.query.asPlainSpine.dropOrders.bind fun r =>
-    .groupYield (g.keys r) (g.having?.map (· r))
+    .groupYield ((g.keys r).head (g.nonempty r)) (g.keys r).tail (g.having?.map (· r))
       ((g.orderKeys?.map (· r)).getD []) (f r ⟨⟩))
 
 /-- `COUNT(*)` over a query. -/
 def QueryP.count (q : QueryP ρ ts s) : ScalarQueryP ρ ts .int := .countQ q.asPlainSpine
 
 /-- `SUM` over a single-column query (project first: `q.select … |>.sum`). -/
-def QueryP.sum (q : QueryP ρ ts [(n, ⟨t, nl⟩)]) : ScalarQueryP ρ ts ⟨t, true⟩ := .aggQ .sum q.asPlainSpine
-def QueryP.avg (q : QueryP ρ ts [(n, ⟨t, nl⟩)]) : ScalarQueryP ρ ts ⟨t, true⟩ := .aggQ .avg q.asPlainSpine
+def QueryP.sum (q : QueryP ρ ts [(n, ⟨t, nl⟩)]) [SqlNumeric t] : ScalarQueryP ρ ts ⟨t, true⟩ := .aggQ .sum q.asPlainSpine
+def QueryP.avg (q : QueryP ρ ts [(n, ⟨t, nl⟩)]) [SqlNumeric t] : ScalarQueryP ρ ts ⟨t, true⟩ := .aggQ .avg q.asPlainSpine
 def QueryP.min (q : QueryP ρ ts [(n, ⟨t, nl⟩)]) : ScalarQueryP ρ ts ⟨t, true⟩ := .aggQ .min q.asPlainSpine
 def QueryP.max (q : QueryP ρ ts [(n, ⟨t, nl⟩)]) : ScalarQueryP ρ ts ⟨t, true⟩ := .aggQ .max q.asPlainSpine
 
@@ -373,12 +376,14 @@ polymorphically and instantiated with the query. -/
 structure GroupedB (ts : Ctx) (s : Schema) : Type 1 where
   q : QueryB ts s
   keys : ∀ {ρ}, RowP ρ ts s → List (KeyExprP ρ ts)
+  nonempty : ∀ {ρ} (r : RowP ρ ts s), keys r ≠ []
   having? : Option (∀ {ρ}, RowP ρ ts s → SqlExprP ρ ts ⟨.bool, true⟩) := none
   orderKeys? : Option (∀ {ρ}, RowP ρ ts s → List (OrderKeyP ρ ts)) := none
 
 def groupBy (q : QueryB ts s)
-    (keys : ∀ {ρ}, RowP ρ ts s → List (KeyExprP ρ ts)) : GroupedB ts s :=
-  ⟨q, keys, none, none⟩
+    (keys : ∀ {ρ}, RowP ρ ts s → List (KeyExprP ρ ts))
+    (nonempty : ∀ {ρ} (r : RowP ρ ts s), keys r ≠ [] := by intros; simp) : GroupedB ts s :=
+  ⟨q, keys, nonempty, none, none⟩
 
 def GroupedB.having (g : GroupedB ts s)
     (p : ∀ {ρ}, RowP ρ ts s → Agg → SqlExprP ρ ts ⟨.bool, nb⟩) : GroupedB ts s :=
@@ -391,7 +396,7 @@ def GroupedB.orderBy (g : GroupedB ts s)
 def GroupedB.select (g : GroupedB ts s)
     (f : ∀ {ρ}, RowP ρ ts s → Agg → RowP ρ ts s') : QueryB ts s' :=
   fun ρ => GroupedQueryP.select
-    ⟨g.q ρ, g.keys, g.having?.map (fun h r => h r),
+    ⟨g.q ρ, g.keys, g.nonempty, g.having?.map (fun h r => h r),
      g.orderKeys?.map (fun ks r => ks r)⟩ f
 
 end QueryB
@@ -408,9 +413,9 @@ namespace QueryB
 
 /- Scalar aggregates at the bundle level: delegate per-ρ. -/
 def count (q : QueryB ts s) : ScalarB ts .int := fun ρ => QueryP.count (q ρ)
-def sum (q : QueryB ts [(n, ⟨t, nl⟩)]) : ScalarB ts ⟨t, true⟩ :=
+def sum (q : QueryB ts [(n, ⟨t, nl⟩)]) [SqlNumeric t] : ScalarB ts ⟨t, true⟩ :=
   fun ρ => QueryP.sum (q ρ)
-def avg (q : QueryB ts [(n, ⟨t, nl⟩)]) : ScalarB ts ⟨t, true⟩ :=
+def avg (q : QueryB ts [(n, ⟨t, nl⟩)]) [SqlNumeric t] : ScalarB ts ⟨t, true⟩ :=
   fun ρ => QueryP.avg (q ρ)
 def min (q : QueryB ts [(n, ⟨t, nl⟩)]) : ScalarB ts ⟨t, true⟩ :=
   fun ρ => QueryP.min (q ρ)

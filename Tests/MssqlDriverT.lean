@@ -1,5 +1,6 @@
 import LeanLinq.Driver.Mssql
 import Tests.DriverSweep
+import Tests.DriverRegressions
 
 /-! # Native SQL Server driver — differential test (`lake exe mssqldriver`)
 
@@ -30,6 +31,8 @@ def main : IO UInt32 := do
     IO.eprintln "[mssqldriver] SQL Server unreachable — skipped (is `docker compose up -d --wait` running?)"
     return 0
   let conn ← Ms.connect msHost msPort msUser msPass (db := "testdb")
+  DriverRegressions.checkDoubleQueries (fun q ps => conn.query q ps)
+  DriverRegressions.checkCompilerQueries .sqlServer (fun q => conn.query q) conn.execRaw
   conn.execRaw (setupSql .sqlServer)
   let ops : DriverOps := {
     query := fun q => conn.query q seedParams

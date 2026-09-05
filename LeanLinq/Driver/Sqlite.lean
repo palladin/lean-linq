@@ -78,12 +78,19 @@ private opaque columnText (stmt : @&Stmt) (i : UInt32) : IO String
 
 /-! ## Parameter binding -/
 
+/-- Lean integers are unbounded; SQLite's INTEGER parameters are signed 64-bit.
+Reject values that cannot be represented instead of wrapping their bits. -/
+private def bindInteger (st : Stmt) (idx : UInt32) (i : Int) : IO Unit := do
+  if i < -9223372036854775808 || i > 9223372036854775807 then
+    throw (IO.userError s!"sqlite3 bind: integer outside signed 64-bit range: {i}")
+  bindInt64 st idx (.ofInt i)
+
 /-- Bind an auto parameter (a staged literal's value). Decimal digit strings
 bind as text — SQLite's numeric affinity converts, matching the semantics
 the inlined-literal test harness always had. -/
 private def bindValue (st : Stmt) (idx : UInt32) : SqlValue → IO Unit
-  | .int i => bindInt64 st idx (.ofInt i)
-  | .long i => bindInt64 st idx (.ofInt i)
+  | .int i => bindInteger st idx i
+  | .long i => bindInteger st idx i
   | .double f => bindDouble st idx f
   | .decimal d => bindText st idx d
   | .string s => bindText st idx s
@@ -96,8 +103,8 @@ private def bindValue (st : Stmt) (idx : UInt32) : SqlValue → IO Unit
 decimals rendered back to digit text, NULL cell → SQL NULL). -/
 private def bindCell (st : Stmt) (idx : UInt32) : (t : SqlPrim) → Nullable t → IO Unit
   | _, none => bindNull st idx
-  | .int, some i => bindInt64 st idx (.ofInt i)
-  | .long, some i => bindInt64 st idx (.ofInt i)
+  | .int, some i => bindInteger st idx i
+  | .long, some i => bindInteger st idx i
   | .double, some f => bindDouble st idx f
   | .decimal, some m => bindText st idx (renderDecimal m)
   | .string, some s => bindText st idx s
@@ -163,7 +170,7 @@ private def collectRows (st : Stmt) (s : Schema) : IO (List (Values s)) := do
 schema-directed. Output is cell-for-cell comparable with `Query.run`. -/
 def Conn.query (conn : Conn) (q : Query c s)
     (ps : ParamEnv c.params := by exact .nil) : IO (List (Values s)) := do
-  let compiled := q.toSql .sqlite
+  let compiled ← Driver.checkedSql (q.toSqlChecked .sqlite)
   let st ← prepareRaw conn compiled.sql
   bindParams st compiled ps.toCells
   collectRows st s
@@ -171,7 +178,7 @@ def Conn.query (conn : Conn) (q : Query c s)
 /-- Execute a scalar aggregate query: one row, one cell (no row = NULL). -/
 def Conn.queryCell (conn : Conn) (sc : ScalarQuery c ⟨t, n⟩)
     (ps : ParamEnv c.params := by exact .nil) : IO (Nullable t) := do
-  let compiled := sc.toSql .sqlite
+  let compiled ← Driver.checkedSql (sc.toSqlChecked .sqlite)
   let st ← prepareRaw conn compiled.sql
   bindParams st compiled ps.toCells
   if (← step st) == 101 then pure none
@@ -189,24 +196,24 @@ private def execCompiled (conn : Conn) (compiled : CompiledSql)
   return (← changesRaw conn).toNat
 
 def Conn.execInsert (conn : Conn) (i : InsertStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execCompiled conn (i.toSql .sqlite) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execCompiled conn (← Driver.checkedSql (i.toSqlChecked .sqlite)) ps.toCells
 
 def Conn.execUpdate (conn : Conn) (u : UpdateStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execCompiled conn (u.toSql .sqlite) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execCompiled conn (← Driver.checkedSql (u.toSqlChecked .sqlite)) ps.toCells
 
 def Conn.execDelete (conn : Conn) (d : DeleteStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execCompiled conn (d.toSql .sqlite) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execCompiled conn (← Driver.checkedSql (d.toSqlChecked .sqlite)) ps.toCells
 
 def Conn.execInsertSelect (conn : Conn) (st : InsertSelectStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execCompiled conn (st.toSql .sqlite) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execCompiled conn (← Driver.checkedSql (st.toSqlChecked .sqlite)) ps.toCells
 
 def Conn.execInsertValues (conn : Conn) (st : InsertValuesStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execCompiled conn (st.toSql .sqlite) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execCompiled conn (← Driver.checkedSql (st.toSqlChecked .sqlite)) ps.toCells
 
 end Sqlite
 

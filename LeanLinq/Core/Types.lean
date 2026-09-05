@@ -12,6 +12,20 @@ inductive SqlPrim where
   | guid
   deriving DecidableEq, Repr
 
+/-- The numeric primitives accepted by SUM and AVG. -/
+def SqlPrim.isNumeric : SqlPrim → Bool
+  | .int | .long | .double | .decimal => true
+  | _ => false
+
+/-- Numeric aggregate arguments are checked at elaboration. -/
+class SqlNumeric (t : SqlPrim) : Prop where
+  valid : t.isNumeric = true
+
+instance : SqlNumeric .int := ⟨rfl⟩
+instance : SqlNumeric .long := ⟨rfl⟩
+instance : SqlNumeric .double := ⟨rfl⟩
+instance : SqlNumeric .decimal := ⟨rfl⟩
+
 /-- Runtime values carried by SQL parameters. Decimals are kept as exact
 digit strings; date-times and guids as their textual forms. -/
 inductive SqlValue where

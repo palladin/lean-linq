@@ -20,8 +20,8 @@ Typed queries in, typed rows out, over TDS (via `native/freetds_shim.c`):
   `dbconvert(coltype → SYBCHAR)` and decoded by the shared text codecs
   (`LeanLinq.Driver.TextCell`).
 - TDS allows one active request per connection — no pipelining — so
-  `Db.execMs` interprets sequentially and the `max` grade stays an
-  honest upper bound (as with in-process SQLite). -/
+  `Db.execMs` interprets sequentially, with one statement per budgeted
+  effect (as with in-process SQLite). -/
 
 namespace LeanLinq.Ms
 
@@ -103,7 +103,7 @@ private def valueTypeOf : SqlValue → SqlPrim
 private def valueText : SqlValue → String
   | .int i => toString i
   | .long i => toString i
-  | .double f => toString f
+  | .double f => Driver.floatText f
   | .decimal d => d
   | .string s => s
   | .bool b => if b then "1" else "0"
@@ -192,12 +192,12 @@ private def collectRows (conn : Conn) (s : Schema) : IO (List (Values s)) := do
 
 def Conn.query (conn : Conn) (q : Query c s)
     (ps : ParamEnv c.params := by exact .nil) : IO (List (Values s)) := do
-  execRpc conn (q.toSql .sqlServer) ps.toCells
+  execRpc conn (← Driver.checkedSql (q.toSqlChecked .sqlServer)) ps.toCells
   collectRows conn s
 
 def Conn.queryCell (conn : Conn) (sc : ScalarQuery c ⟨t, n⟩)
     (ps : ParamEnv c.params := by exact .nil) : IO (Nullable t) := do
-  execRpc conn (sc.toSql .sqlServer) ps.toCells
+  execRpc conn (← Driver.checkedSql (sc.toSqlChecked .sqlServer)) ps.toCells
   if (← resultsNext conn) == 0 then pure none
   else do
     if (← rowNext conn) == 0 then
@@ -222,24 +222,24 @@ private def execStmt (conn : Conn) (compiled : CompiledSql)
   return (← countRaw conn).toNat
 
 def Conn.execInsert (conn : Conn) (i : InsertStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execStmt conn (i.toSql .sqlServer) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execStmt conn (← Driver.checkedSql (i.toSqlChecked .sqlServer)) ps.toCells
 
 def Conn.execUpdate (conn : Conn) (u : UpdateStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execStmt conn (u.toSql .sqlServer) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execStmt conn (← Driver.checkedSql (u.toSqlChecked .sqlServer)) ps.toCells
 
 def Conn.execDelete (conn : Conn) (d : DeleteStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execStmt conn (d.toSql .sqlServer) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execStmt conn (← Driver.checkedSql (d.toSqlChecked .sqlServer)) ps.toCells
 
 def Conn.execInsertSelect (conn : Conn) (st : InsertSelectStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execStmt conn (st.toSql .sqlServer) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execStmt conn (← Driver.checkedSql (st.toSqlChecked .sqlServer)) ps.toCells
 
 def Conn.execInsertValues (conn : Conn) (st : InsertValuesStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execStmt conn (st.toSql .sqlServer) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execStmt conn (← Driver.checkedSql (st.toSqlChecked .sqlServer)) ps.toCells
 
 end Ms
 

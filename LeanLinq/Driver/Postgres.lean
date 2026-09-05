@@ -1,5 +1,6 @@
 import LeanLinq
 import LeanLinq.Driver.TextCell
+import LeanLinq.Driver.Wire
 
 /-! # Native PostgreSQL driver (libpq)
 
@@ -79,12 +80,12 @@ private opaque pipelineAbort (conn : @&Conn) : IO Unit
 
 /-! ## Wire form: `$N` placeholders, OID-typed text values -/
 
-/-- Rewrite `:name` placeholders to positional `$k+1`, longest name first. -/
-private def toWire (compiled : CompiledSql) : String :=
+/-- Rewrite actual `:name` placeholders to positional `$k+1`; quoted SQL text
+is preserved. Exposed separately so wire preparation can be checked offline. -/
+def toWire (compiled : CompiledSql) : String :=
   let entries := compiled.params.toList.zipIdx.map fun ((name, _), k) =>
     (name, s!"${k + 1}")
-  let entries := entries.mergeSort (fun a b => a.1.length ≥ b.1.length)
-  entries.foldl (fun sql (n, ph) => sql.replace n ph) compiled.sql
+  (Driver.rewriteParams compiled.sql entries).1
 
 private def oidOf : SqlPrim → UInt32
   | .int => 23      -- int4 (function overloads resolve against int4, e.g. SUBSTRING)
@@ -99,7 +100,7 @@ private def oidOf : SqlPrim → UInt32
 private def valueWire : SqlValue → UInt32 × Option String
   | .int i => (23, some (toString i))
   | .long i => (20, some (toString i))
-  | .double f => (701, some (toString f))
+  | .double f => (701, Driver.valueText (.double f))
   | .decimal d => (1700, some d)
   | .string s => (25, some s)
   | .bool b => (16, some (if b then "t" else "f"))
@@ -155,14 +156,14 @@ private def readRows (res : PgResult) (s : Schema) : IO (List (Values s)) := do
 
 def Conn.query (conn : Conn) (q : Query c s)
     (ps : ParamEnv c.params := by exact .nil) : IO (List (Values s)) := do
-  let compiled := q.toSql .postgres
+  let compiled ← Driver.checkedSql (q.toSqlChecked .postgres)
   let (oids, vals) ← wireParams compiled ps.toCells
   let res ← execParamsRaw conn (toWire compiled) oids vals
   readRows res s
 
 def Conn.queryCell (conn : Conn) (sc : ScalarQuery c ⟨t, n⟩)
     (ps : ParamEnv c.params := by exact .nil) : IO (Nullable t) := do
-  let compiled := sc.toSql .postgres
+  let compiled ← Driver.checkedSql (sc.toSqlChecked .postgres)
   let (oids, vals) ← wireParams compiled ps.toCells
   let res ← execParamsRaw conn (toWire compiled) oids vals
   if (← ntuples res) == 0 then pure none
@@ -180,24 +181,24 @@ private def execCompiled (conn : Conn) (compiled : CompiledSql)
   return ((← cmdTuplesRaw res).toNat?).getD 0
 
 def Conn.execInsert (conn : Conn) (i : InsertStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execCompiled conn (i.toSql .postgres) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execCompiled conn (← Driver.checkedSql (i.toSqlChecked .postgres)) ps.toCells
 
 def Conn.execUpdate (conn : Conn) (u : UpdateStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execCompiled conn (u.toSql .postgres) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execCompiled conn (← Driver.checkedSql (u.toSqlChecked .postgres)) ps.toCells
 
 def Conn.execDelete (conn : Conn) (d : DeleteStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execCompiled conn (d.toSql .postgres) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execCompiled conn (← Driver.checkedSql (d.toSqlChecked .postgres)) ps.toCells
 
 def Conn.execInsertSelect (conn : Conn) (st : InsertSelectStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execCompiled conn (st.toSql .postgres) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execCompiled conn (← Driver.checkedSql (st.toSqlChecked .postgres)) ps.toCells
 
 def Conn.execInsertValues (conn : Conn) (st : InsertValuesStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execCompiled conn (st.toSql .postgres) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execCompiled conn (← Driver.checkedSql (st.toSqlChecked .postgres)) ps.toCells
 
 /-! ## `Db` interpretation
 

@@ -6,7 +6,8 @@
 
 A type-safe, deeply-embedded SQL query DSL for Lean 4 — language-integrated queries built
 from intrinsically-typed GADTs and PHOAS binders: schemas index the types of queries and rows,
-so only well-formed SQL elaborates.
+so schema, column types, and nullability are checked at elaboration. Checked
+compilation rejects unsupported SQL compositions before native execution.
 
 Queries are staged: bound row variables carry *SQL expressions* (not runtime values) and
 compose an expression tree. The compiler emits parameterized SQL — literals
@@ -176,24 +177,27 @@ def duplicateAllFast : Db ShopDb 1 Nat := db! {
 On a fetched row, `s["Id"]` in an expression position embeds the cell as a typed
 literal (the inner query's WHERE), and anywhere else reads the honest value —
 the same brackets both ways. Over the wire the doors are per-driver:
-`f.execIO conn budget` (SQLite), `f.execPg conn budget` (PostgreSQL, pipelined),
-`f.execMs conn budget` (SQL Server) — each with an unchecked `…All` variant.
+`f.execIO conn budget` (SQLite), `f.execPg conn budget` (PostgreSQL),
+`f.execMs conn budget` (SQL Server), and `f.execMy conn budget` (MySQL) — each
+with a budget-unchecked `…All` variant.
 All interpret sequentially, one statement per round.
 
 ## Building
 
 ```
 lake build                        # library
-lake test                         # golden tests: 404 cases × 4 dialects (exact SQL + parameters)
-lake exe tests --update           # regenerate Tests/golden/{sqlite,sqlserver,postgres}.golden
+lake test                         # regression checks + 405 cases × 4 dialects (SQL + parameters)
+lake exe tests --update           # regenerate the four SQL golden files
 
-docker compose up -d --wait       # PostgreSQL + SQL Server test databases
-lake exe integration              # execute all 358 cases against live SQLite/PostgreSQL/SQL Server
+docker compose up -d --wait       # PostgreSQL + SQL Server + MySQL test databases
+lake exe integration              # execute the corpus against all four engines (required)
+lake exe integration --db sqlite  # select just the local SQLite engine
 lake exe integration --update     # regenerate Tests/golden/results-*.golden
 
 lake exe sqlitedriver             # native-driver sweeps: full corpus through each driver,
 lake exe pgdriver                 #   compared against the evaluator at the Values level
 lake exe mssqldriver
+lake exe mysqldriver
 ```
 
 ## Integration tests
@@ -203,8 +207,8 @@ the exceptions are shapes `query!` cannot spell — split limit/offset chains an
 set-operation compositions)
 expressing the same shape with `query!` clauses, so both surfaces are covered by
 every layer below. `lake exe integration` executes every registered query and
-statement against real databases: SQLite (local temp file), PostgreSQL and SQL Server (docker compose
-services, driven through `psql`/`sqlcmd` inside the containers — no local client
+statement against real databases: SQLite (local temp file), PostgreSQL, MySQL and SQL Server (docker compose
+services, driven through their CLI clients inside the containers — no local client
 installs needed). The seed dataset mirrors the classic customers/products/orders
 fixture. Parameters are inlined as dialect-escaped literals *for execution only*;
 the library itself always emits parameterized SQL.
@@ -220,8 +224,10 @@ the library itself always emits parameterized SQL.
 - A cross-dialect comparison then checks that all engines agree on every case,
   modulo a small allowlist (AVG division semantics differ by engine: integer on
   SQL Server, numeric on PostgreSQL, float on SQLite).
-- Unreachable databases are skipped with a warning: `--db sqlite,postgres`
-  selects explicitly.
+- Selected databases are required: `--db sqlite,postgres` selects explicitly.
+  Local development can use `--allow-skip` to skip unavailable engines, but
+  unknown selections and runs where no engine executes always fail. CI requires
+  all four engines and runs all four native-driver suites.
 - Prerequisites: the `sqlite3` CLI (ships with macOS and GitHub runners;
   `apt-get install sqlite3` on minimal Linux) and docker compose v2. The SQL
   Server image is amd64-only: on Apple Silicon it runs via Docker Desktop's
@@ -355,6 +361,16 @@ def demo : IO Unit := do
   conn.close
 ```
 
+- **Compilation is checked before execution.** Native drivers use
+  `q.toSqlChecked dialect` (and corresponding scalar/statement methods), which
+  return `Except CompileError CompiledSql`. Use that entry point when passing
+  SQL to another driver. `toSql` remains the pure, unchecked rendering API for
+  inspection and compatibility. In particular, a correlated query used as a
+  derived FROM source is rejected when it crosses a query boundary; ordinary
+  correlated expression subqueries remain supported. Aggregate arguments cannot
+  capture outer query rows: engines can assign such aggregates to the outer
+  query and change its cardinality. Correlated filters with local aggregate
+  arguments remain supported.
 - **Parameters are bound natively**, and there are two kinds. *User parameters*
   (`Ctx.params`) are the query's typed interface — declared names whose values the
   caller supplies at execution, read from the same typed `ParamEnv c.params` by the
@@ -371,6 +387,12 @@ def demo : IO Unit := do
   verified inside rolled-back transactions).
 - **`Db` programs run over the wire**: `f.execIO conn budget` interprets the same
   round-budgeted tree `runWith` interprets in memory, with the same proof discipline.
+  The cardinality and operation-count theorems certify the in-memory semantics;
+  native agreement is checked through differential tests. `execWithin` currently
+  operates on an in-memory `TableEnv`; native execution has no sized equivalent.
+  Grouping requires at least one key, including through the pipeline API, so
+  an empty grouping cannot silently become a global aggregate. Use scalar
+  `.count`, `.sum`, etc. when a global aggregate is intended.
 
 **PostgreSQL** works the same way (`import LeanLinq.Driver.Postgres`, `Pg.connect` with
 a conninfo string; requires libpq — `brew install libpq` / `libpq-dev`): the driver
@@ -517,12 +539,16 @@ return `Bool`/`Prop`, so SQL needs its own).
 
 Core, full query surface (joins, grouping, aggregates, set ops, subqueries),
 statements, the four dialects, native drivers for all four engines, and the
-round-budgeted `Db` layer are implemented, with a 404-case × 4-dialect
+round-budgeted `Db` layer are implemented, with a 405-case × 4-dialect
 golden suite (both surfaces), an executable in-memory oracle, per-driver
-corpus sweeps, and live 3-engine integration tests.
+corpus sweeps, independent edge-case regressions, and four-engine integration tests.
 
 Known limitations: trailing `orderBy` after
 `distinct`/`limit` is pipeline-only (the comprehension fuses ordering before
-them). Possible next steps: EXISTS/NOT IN, window functions, CTEs, and
-cardinality-indexed queries — row bounds, predicate satisfaction, and
-sortedness as propositions the fetch returns with the rows.
+them). Integer AVG semantics differ by engine, including in HAVING predicates.
+Transactions currently require explicit raw BEGIN/COMMIT/ROLLBACK statements;
+queries materialize all result rows, and PostgreSQL Db execution is sequential.
+Possible next steps: checking that grouped projections use only grouping keys
+or aggregates, transaction helpers, sized native budgets, COALESCE/casts,
+UNION ALL, returned/generated keys and upsert, followed by CTEs, window functions,
+streaming, prepared-statement reuse, and applicative pipeline batching.

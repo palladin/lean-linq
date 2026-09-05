@@ -125,10 +125,11 @@ def SqlExprP.evalG {c : SqlType} (ee : EvalEnv ts) : List Scope → SqlExpr ts c
   -- the group's first member stands for the group, the same convention
   -- bare column reads use
   | scs, .inSub (t := t₀) e sq => do
+      let rows ← sq.evalRowsIn ee (scs.head?.getD [])
+      if rows.isEmpty then return some false
       match (← e.evalG ee scs) with
       | none => pure none
       | some v =>
-          let rows ← sq.evalRowsIn ee (scs.head?.getD [])
           let hits := (rows.map fun | .cons cell .nil => SqlType.toNullable cell).map
             (·.map (fun w => t₀.cmpV v w == Ordering.eq))
           pure (if hits.any (· == some true) then some true
@@ -138,7 +139,7 @@ def SqlExprP.evalG {c : SqlType} (ee : EvalEnv ts) : List Scope → SqlExpr ts c
   -- EXISTS: rows or not — never NULL, evaluated in the current scope
   -- (correlation is the construct's whole point)
   | scs, .existsSub sub => do
-      pure (some !(← sub.evalRowsIn ee (scs.head?.getD [])).isEmpty)
+      pure (some (← sub.evalExistsIn ee (scs.head?.getD []) 0))
   -- CASE is lazy in its branches (SQL semantics): only the taken branch
   -- evaluates, so a guarded division cannot error
   | scs, .caseWhen c a b => do
@@ -151,10 +152,12 @@ def SqlExprP.evalG {c : SqlType} (ee : EvalEnv ts) : List Scope → SqlExpr ts c
   | scs, .ceiling (c := c₀) e => do strict1 (← e.evalG ee scs) c₀.ty.ceilV
   | scs, .floor (c := c₀) e => do strict1 (← e.evalG ee scs) c₀.ty.floorV
   | scs, .substring e start len => do
-      pure ((← e.evalG ee scs).map (sqlSubstring · start len))
+      strict1 (← e.evalG ee scs) fun s =>
+        if len < 0 then .error (.invalidStatement "negative SUBSTRING length")
+        else pure (some (sqlSubstring s start len))
   | scs, .upper e => do pure ((← e.evalG ee scs).map (·.toUpper))
   | scs, .lower e => do pure ((← e.evalG ee scs).map (·.toLower))
-  | scs, .trim e => do pure ((← e.evalG ee scs).map (·.trimAscii.toString))
+  | scs, .trim e => do pure ((← e.evalG ee scs).map sqlTrim)
   | scs, .length e => do pure ((← e.evalG ee scs).map (fun s => (s.length : Int)))
   | _, .now =>
       match ee.now with
@@ -219,8 +222,10 @@ def SpineQP.evalScopes : SpineQ ts g s → EvalEnv ts → Nat → List Scope →
     Except EvalError (List (List Scope × Values s))
   | .yield r, ee, _, scopes =>
       scopes.mapM fun sc => do pure ([sc], ← r.evalRow ee [sc])
-  | .groupYield ks hv ord r, ee, _, scopes => do
-      let keyed ← scopes.mapM fun sc => do pure (← evalKeyCells ee sc ks, sc)
+  | .groupYield ⟨c, e⟩ ks hv ord r, ee, _, scopes => do
+      let keyed ← scopes.mapM fun sc => do
+        let first : AnyCell := ⟨c.ty, ← e.evalG ee [sc]⟩
+        pure (first :: (← evalKeyCells ee sc ks), sc)
       let groups := keyed.foldl (init := []) fun acc (kv, sc) => insertGrouped acc kv sc
       let tagged? ← groups.mapM fun (_, ms) => do
         let ok ← match hv with
@@ -310,6 +315,78 @@ def SpineQP.enumScopes : {g₀ : Terminal} → SpineQ ts g₀ s → EvalEnv ts �
         pure (rows.map fun v => (s!"a{n}", ⟨s₀, v⟩) :: sc)
       (f ⟨s!"a{n}"⟩).enumScopes ee (n + 1) exts.flatten h
 
+/-- Enumerate the result groups for EXISTS without evaluating the SELECT
+list or ordering. GROUP BY and HAVING still determine which rows exist;
+derived sources retain their own value semantics for downstream predicates. -/
+def SpineQP.enumGroups : SpineQ ts g s → EvalEnv ts → Nat → List Scope →
+    Except EvalError (List (List Scope))
+  | .yield _, _, _, scopes => pure (scopes.map (fun sc => [sc]))
+  | .groupYield ⟨c, e⟩ ks hv _ _, ee, _, scopes => do
+      let keyed ← scopes.mapM fun sc => do
+        let first : AnyCell := ⟨c.ty, ← e.evalG ee [sc]⟩
+        pure (first :: (← evalKeyCells ee sc ks), sc)
+      let groups := keyed.foldl (init := []) fun acc (kv, sc) => insertGrouped acc kv sc
+      (groups.map (·.2)).filterM fun ms => do
+        match hv with
+        | none => pure true
+        | some h => pure ((← h.evalG ee ms) == some true)
+  | .guard b rest, ee, n, scopes => do
+      let survivors ← scopes.filterM fun sc => do
+        pure ((← b.evalG ee [sc]) == some true)
+      rest.enumGroups ee n survivors
+  | .order _ rest, ee, n, scopes => rest.enumGroups ee n scopes
+  | .fromT (s := s₀) (inst := i) _ f, ee, n, scopes => do
+      let alias := s!"a{n}"
+      let exts := scopes.flatMap fun sc =>
+        (i.rows ee.tables).map fun v => (alias, ⟨s₀, v⟩) :: sc
+      (f ⟨alias⟩).enumGroups ee (n + 1) exts
+  | .joinT (s := s₀) (inst := i) _ on' f, ee, n, scopes => do
+      let alias := s!"a{n}"
+      let exts := scopes.flatMap fun sc =>
+        (i.rows ee.tables).map fun v => (alias, ⟨s₀, v⟩) :: sc
+      let hits ← exts.filterM fun ext => do
+        pure ((← (on' ⟨alias⟩).evalG ee [ext]) == some true)
+      (f ⟨alias⟩).enumGroups ee (n + 1) hits
+  | .joinLeftT (s := s₀) (inst := i) _ on' f, ee, n, scopes => do
+      let alias := s!"a{n}"
+      let exts ← scopes.mapM fun sc => do
+        let hits ← (i.rows ee.tables).filterM fun v => do
+          pure ((← (on' ⟨alias⟩).evalG ee [(alias, ⟨s₀, v⟩) :: sc]) == some true)
+        if hits.isEmpty then
+          pure [(alias, ⟨s₀.asNull, Values.nulls s₀⟩) :: sc]
+        else
+          pure (hits.map fun v => (alias, ⟨s₀, v⟩) :: sc)
+      (f ⟨alias⟩).enumGroups ee (n + 1) exts.flatten
+  | .fromQ (s := s₀) q f, ee, n, scopes => do
+      let exts ← scopes.mapM fun sc => do
+        let rows ← q.evalRowsIn ee sc
+        pure (rows.map fun v => (s!"a{n}", ⟨s₀, v⟩) :: sc)
+      (f ⟨s!"a{n}"⟩).enumGroups ee (n + 1) exts.flatten
+
+/-- Whether a query has a row after skipping `skip` results. EXISTS can
+ignore projected values unless DISTINCT with an offset, INTERSECT, EXCEPT,
+or an offset into UNION needs those values to determine membership. -/
+def QueryP.evalExistsIn : QueryA ts s → EvalEnv ts → Scope → Nat → Except EvalError Bool
+  | .spine sp, ee, sc, skip => do
+      pure ((← sp.enumGroups ee sc.length [sc]).length > skip)
+  | .distinctC q, ee, sc, skip => do
+      if skip == 0 then q.evalExistsIn ee sc 0
+      else pure ((List.dedupBy Values.beq (← q.evalRowsIn ee sc)).length > skip)
+  | .limitC q lim? off?, ee, sc, skip => do
+      if lim?.any (· ≤ skip) then pure false
+      else q.evalExistsIn ee sc (off?.getD 0 + skip)
+  | .setOpC op a b, ee, sc, skip => do
+      if op == .union && skip == 0 then
+        if ← a.evalExistsIn ee sc 0 then pure true else b.evalExistsIn ee sc 0
+      else
+        let ra ← a.evalRowsIn ee sc
+        let rb ← b.evalRowsIn ee sc
+        let rows := match op with
+          | .union => List.dedupBy Values.beq (ra ++ rb)
+          | .intersect => List.dedupBy Values.beq (ra.filter (fun r => rb.any (Values.beq r)))
+          | .except => List.dedupBy Values.beq (ra.filter (fun r => !rb.any (Values.beq r)))
+        pure (rows.length > skip)
+
 /-- The total evaluation core (see `Query.run` for the public entry point).
 Boundary clauses are list operations over the rows of the query underneath
 (SQL set semantics: UNION, INTERSECT, and EXCEPT deduplicate); spines
@@ -324,10 +401,12 @@ def QueryP.evalRowsIn : QueryA ts s → EvalEnv ts → Scope → Except EvalErro
   | .distinctC q, ee, sc => do
       pure (List.dedupBy Values.beq (← q.evalRowsIn ee sc))
   | .limitC q lim? off?, ee, sc => do
-      let rows := (← q.evalRowsIn ee sc).drop (off?.getD 0)
-      pure (match lim? with
-        | some l => rows.take l
-        | none => rows)
+      if lim? = some 0 then pure []
+      else
+        let rows := (← q.evalRowsIn ee sc).drop (off?.getD 0)
+        pure (match lim? with
+          | some l => rows.take l
+          | none => rows)
   | .setOpC op a b, ee, sc => do
       let ra ← a.evalRowsIn ee sc
       let rb ← b.evalRowsIn ee sc

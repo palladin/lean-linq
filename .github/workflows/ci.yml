@@ -11,12 +11,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ensure sqlite3 CLI + headers (native driver)
+      - name: Install database CLI and native development libraries
         run: |
           command -v sqlite3 || { sudo apt-get update && sudo apt-get install -y sqlite3; }
           dpkg -s libsqlite3-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y libsqlite3-dev; }
           dpkg -s libpq-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y libpq-dev; }
           dpkg -s freetds-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y freetds-dev; }
+          dpkg -s libmysqlclient-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y libmysqlclient-dev; }
 
       - name: Install elan
         run: |
@@ -33,7 +34,7 @@ jobs:
       - name: Build
         run: lake build
 
-      - name: Unit golden tests (SQL text + params, 3 dialects)
+      - name: Unit golden tests (SQL text + params, 4 dialects)
         run: lake test
 
       - name: Native SQLite driver tests (typed, Values-to-Values vs the evaluator)
@@ -47,15 +48,20 @@ jobs:
       - name: Native PostgreSQL driver tests (typed, over the wire protocol)
         run: |
           lake exe pgdriver | tee pg-sweep.out
-          grep -q "all green" pg-sweep.out
+          grep -q '^driver(postgres): .*all green$' pg-sweep.out
 
       - name: Native SQL Server driver tests (typed, over TDS RPC)
         run: |
           lake exe mssqldriver | tee ms-sweep.out
-          grep -q "all green" ms-sweep.out
+          grep -q '^driver(mssql): .*all green$' ms-sweep.out
 
-      - name: Integration tests (execute against live SQLite/PostgreSQL/SQL Server)
-        run: lake exe integration
+      - name: Native MySQL driver tests (typed, over prepared statements)
+        run: |
+          lake exe mysqldriver | tee mysql-sweep.out
+          grep -q '^driver(mysql): .*all green$' mysql-sweep.out
+
+      - name: Integration tests (all four engines required)
+        run: lake exe integration --db sqlite,postgres,mssql,mysql
 
       - name: Stop databases
         if: always()

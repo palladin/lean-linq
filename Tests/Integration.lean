@@ -6,8 +6,8 @@ import Tests.SeedSql
 /-! # Integration runner
 
 Executes every registered query/statement against live databases:
-SQLite (local temp file), PostgreSQL and SQL Server (docker compose services,
-driven through `psql`/`sqlcmd` inside the containers). Parameters are inlined
+SQLite (local temp file), PostgreSQL, MySQL and SQL Server (docker compose services,
+driven through their CLI clients inside the containers). Parameters are inlined
 as dialect-escaped literals *for execution only* — the library itself never
 inlines. Row results are normalized and checked three ways: against
 `Tests/golden/results-{db}.golden` (regenerate with
@@ -17,7 +17,10 @@ differential-tested against the executable semantics; and against each other
 (cross-dialect agreement, modulo a known-variant allowlist — AVG division
 semantics).
 
-Usage: `lake exe integration [--db sqlite,postgres,mssql] [--update]` -/
+Selected engines are required by default. `--allow-skip` permits unavailable
+engines during local development, but a run with no engines always fails.
+
+Usage: `lake exe integration [--db sqlite,postgres,mssql,mysql] [--allow-skip] [--update]` -/
 
 open LeanLinq TQ
 
@@ -204,13 +207,20 @@ def goldenPath (dn : String) : String := s!"Tests/golden/results-{dn}.golden"
 
 def main (args : List String) : IO UInt32 := do
   let update := args.contains "--update"
-  let selected :=
+  let allowSkip := args.contains "--allow-skip"
+  let selected ←
     match args.idxOf? "--db" with
     | some i =>
       match args[i+1]? with
-      | some csv => csv.splitOn ","
-      | none => dialects.map Prod.fst
-    | none => dialects.map Prod.fst
+      | some csv => pure (csv.splitOn ",")
+      | none =>
+          IO.eprintln "--db requires a comma-separated list of dialects"
+          return 1
+    | none => pure (dialects.map Prod.fst)
+  let unknown := selected.filter fun name => !dialects.any (fun d => d.1 == name)
+  unless unknown.isEmpty do
+    IO.eprintln s!"unknown dialect selection: {String.intercalate ", " unknown}; expected sqlite,postgres,mssql,mysql"
+    return 1
   let allNamed : List (Bool × String × Case) :=
     queryCases.map (fun (n, c) => (false, n, c)) ++
     twinCases.map (fun (n, c) => (false, n, c)) ++
@@ -227,7 +237,8 @@ def main (args : List String) : IO UInt32 := do
       let hint :=
         if db == DatabaseType.sqlite then "is the `sqlite3` CLI installed?"
         else "is `docker compose up -d --wait` running?"
-      IO.eprintln s!"[{dn}] unreachable — skipped ({hint})"
+      IO.eprintln s!"[{dn}] unreachable ({hint})"
+      unless allowSkip do failures := failures + 1
       continue
     let (ok, out) ← execSql db sqliteFile (setupSql db)
     unless ok do
@@ -285,7 +296,9 @@ def main (args : List String) : IO UInt32 := do
            a.result != b.result then
           failures := failures + 1
           IO.eprintln s!"CROSS-DIALECT MISMATCH {a.name}: [{refName}] {a.result} ≠ [{dn}] {b.result}"
-  | [] => IO.eprintln "no dialect ran"
+  | [] =>
+      IO.eprintln "no dialect ran"
+      failures := failures + 1
   if failures == 0 then
     IO.println "integration: all green"
     return 0

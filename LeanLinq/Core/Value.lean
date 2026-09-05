@@ -337,13 +337,18 @@ def civilFromDays (z : Int) : Int × Int × Int :=
 
 private def pad2 (n : Int) : String := if n < 10 then s!"0{n}" else s!"{n}"
 
+private def padYear (n : Int) : String :=
+  let digits := toString n.natAbs
+  let padded := String.ofList (List.replicate (4 - digits.length) '0') ++ digits
+  if n < 0 then "-" ++ padded else padded
+
 /-- The time-of-day part of a normalized date-time (midnight for
 date-only strings) — date arithmetic preserves it, as engines do. -/
 def timeOfDay (s : String) : String :=
   if s.length ≥ 19 then ((s.drop 11).take 8).toString else "00:00:00"
 
 def fmtDateTime (ymd : Int × Int × Int) (time : String := "00:00:00") : String :=
-  s!"{ymd.1}-{pad2 ymd.2.1}-{pad2 ymd.2.2} {time}"
+  s!"{padYear ymd.1}-{pad2 ymd.2.1}-{pad2 ymd.2.2} {time}"
 
 def isLeapYear (y : Int) : Bool :=
   y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)
@@ -379,6 +384,10 @@ def dateDiffYears (a b : String) : Int := (parseYMD b).1 - (parseYMD a).1
 
 /-! ## String functions -/
 
+/-- SQL's default TRIM removes space characters, preserving tabs and newlines. -/
+def sqlTrim (s : String) : String :=
+  String.ofList (((s.toList.dropWhile (· == ' ')).reverse.dropWhile (· == ' ')).reverse)
+
 /-- SQL `LIKE` (`%` any run, `_` any char). -/
 def likeMatch (s pat : String) : Bool := go pat.toList s.toList
 where
@@ -393,9 +402,12 @@ where
     | _ :: _, [] => false
   termination_by ps cs => (cs.length, ps.length)
 
-/-- SQL SUBSTRING: 1-based start. -/
+/-- SQL SUBSTRING with PostgreSQL/SQL Server's 1-based positions. A start
+before position 1 consumes that many characters of the requested length;
+the compiler lowers the other dialects to this convention. -/
 def sqlSubstring (s : String) (start len : Int) : String :=
-  String.ofList ((s.toList.drop (start - 1).toNat).take len.toNat)
+  let effectiveLength := len + min (start - 1) 0
+  String.ofList ((s.toList.drop (start - 1).toNat).take effectiveLength.toNat)
 
 /-! ## Display -/
 

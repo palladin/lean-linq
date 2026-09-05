@@ -190,7 +190,9 @@ inductive SpineQP (ρ : Schema → Type) (ts : Ctx) : Terminal → Schema → Ty
   -- the grouped terminal: GROUP BY keys, optional HAVING, its own ORDER BY
   -- keys (the pipeline's aggregate-aware `orderBy`, rendered inside the
   -- grouped statement), and the grouped projection
-  | groupYield : {s : Schema} → List (KeyExprP ρ ts) →
+  -- A first key is required: empty-key grouping would compile as a global
+  -- aggregate, which produces a row even when the input cardinality is zero.
+  | groupYield : {s : Schema} → KeyExprP ρ ts → List (KeyExprP ρ ts) →
       Option (SqlExprP ρ ts ⟨.bool, true⟩) → List (OrderKeyP ρ ts) →
       RowP ρ ts s → SpineQP ρ ts .grouped s
   | guard : {g : Terminal} → {s : Schema} → {nb : Bool} →
@@ -406,8 +408,8 @@ def SqlExprP.key (e : SqlExprP ρ ts c) : KeyExprP ρ ts := ⟨c, e⟩
 structure Agg where
 
 def Agg.count (_ : Agg) : SqlExprP ρ ts ⟨.int, true⟩ := .widen .countAll
-def Agg.sum (_ : Agg) (e : SqlExprP ρ ts ⟨t, n⟩) : SqlExprP ρ ts ⟨t, true⟩ := .aggE .sum e
-def Agg.avg (_ : Agg) (e : SqlExprP ρ ts ⟨t, n⟩) : SqlExprP ρ ts ⟨t, true⟩ := .aggE .avg e
+def Agg.sum (_ : Agg) (e : SqlExprP ρ ts ⟨t, n⟩) [SqlNumeric t] : SqlExprP ρ ts ⟨t, true⟩ := .aggE .sum e
+def Agg.avg (_ : Agg) (e : SqlExprP ρ ts ⟨t, n⟩) [SqlNumeric t] : SqlExprP ρ ts ⟨t, true⟩ := .aggE .avg e
 def Agg.min (_ : Agg) (e : SqlExprP ρ ts ⟨t, n⟩) : SqlExprP ρ ts ⟨t, true⟩ := .aggE .min e
 def Agg.max (_ : Agg) (e : SqlExprP ρ ts ⟨t, n⟩) : SqlExprP ρ ts ⟨t, true⟩ := .aggE .max e
 

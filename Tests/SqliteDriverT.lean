@@ -1,5 +1,6 @@
 import LeanLinq.Driver.Sqlite
 import Tests.DriverSweep
+import Tests.DriverRegressions
 
 /-! # Native SQLite driver — differential test (`lake exe sqlitedriver`)
 
@@ -25,6 +26,7 @@ open LeanLinq LeanLinq.Sqlite TQ
   TQ.wholeTableFanOut.execIO conn 1000 seedParams
 
 def main : IO UInt32 := do
+  DriverRegressions.run
   let path := "/tmp/leanlinq-driver.db"
   if ← System.FilePath.pathExists path then IO.FS.removeFile path
   let conn ← Sqlite.connect path

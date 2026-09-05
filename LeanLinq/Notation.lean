@@ -58,7 +58,8 @@ instance : Neg (SqlExprP ρ ts ⟨.int, n⟩) := ⟨fun e => .arith .sub (.atFla
 
 /-- Render a scientific literal (`99.99`) as exact decimal digits. -/
 private def scientificDigits (m : Nat) (sign : Bool) (e : Nat) : String :=
-  if !sign || e == 0 then toString m
+  if !sign then toString (m * 10 ^ e)
+  else if e == 0 then toString m
   else
     let s := toString m
     let s := if s.length ≤ e then String.ofList (List.replicate (e + 1 - s.length) '0') ++ s else s

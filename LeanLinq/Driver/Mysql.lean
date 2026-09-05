@@ -1,5 +1,6 @@
 import LeanLinq
 import LeanLinq.Driver.TextCell
+import LeanLinq.Driver.Wire
 
 /-! # Native MySQL driver (libmysqlclient)
 
@@ -51,17 +52,6 @@ private opaque execParamsRaw (conn : @&Conn) (sql : @&String)
 
 /-! ## Wire form: occurrence-order `?` placeholders, text values -/
 
-private def valueText : SqlValue → Option String
-  | .int i => some (toString i)
-  | .long i => some (toString i)
-  | .double f => some (toString f)
-  | .decimal d => some d
-  | .string s => some s
-  | .bool b => some (if b then "1" else "0")
-  | .dateTime s => some s
-  | .guid g => some g
-  | .null => none   -- unreachable: `.null` marks user-named params
-
 /-- The text value for one compiled parameter: auto parameters carry their
 values; user-named ones resolve from the typed cells. -/
 private def paramText (cells : List (String × ((t : SqlPrim) × Nullable t)))
@@ -72,36 +62,20 @@ private def paramText (cells : List (String × ((t : SqlPrim) × Nullable t)))
       match cells.find? (·.1 == bare) with
       | some (_, ⟨t, cell⟩) => pure (cell.map (Driver.cellText t))
       | none => throw (IO.userError s!"mysql bind: no typed value for {name}")
-  | v => pure (valueText v)
+  | v => pure (Driver.valueText v)
 
-/-- Scan the SQL replacing each `:name` occurrence with `?`, emitting the
-value list in occurrence order. Literals never contain `:` (values always
-travel as parameters), so the scan is safe. -/
-private partial def scanParams (names : List String)
-    (lookup : String → IO (Option String)) :
-    List Char → String → Array (Option String) →
-    IO (String × Array (Option String))
-  | [], acc, vals => pure (acc, vals)
-  | ':' :: cs, acc, vals => do
-      let tail := String.mk (':' :: cs)
-      match names.find? (fun n => tail.startsWith n) with
-      | some n => do
-          let v ← lookup n
-          scanParams names lookup (cs.drop (n.length - 1))
-            (acc ++ "?") (vals.push v)
-      | none => scanParams names lookup cs (acc.push ':') vals
-  | c :: cs, acc, vals => scanParams names lookup cs (acc.push c) vals
-
-private def toWire (compiled : CompiledSql)
+/-- Prepare positional SQL and values without connecting. Quoted SQL text is
+preserved, and only real placeholder occurrences contribute bound values. -/
+def toWire (compiled : CompiledSql)
     (cells : List (String × ((t : SqlPrim) × Nullable t))) :
     IO (String × Array (Option String)) := do
-  let names := (compiled.params.toList.map (·.1)).mergeSort
-    (fun a b => a.length ≥ b.length)
+  let entries := compiled.params.toList.map (fun (name, _) => (name, "?"))
+  let (sql, names) := Driver.rewriteParams compiled.sql entries
   let lookup := fun (n : String) => do
     match compiled.params.toList.find? (·.1 == n) with
     | some (_, v) => paramText cells n v
     | none => throw (IO.userError "mysql toWire: unknown param")
-  scanParams names lookup compiled.sql.toList "" #[]
+  return (sql, ← names.mapM lookup)
 
 /-! ## Text decode → `Values` -/
 
@@ -120,14 +94,14 @@ private def readRow : (s : Schema) → List (Option String) → IO (Values s)
 
 def Conn.query (conn : Conn) (q : Query c s)
     (ps : ParamEnv c.params := by exact .nil) : IO (List (Values s)) := do
-  let compiled := q.toSql .mysql
+  let compiled ← Driver.checkedSql (q.toSqlChecked .mysql)
   let (sql, vals) ← toWire compiled ps.toCells
   let rows ← queryRaw conn sql vals
   rows.toList.mapM fun r => readRow s r.toList
 
 def Conn.queryCell (conn : Conn) (sc : ScalarQuery c ⟨t, n⟩)
     (ps : ParamEnv c.params := by exact .nil) : IO (Nullable t) := do
-  let compiled := sc.toSql .mysql
+  let compiled ← Driver.checkedSql (sc.toSqlChecked .mysql)
   let (sql, vals) ← toWire compiled ps.toCells
   let rows ← queryRaw conn sql vals
   match rows[0]? with
@@ -144,24 +118,24 @@ private def execCompiled (conn : Conn) (compiled : CompiledSql)
   return (← execParamsRaw conn sql vals).toNat
 
 def Conn.execInsert (conn : Conn) (i : InsertStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execCompiled conn (i.toSql .mysql) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execCompiled conn (← Driver.checkedSql (i.toSqlChecked .mysql)) ps.toCells
 
 def Conn.execUpdate (conn : Conn) (u : UpdateStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execCompiled conn (u.toSql .mysql) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execCompiled conn (← Driver.checkedSql (u.toSqlChecked .mysql)) ps.toCells
 
 def Conn.execDelete (conn : Conn) (d : DeleteStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execCompiled conn (d.toSql .mysql) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execCompiled conn (← Driver.checkedSql (d.toSqlChecked .mysql)) ps.toCells
 
 def Conn.execInsertSelect (conn : Conn) (st : InsertSelectStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execCompiled conn (st.toSql .mysql) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execCompiled conn (← Driver.checkedSql (st.toSqlChecked .mysql)) ps.toCells
 
 def Conn.execInsertValues (conn : Conn) (st : InsertValuesStmt c n s)
-    (ps : ParamEnv c.params := by exact .nil) : IO Nat :=
-  execCompiled conn (st.toSql .mysql) ps.toCells
+    (ps : ParamEnv c.params := by exact .nil) : IO Nat := do
+  execCompiled conn (← Driver.checkedSql (st.toSqlChecked .mysql)) ps.toCells
 
 /-! ## `Db` interpretation (sequential, one statement per round) -/
 

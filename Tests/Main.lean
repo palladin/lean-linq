@@ -1,11 +1,14 @@
 import Tests.QueriesC
 import Tests.StatementsT
 import Tests.Basic
+import Tests.CoreRegressions
+import Tests.EvalRegressions
+import Tests.CompilerRegressions
 
 /-! # Golden-test runner
 
-Compiles every registered query/statement for all three dialects and compares
-against `Tests/golden/{sqlite,sqlserver,postgres}.golden` (one line per case:
+Compiles every registered query/statement for all four dialects and compares
+against `Tests/golden/{sqlite,sqlserver,postgres,mysql}.golden` (one line per case:
 `name<TAB>sql<TAB>params`). Regenerate with `lake exe tests -- --update` (or
 `lake exe tests --update`), then review the diff. -/
 

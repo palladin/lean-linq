@@ -39,9 +39,9 @@ shape does not depend on row values). ORDER BY inside a derived table
 (`fromQ`) does not count — it belongs to the inner statement. -/
 def SpineQP.hasOrder : SpineQ ts g s → Bool
   | .yield _ => false
-  | .groupYield _ _ ord _ => !ord.isEmpty
+  | .groupYield _ _ _ ord _ => !ord.isEmpty
   | .guard _ rest => rest.hasOrder
-  | .order _ _ => true
+  | .order ks rest => !ks.isEmpty || rest.hasOrder
   | .fromT (g := .plain) (inst := _) _ f => (f default).hasOrder
   | .fromT (g := .grouped) (inst := _) _ f => (f default).hasOrder
   | .joinT (g := .plain) (inst := _) _ _ f => (f default).hasOrder
@@ -56,7 +56,7 @@ def SpineQP.hasOrder : SpineQ ts g s → Bool
 def QueryP.hasOrderBy : QueryA ts s → Bool
   | .spine sp => sp.hasOrder
   | .distinctC q => q.hasOrderBy
-  | .limitC q _ _ => q.hasOrderBy
+  | .limitC q lim? _ => lim? != some 0 && q.hasOrderBy
   | .setOpC .. => false
 
 namespace SpineQ
@@ -96,6 +96,21 @@ def predWrap (isPred : Bool) (s : String) : CompileM String := do
   else
     return s
 
+/-- T-SQL predicates need a scalar representation in projections, comparison
+operands, CASE branches, and other value positions. Test both truth values:
+`ELSE 0` alone would silently turn SQL UNKNOWN into FALSE. Reusing the
+rendered text also reuses the parameters already allocated for the predicate. -/
+def valueWrap (isPred : Bool) (s : String) : CompileM String := do
+  if (← read) == .sqlServer && isPred then
+    return s!"CASE WHEN {s} THEN 1 WHEN NOT ({s}) THEN 0 ELSE NULL END"
+  else
+    return s
+
+private def checkAggregateType (op : AggOp) (t : SqlPrim) : CompileM Unit := do
+  if (op == .sum || op == .avg) &&
+      !(t == .int || t == .long || t == .double || t == .decimal) then
+    recordCompileError (.invalidAggregate s!"{op.token} requires a numeric argument")
+
 mutual
 
 /-- Render an expression to SQL text for the ambient dialect, allocating a
@@ -113,6 +128,7 @@ def SqlExprP.compile : SqlExpr ts c → CompileM String
   | .paramE (inst := _) name => refParam name
   | .widen e => e.compile
   | .field _ row name => do
+      checkFieldScope row.alias name
       if row.alias.isEmpty then quote name
       else return s!"{← quote row.alias}.{← quote name}"
   | .arith (c := c₀) op a b  => do
@@ -120,52 +136,61 @@ def SqlExprP.compile : SqlExpr ts c → CompileM String
       let tok := if (← read) == .mysql && op == .div
           && (c₀.ty == .int || c₀.ty == .long)
         then "DIV" else op.token
-      return s!"({← a.compile} {tok} {← b.compile})"
+      return s!"({← valueWrap a.isPredicate (← a.compile)} {tok} {← valueWrap b.isPredicate (← b.compile)})"
   | .concat a b    => do
       -- MySQL: || is logical OR — string concatenation is CONCAT
       if (← read) == .mysql then
         return s!"CONCAT({← a.compile}, {← b.compile})"
       let tok := if (← read) == .sqlServer then "+" else "||"
       return s!"({← a.compile} {tok} {← b.compile})"
-  | .cmp (t := t₀) op a b => do
-      let sa ← a.compile
-      let sb ← b.compile
-      -- SQL Server: predicates are not values; convert before comparing.
-      let wrap (e : SqlExpr ts ⟨t₀, true⟩) (s : String) : String :=
-        if t₀ == .bool && e.isPredicate then s!"CASE WHEN {s} THEN 1 ELSE 0 END" else s
-      if (← read) == .sqlServer then
-        return s!"({wrap a sa} {op.token} {wrap b sb})"
-      else
-        return s!"({sa} {op.token} {sb})"
+  | .cmp op a b => do
+      let sa ← valueWrap a.isPredicate (← a.compile)
+      let sb ← valueWrap b.isPredicate (← b.compile)
+      return s!"({sa} {op.token} {sb})"
   | .and a b       => return s!"({← predWrap a.isPredicate (← a.compile)} AND {← predWrap b.isPredicate (← b.compile)})"
   | .or a b        => return s!"({← predWrap a.isPredicate (← a.compile)} OR {← predWrap b.isPredicate (← b.compile)})"
   | .not a         => return s!"(NOT {← predWrap a.isPredicate (← a.compile)})"
-  | .isNull e      => return s!"{← e.compile} IS NULL"
-  | .isNotNull e   => return s!"{← e.compile} IS NOT NULL"
+  | .isNull e      => return s!"{← valueWrap e.isPredicate (← e.compile)} IS NULL"
+  | .isNotNull e   => return s!"{← valueWrap e.isPredicate (← e.compile)} IS NOT NULL"
   | .like e p      => return s!"{← e.compile} LIKE {← p.compile}"
   -- an empty IN list is invalid SQL (PostgreSQL/SQL Server reject `IN ()`);
   -- SQL's `x IN (empty)` is FALSE without evaluating x, so compile exactly that
   | .inList _ []   => return "(1 = 0)"
-  | .inList e es   => return s!"{← e.compile} IN ({String.intercalate ", " (← SqlExprP.compileList es)})"
-  | .inSub e sub   => return s!"{← e.compile} IN ({← sub.compileStmt})"
-  | .existsSub sub => return s!"EXISTS ({← sub.compileStmt})"
-  | .scalarSub sub => return s!"({← sub.compileScalar})"
+  | .inList e es   => return s!"{← valueWrap e.isPredicate (← e.compile)} IN ({String.intercalate ", " (← SqlExprP.compileList es)})"
+  | .inSub e sub   => return s!"{← valueWrap e.isPredicate (← e.compile)} IN ({← withCompileStatement sub.compileStmt})"
+  | .existsSub sub => return s!"EXISTS ({← withCompileStatement sub.compileStmt})"
+  | .scalarSub sub => return s!"({← withCompileStatement sub.compileScalar})"
   | .caseWhen c a b =>
-      return s!"CASE WHEN {← predWrap c.isPredicate (← c.compile)} THEN {← a.compile} ELSE {← b.compile} END"
-  | .aggE op e     => return s!"{op.token}({← e.compile})"
-  | .countAll      => pure "COUNT(*)"
-  | .abs e         => return s!"ABS({← e.compile})"
+      return s!"CASE WHEN {← predWrap c.isPredicate (← c.compile)} THEN {← valueWrap a.isPredicate (← a.compile)} ELSE {← valueWrap b.isPredicate (← b.compile)} END"
+  | .aggE (t := t) op e => do
+      checkAggregate
+      checkAggregateType op t
+      let arg ← withAggregateArgument do valueWrap e.isPredicate (← e.compile)
+      return s!"{op.token}({arg})"
+  | .countAll => do
+      checkAggregate
+      pure "COUNT(*)"
+  | .abs e         => return s!"ABS({← valueWrap e.isPredicate (← e.compile)})"
   | .round e digits => do
       let p ← pushParam (.int digits)
-      return s!"ROUND({← e.compile}, {p})"
+      return s!"ROUND({← valueWrap e.isPredicate (← e.compile)}, {p})"
   | .ceiling e     => do
       let name := match (← read) with
         | .sqlite => "CEIL"
         | _ => "CEILING"
-      return s!"{name}({← e.compile})"
-  | .floor e       => return s!"FLOOR({← e.compile})"
+      return s!"{name}({← valueWrap e.isPredicate (← e.compile)})"
+  | .floor e       => return s!"FLOOR({← valueWrap e.isPredicate (← e.compile)})"
   | .substring e start len => do
-      let name := if (← read) == .sqlite then "SUBSTR" else "SUBSTRING"
+      let db ← read
+      let name := if db == .sqlite then "SUBSTR" else "SUBSTRING"
+      if len < 0 then recordCompileError (.negativeSubstringLength len)
+      -- PostgreSQL/SQL Server count positions before the first character
+      -- against the requested length; SQLite/MySQL use different native
+      -- conventions for zero/negative starts, so lower those explicitly.
+      let (start, len) :=
+        if (db == .sqlite || db == .mysql) && start ≤ 0 then
+          (1, max 0 (len + start - 1))
+        else (start, len)
       let p1 ← pushParam (.int start)
       let p2 ← pushParam (.int len)
       return s!"{name}({← e.compile}, {p1}, {p2})"
@@ -231,13 +256,13 @@ def SqlExprP.compile : SqlExpr ts c → CompileM String
 def SqlExprP.compileList :
     List ((p : SqlType) × SqlExpr ts p) → CompileM (List String)
   | [] => pure []
-  | ⟨_, e⟩ :: es => return (← e.compile) :: (← SqlExprP.compileList es)
+  | ⟨_, e⟩ :: es => return (← valueWrap e.isPredicate (← e.compile)) :: (← SqlExprP.compileList es)
 
 /-- Render a projected row as a SELECT list: `expr AS name` per column. -/
 def RowP.selectList : {s : Schema} → Row ts s → CompileM (List String)
   | [], .nil => pure []
   | (name, _) :: _, .cons e r => do
-      let item ← e.compile
+      let item ← valueWrap e.isPredicate (← e.compile)
       let rest ← r.selectList
       return s!"{item} AS {← quote name}" :: rest
 
@@ -245,7 +270,7 @@ def compileOrderKeyItems : List (OrderKey ts) → CompileM (List String)
   | [] => pure []
   | ⟨_, e, dir⟩ :: ks => do
       let db ← read
-      let x ← e.compile
+      let x ← valueWrap e.isPredicate (← e.compile)
       -- the evaluator (and SQLite/SQL Server) sort NULL smallest; PostgreSQL
       -- defaults to NULLS LAST on ASC — make the placement explicit there
       let nulls := if db == .postgres then
@@ -256,7 +281,7 @@ def compileOrderKeyItems : List (OrderKey ts) → CompileM (List String)
 def compileGroupKeyItems : List (KeyExpr ts) → CompileM (List String)
   | [] => pure []
   | ⟨_, e⟩ :: ks => do
-      return (← e.compile) :: (← compileGroupKeyItems ks)
+      return (← valueWrap e.isPredicate (← e.compile)) :: (← compileGroupKeyItems ks)
 
 /-- Compile a full query. Boundary clauses (DISTINCT, LIMIT, set ops,
 GROUP BY) decorate the statement produced by the spine underneath. -/
@@ -268,16 +293,22 @@ def QueryP.compileStmt : QueryA ts s → CompileM String
   -- (structural recursion forbids `asSpine` here: it can wrap `q`, producing
   -- a larger term)
   | .distinctC (s := s₀) q => do
-      let sub ← q.compileStmt
+      let sub ← withCompileStatement q.compileStmt
       let alias ← freshAlias
       let sel := String.intercalate ", " (← aliasSelect alias s₀)
       return s!"SELECT DISTINCT {sel} FROM ({sub}) {← quote alias}"
-  | .limitC q lim? off? => do
+  | .limitC (s := s₀) q lim? off? => do
       let inner ← q.compileStmt
       match (← read) with
       | .sqlServer =>
           let ob := if q.hasOrderBy then "" else " ORDER BY (SELECT NULL)"
           let offN := off?.getD 0
+          -- FETCH requires a positive row count in T-SQL. Keep pagination
+          -- legal inside the derived table, then make the outer result empty.
+          if lim? == some 0 then
+            let alias ← freshAlias
+            let sel := String.intercalate ", " (← aliasSelect alias s₀)
+            return s!"SELECT TOP (0) {sel} FROM ({inner}{ob} OFFSET {offN} ROWS FETCH NEXT 1 ROWS ONLY) {← quote alias}"
           let fetch := match lim? with
             | some l => s!" FETCH NEXT {l} ROWS ONLY"
             | none => ""
@@ -309,16 +340,16 @@ def QueryP.compileStmt : QueryA ts s → CompileM String
       -- derived table. Plain spines compile flat with their (dead) ORDER
       -- BY stripped: an operand's order is discarded by the operation.
       let ca ← match a with
-        | .spine sp => sp.compileSpine {} .defaultSel
+        | .spine sp => withCompileStatement (sp.compileSpine {} .defaultSel)
         | qa => do
-            let sub ← qa.compileStmt
+            let sub ← withCompileStatement qa.compileStmt
             let alias ← freshAlias
             let sel := String.intercalate ", " (← aliasSelect alias s₀)
             pure s!"SELECT {sel} FROM ({sub}) {← quote alias}"
       let cb ← match b with
-        | .spine sp => sp.compileSpine {} .defaultSel
+        | .spine sp => withCompileStatement (sp.compileSpine {} .defaultSel)
         | qb => do
-            let sub ← qb.compileStmt
+            let sub ← withCompileStatement qb.compileStmt
             let alias ← freshAlias
             let sel := String.intercalate ", " (← aliasSelect alias s₀)
             pure s!"SELECT {sel} FROM ({sub}) {← quote alias}"
@@ -336,7 +367,9 @@ def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec → CompileM St
         | .countSel => pure ("COUNT(*)", "")
         | .aggSel op =>
             match r with
-            | .cons e .nil => do pure (s!"{op.token}({← e.compile})", "")
+            | .cons e .nil => do
+                let arg ← withAggregateArgument do valueWrap e.isPredicate (← e.compile)
+                pure (s!"{op.token}({arg})", "")
             | _ => pure ("", "")   -- unreachable: aggQ spines are single-column
       let head := if acc.distinct then "SELECT DISTINCT" else "SELECT"
       let orderClause :=
@@ -345,30 +378,36 @@ def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec → CompileM St
       return s!"{head} {sel}{renderFroms acc.froms}{renderWheres acc.wheres}{tail}{orderClause}"
   -- the grouped terminal carries its own projection and GROUP BY/HAVING/
   -- ORDER BY tail; the projection spec is plain-only and ignored here
-  | .groupYield ks hv ord r, acc, _ => do
-      let items ← r.selectList
-      let ksStr := String.intercalate ", " (← compileGroupKeyItems ks)
+  | .groupYield key ks hv ord r, acc, _ => do
+      let items ← withAggregateContext true r.selectList
+      let keyStr ← match key with
+        | ⟨_, e⟩ => valueWrap e.isPredicate (← e.compile)
+      let ksStr := String.intercalate ", " (keyStr :: (← compileGroupKeyItems ks))
       let hvStr ← match hv with
         | none => pure ""
         | some h => do
-            let hs ← predWrap h.isPredicate (← h.compile)
+            let hs ← withAggregateContext true do predWrap h.isPredicate (← h.compile)
             pure s!" HAVING {hs}"
       let ownOb ← match ord with
         | [] => pure ""
         | _ => do
-            pure s!" ORDER BY {String.intercalate ", " (← compileOrderKeyItems ord)}"
+            pure s!" ORDER BY {String.intercalate ", " (← withAggregateContext true (compileOrderKeyItems ord))}"
       let head := if acc.distinct then "SELECT DISTINCT" else "SELECT"
       let orderClause :=
         if acc.orders.isEmpty then ""
         else s!" ORDER BY {String.intercalate ", " acc.orders.toList}"
-      let gb := if ksStr.isEmpty then "" else s!" GROUP BY {ksStr}"
+      let gb := s!" GROUP BY {ksStr}"
       return s!"{head} {String.intercalate ", " items}{renderFroms acc.froms}{renderWheres acc.wheres}{gb}{hvStr}{ownOb}{orderClause}"
   | .guard b rest, acc, k => do
       let w ← predWrap b.isPredicate (← b.compile)
       rest.compileSpine { acc with wheres := acc.wheres.push w } k
-  | .order ks rest, acc, k => do
-      let rendered := String.intercalate ", " (← compileOrderKeyItems ks)
-      rest.compileSpine { acc with orders := acc.orders.push rendered } k
+  | .order (g := g) ks rest, acc, k => do
+      if ks.isEmpty then return ← rest.compileSpine acc k
+      match k with
+      | .countSel | .aggSel _ => rest.compileSpine acc k
+      | .defaultSel =>
+          let rendered := String.intercalate ", " (← withAggregateContext (g == .grouped) (compileOrderKeyItems ks))
+          rest.compileSpine { acc with orders := acc.orders.push rendered } k
   | .fromT (n := nm) (inst := _) _ f, acc, k => do
       let alias ← freshAlias
       let item := s!"{← quote nm} {← quote alias}"
@@ -387,7 +426,7 @@ def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec → CompileM St
       let item := s!"{JoinKind.left.token} {← quote nm} {← quote alias} ON {onStr}"
       (f ⟨alias⟩).compileSpine { acc with froms := acc.froms.push (true, item) } k
   | .fromQ q f, acc, k => do
-      let sub ← q.compileStmt
+      let sub ← withDerivedSource q.compileStmt
       let alias ← freshAlias
       let item := s!"({sub}) {← quote alias}"
       (f ⟨alias⟩).compileSpine
@@ -396,13 +435,19 @@ def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec → CompileM St
 /-- Compile a scalar aggregate query. -/
 def ScalarQueryP.compileScalar : ScalarA ts c → CompileM String
   | .countQ sp => sp.compileSpine {} .countSel
-  | .aggQ op sp => sp.compileSpine {} (.aggSel op)
+  | .aggQ (t := t) op sp => do
+      checkAggregateType op t
+      sp.compileSpine {} (.aggSel op)
 
 end
 
 /-- Compile a boolean expression for a predicate position. -/
 def SqlExprP.compilePred (e : SqlExpr ts c) : CompileM String := do
   predWrap e.isPredicate (← e.compile)
+
+/-- Compile an expression for a SELECT item or another scalar-value position. -/
+def SqlExprP.compileValue (e : SqlExpr ts c) : CompileM String := do
+  valueWrap e.isPredicate (← e.compile)
 
 namespace SpineQ
 export SpineQP (compileSpine)
@@ -417,9 +462,21 @@ private def runCompile (m : CompileM String) (db : DatabaseType) : CompiledSql :
   let (sql, st) := Id.run ((m.run db).run {})
   { sql, params := st.params }
 
-/-- Compile a query to SQL text plus named parameters for the given dialect. -/
+/-- Run compilation and reject unsupported SQL before handing it to a driver. -/
+def runCompileChecked (m : CompileM String) (db : DatabaseType) : Except CompileError CompiledSql :=
+  let (sql, st) := Id.run ((m.run db).run {})
+  match st.error? with
+  | some e => .error e
+  | none => .ok { sql, params := st.params }
+
+/-- Low-level, unchecked SQL rendering retained for inspection and compatibility.
+Use `toSqlChecked` for executable SQL; native drivers use the checked path. -/
 def Query.toSql (q : Query ts s) (db : DatabaseType := .sqlite) : CompiledSql :=
   runCompile (q AliasOf).compileStmt db
+
+/-- Compile a query, reporting unsupported correlated FROM sources explicitly. -/
+def Query.toSqlChecked (q : Query ts s) (db : DatabaseType := .sqlite) : Except CompileError CompiledSql :=
+  runCompileChecked (q AliasOf).compileStmt db
 
 def Query.toSqlite (q : Query ts s) : CompiledSql := q.toSql .sqlite
 def Query.toSqlServer (q : Query ts s) : CompiledSql := q.toSql .sqlServer
@@ -428,15 +485,18 @@ def Query.toMysql (q : Query ts s) : CompiledSql := q.toSql .mysql
 def Query.toPostgres (q : Query ts s) : CompiledSql := q.toSql .postgres
 
 namespace QueryB
-export Query (toSql toSqlite toSqlServer toPostgres)
+export Query (toSql toSqlChecked toSqlite toSqlServer toPostgres)
 end QueryB
 
 /-- Compile a scalar query for the given dialect. -/
 def ScalarQuery.toSql (sq : ScalarQuery ts c) (db : DatabaseType := .sqlite) : CompiledSql :=
   runCompile (sq AliasOf).compileScalar db
 
+def ScalarQuery.toSqlChecked (sq : ScalarQuery ts c) (db : DatabaseType := .sqlite) : Except CompileError CompiledSql :=
+  runCompileChecked (sq AliasOf).compileScalar db
+
 namespace ScalarB
-export ScalarQuery (toSql)
+export ScalarQuery (toSql toSqlChecked)
 end ScalarB
 
 

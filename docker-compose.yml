@@ -39,7 +39,7 @@ services:
   mysql:
     image: mysql:8
     ports:
-      # CLI integration + (future) native driver; 3307 to avoid clashing
+      # CLI integration + native driver; 3307 to avoid clashing
       # with any local MySQL
       - "127.0.0.1:3307:3306"
     environment:

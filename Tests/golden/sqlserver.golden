@@ -112,7 +112,7 @@ FromSelectMin	SELECT MIN([a0].[Amount]) FROM [orders] [a0]
 FromSelectMax	SELECT MAX([a0].[Amount]) FROM [orders] [a0]	
 ParameterAsIntParam	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @minAge)	@minAge=null
 ParameterAsStringParam	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age] FROM [customers] [a0] WHERE ([a0].[Name] = @customerName)	@customerName=null
-ParameterAsBoolParam	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age] FROM [customers] [a0] WHERE (CASE WHEN ([a0].[Age] > @p0) THEN 1 ELSE 0 END = @isAdult)	@p0=int 18; @isAdult=null
+ParameterAsBoolParam	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age] FROM [customers] [a0] WHERE (CASE WHEN ([a0].[Age] > @p0) THEN 1 WHEN NOT (([a0].[Age] > @p0)) THEN 0 ELSE NULL END = @isAdult)	@p0=int 18; @isAdult=null
 BoolColumnDirectComparison	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[IsActive] = @isActive)	@isActive=null
 BoolColumnLiteralTrue	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[IsActive] = @p0)	@p0=bool true
 BoolColumnLiteralFalse	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[IsActive] = @p0)	@p0=bool false
@@ -305,7 +305,7 @@ CFromSelectMin	SELECT MIN([a0].[Amount]) FROM [orders] [a0]
 CFromSelectMax	SELECT MAX([a0].[Amount]) FROM [orders] [a0]	
 CParameterAsIntParam	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name] FROM [customers] [a0] WHERE ([a0].[Age] > @minAge)	@minAge=null
 CParameterAsStringParam	SELECT [a0].[Id] AS [Id], [a0].[Age] AS [Age] FROM [customers] [a0] WHERE ([a0].[Name] = @customerName)	@customerName=null
-CParameterAsBoolParam	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age] FROM [customers] [a0] WHERE (CASE WHEN ([a0].[Age] > @p0) THEN 1 ELSE 0 END = @isAdult)	@p0=int 18; @isAdult=null
+CParameterAsBoolParam	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age] FROM [customers] [a0] WHERE (CASE WHEN ([a0].[Age] > @p0) THEN 1 WHEN NOT (([a0].[Age] > @p0)) THEN 0 ELSE NULL END = @isAdult)	@p0=int 18; @isAdult=null
 CBoolColumnDirectComparison	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[IsActive] = @isActive)	@isActive=null
 CBoolColumnLiteralTrue	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[IsActive] = @p0)	@p0=bool true
 CBoolColumnLiteralFalse	SELECT [a0].[Id] AS [Id], [a0].[Name] AS [Name], [a0].[Age] AS [Age], [a0].[IsActive] AS [IsActive] FROM [customers] [a0] WHERE ([a0].[IsActive] = @p0)	@p0=bool false

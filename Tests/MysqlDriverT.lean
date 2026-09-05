@@ -1,5 +1,6 @@
 import LeanLinq.Driver.Mysql
 import Tests.DriverSweep
+import Tests.DriverRegressions
 
 /-! # Native MySQL driver — differential test (`lake exe mysqldriver`)
 
@@ -20,6 +21,8 @@ def main : IO UInt32 := do
       IO.eprintln "[mysqldriver] MySQL unreachable — skipped (is `docker compose up -d --wait` running?)"
       return 0
   | some conn =>
+  DriverRegressions.checkDoubleQueries (fun q ps => conn.query q ps)
+  DriverRegressions.checkCompilerQueries .mysql (fun q => conn.query q) conn.execRaw
   conn.execRaw (setupSql .mysql)
   let ops : DriverOps := {
     query := fun q => conn.query q seedParams

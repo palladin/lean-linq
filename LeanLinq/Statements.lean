@@ -73,18 +73,18 @@ private def whereClause {s : Schema} (p? : Option (Row ts s → SqlExpr ts ⟨.b
     CompileM String :=
   match p? with
   | none => pure ""
-  | some p => do return s!" WHERE {← (p (Row.ofAlias "" s)).compile}"
+  | some p => do return s!" WHERE {← (p (Row.ofAlias "" s)).compilePred}"
 
 def InsertStmt.compile (i : InsertStmt ts n s) : CompileM String := do
   let cols ← i.values.mapM fun (nm, _) => quote nm
-  let vals ← i.values.mapM fun (_, ⟨_, e⟩) => e.compile
+  let vals ← i.values.mapM fun (_, ⟨_, e⟩) => e.compileValue
   return s!"INSERT INTO {← quote n} ({String.intercalate ", " cols}) VALUES ({String.intercalate ", " vals})"
 
 def UpdateStmt.compile (u : UpdateStmt ts n s) : CompileM String := do
   let row := Row.ofAlias "" s
   let sets ← u.sets.mapM fun (nm, f) => do
     let ⟨_, e⟩ := f row
-    return s!"{← quote nm} = {← e.compile}"
+    return s!"{← quote nm} = {← e.compileValue}"
   return s!"UPDATE {← quote n} SET {String.intercalate ", " sets}{← whereClause u.where?}"
 
 def DeleteStmt.compile (d : DeleteStmt ts n s) : CompileM String := do
@@ -101,6 +101,15 @@ def UpdateStmt.toSql (u : UpdateStmt ts n s) (db : DatabaseType := .sqlite) : Co
 def DeleteStmt.toSql (d : DeleteStmt ts n s) (db : DatabaseType := .sqlite) : CompiledSql :=
   let (sql, st) := Id.run ((d.compile.run db).run {})
   { sql, params := st.params }
+
+def InsertStmt.toSqlChecked (i : InsertStmt ts n s) (db : DatabaseType := .sqlite) : Except CompileError CompiledSql :=
+  runCompileChecked i.compile db
+
+def UpdateStmt.toSqlChecked (u : UpdateStmt ts n s) (db : DatabaseType := .sqlite) : Except CompileError CompiledSql :=
+  runCompileChecked u.compile db
+
+def DeleteStmt.toSqlChecked (d : DeleteStmt ts n s) (db : DatabaseType := .sqlite) : Except CompileError CompiledSql :=
+  runCompileChecked d.compile db
 
 /-- A typed cell as a parameter value — the encoder the batched VALUES
 insert rides (data already in hand travels as parameters, never as
@@ -148,6 +157,10 @@ def InsertValuesStmt.toSql (st : InsertValuesStmt ts n s)
   let (sql, stt) := Id.run ((st.compile.run db).run {})
   { sql, params := stt.params }
 
+def InsertValuesStmt.toSqlChecked (st : InsertValuesStmt ts n s)
+    (db : DatabaseType := .sqlite) : Except CompileError CompiledSql :=
+  runCompileChecked st.compile db
+
 /-- `INSERT INTO t (cols) SELECT …` — the batched write: the engine
 moves the rows, one statement, grade 1. The source query's schema must
 match the target's — enforced by the type. -/
@@ -169,5 +182,9 @@ def InsertSelectStmt.toSql (st : InsertSelectStmt ts n s)
     (db : DatabaseType := .sqlite) : CompiledSql :=
   let (sql, stt) := Id.run ((st.compile.run db).run {})
   { sql, params := stt.params }
+
+def InsertSelectStmt.toSqlChecked (st : InsertSelectStmt ts n s)
+    (db : DatabaseType := .sqlite) : Except CompileError CompiledSql :=
+  runCompileChecked st.compile db
 
 end LeanLinq

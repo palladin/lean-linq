@@ -28,15 +28,19 @@ theorem Query.evalRows_limitC_length_le {ts : Ctx} {s : Schema}
     rows.length ≤ n := by
   rw [QueryP.evalRowsIn.eq_def] at h
   simp only at h
-  cases hq : q.evalRowsIn ee [] with
-  | error e =>
-      rw [hq] at h
-      simp [Bind.bind, Except.bind] at h
-  | ok inner =>
-      rw [hq] at h
-      simp only [Bind.bind, Except.bind, pure, Except.pure, Except.ok.injEq] at h
-      subst h
-      exact List.length_take_le n _
+  split at h
+  · simp only [pure, Except.pure, Except.ok.injEq] at h
+    subst h
+    exact Nat.zero_le _
+  · cases hq : q.evalRowsIn ee [] with
+    | error e =>
+        rw [hq] at h
+        simp [Bind.bind, Except.bind] at h
+    | ok inner =>
+        rw [hq] at h
+        simp only [Bind.bind, Except.bind, pure, Except.pure, Except.ok.injEq] at h
+        subst h
+        exact List.length_take_le n _
 
 /-- `q.limit n` returns at most `n` rows — `LIMIT` really limits, in the
 executable semantics. The proof only needs that `Query.limit` always
@@ -166,8 +170,8 @@ theorem SpineQP.evalScopes_gcard_le {ts : Ctx} {g : Terminal} {s : Schema}
       rw [show ((SpineQP.yield r).gcardAux n) = Grade.nat 1 from rfl,
         Grade.eval_nat, Nat.mul_one]
       exact Nat.le_of_eq (List.length_mapM_except _ h)
-  | .groupYield ks hv ord r, n, scopes, rs, _, h => by
-      rw [show ((SpineQP.groupYield ks hv ord r).gcardAux n) = Grade.nat 1 from rfl,
+  | .groupYield ⟨c, e⟩ ks hv ord r, n, scopes, rs, _, h => by
+      rw [show ((SpineQP.groupYield ⟨c, e⟩ ks hv ord r).gcardAux n) = Grade.nat 1 from rfl,
         Grade.eval_nat, Nat.mul_one]
       rw [SpineQP.evalScopes.eq_def] at h
       simp only at h
@@ -560,22 +564,26 @@ theorem QueryP.evalRowsIn_gcard_le {ts : Ctx} {s : Schema} {ee : EvalEnv ts} :
   | .limitC q lim? off?, sc, xs, h => by
       rw [QueryP.evalRowsIn.eq_def] at h
       simp only at h
-      obtain ⟨inner, hq, h⟩ := Except.bind_ok h
-      simp only [pure, Except.pure, Except.ok.injEq] at h
-      have hin := QueryP.evalRowsIn_gcard_le q hq
-      cases lim? with
-      | some l =>
-          subst h
-          have htake : ((inner.drop (off?.getD 0)).take l).length ≤ l :=
-            List.length_take_le ..
-          have hinner : ((inner.drop (off?.getD 0)).take l).length ≤ inner.length :=
-            Nat.le_trans (List.take_sublist ..).length_le
-              (List.drop_sublist ..).length_le
-          simp only [QueryP.gcardAux, Grade.eval_min, Grade.eval_nat]
-          exact Nat.le_min.mpr ⟨by omega, htake⟩
-      | none =>
-          subst h
-          exact Nat.le_trans (List.drop_sublist ..).length_le hin
+      split at h
+      · simp only [pure, Except.pure, Except.ok.injEq] at h
+        subst h
+        exact Nat.zero_le _
+      · obtain ⟨inner, hq, h⟩ := Except.bind_ok h
+        simp only [pure, Except.pure, Except.ok.injEq] at h
+        have hin := QueryP.evalRowsIn_gcard_le q hq
+        cases lim? with
+        | some l =>
+            subst h
+            have htake : ((inner.drop (off?.getD 0)).take l).length ≤ l :=
+              List.length_take_le ..
+            have hinner : ((inner.drop (off?.getD 0)).take l).length ≤ inner.length :=
+              Nat.le_trans (List.take_sublist ..).length_le
+                (List.drop_sublist ..).length_le
+            simp only [QueryP.gcardAux, Grade.eval_min, Grade.eval_nat]
+            exact Nat.le_min.mpr ⟨by omega, htake⟩
+        | none =>
+            subst h
+            exact Nat.le_trans (List.drop_sublist ..).length_le hin
   | .setOpC op a b, sc, xs, h => by
       rw [QueryP.evalRowsIn.eq_def] at h
       simp only at h

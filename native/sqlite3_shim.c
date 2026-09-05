@@ -254,5 +254,7 @@ LEAN_EXPORT lean_obj_res ll_sqlite3_column_text(b_lean_obj_arg stmt, uint32_t i,
     (void)w;
     ll_stmt *s = stmt_of(stmt);
     const unsigned char *txt = sqlite3_column_text(s->stmt, (int)i);
-    return lean_io_result_mk_ok(lean_mk_string(txt ? (const char *)txt : ""));
+    int len = sqlite3_column_bytes(s->stmt, (int)i);
+    return lean_io_result_mk_ok(
+        lean_mk_string_from_bytes(txt ? (const char *)txt : "", (size_t)len));
 }

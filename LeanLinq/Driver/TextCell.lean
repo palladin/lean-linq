@@ -9,6 +9,41 @@ cell-for-cell comparable with `Query.run`. -/
 
 namespace LeanLinq.Driver
 
+/-- Surface unsupported query forms before sending SQL to an engine. -/
+def checkedSql (result : Except CompileError CompiledSql) : IO CompiledSql :=
+  IO.ofExcept (result.mapError (fun e => IO.userError s!"SQL compilation: {e}"))
+
+/-- Exact decimal wire representation of an IEEE 754 double. `Float.toString`
+is a display formatter (six decimal places), so it cannot serialize parameters.
+Every finite binary64 is an integer times a power of two; for negative powers,
+`m / 2^k = (m * 5^k) / 10^k` gives a finite decimal without rounding. Signed
+zero is preserved. Engines that do not support infinities/NaN reject their
+explicit spellings instead of receiving a different finite value. -/
+def floatText (f : Float) : String := Id.run do
+  let bits := f.toBits.toNat
+  let sign := if bits / 2^63 == 0 then "" else "-"
+  let exponent : Nat := (bits / 2^52) % 2048
+  let fraction := bits % 2^52
+  if exponent == 2047 then
+    return if fraction == 0 then sign ++ "Infinity" else "NaN"
+  let mantissa := if exponent == 0 then fraction else 2^52 + fraction
+  if mantissa == 0 then return sign ++ "0"
+  let power : Int := if exponent == 0 then -1074 else (exponent : Int) - 1075
+  if power ≥ 0 then
+    return sign ++ toString (mantissa * 2^power.toNat)
+  else
+    let k := (-power).toNat
+    return sign ++ toString (mantissa * 5^k) ++ "e-" ++ toString k
+
+/-- A staged literal in text wire format. NULL stays distinct from an empty
+string. Drivers use this alongside `cellText` for named parameters. -/
+def valueText : SqlValue → Option String
+  | .int i | .long i => some (toString i)
+  | .double f => some (floatText f)
+  | .decimal d | .string d | .dateTime d | .guid d => some d
+  | .bool b => some (if b then "1" else "0")
+  | .null => none
+
 /-- Integer column text may arrive `numeric`-formatted (`AVG(int)` yields
 `325.0000000000000000`); take the integral part. Non-exact integer AVG is
 engine-variant and allowlisted, so truncation never disagrees with the
@@ -96,7 +131,7 @@ boolean input text on PostgreSQL and the native form for SQL Server `bit`. -/
 def cellText : (t : SqlPrim) → t.interp → String
   | .int, i => toString i
   | .long, i => toString i
-  | .double, f => toString f
+  | .double, f => floatText f
   | .decimal, m => LeanLinq.renderDecimal m
   | .string, s => s
   | .bool, b => if b then "1" else "0"
