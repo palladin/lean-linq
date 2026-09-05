@@ -18,8 +18,8 @@ scope length), guards filter, ORDER BY nodes stable-sort what returns from
 below (stacked nodes compose outermost-primary), and the terminal evaluates
 where its expression trees are structural — plain `yield` projects each
 scope, `groupYield` buckets the arriving scopes by its keys and folds
-HAVING/ORDER BY/projection over each group's member scopes. Expression
-evaluation (`SqlExprP.evalG`) is part of the same structural recursion:
+HAVING/ORDER BY/projection over each group's member scopes and its typed
+key values. Row and grouped expression evaluation share the same structural recursion:
 a subquery stored in an expression evaluates against the site's scope, its
 inner aliases continuing from the scope length — exactly the numbering the
 compiled SQL uses, so correlated references resolve identically in both
@@ -44,9 +44,9 @@ def sortTagged (tagged : List (List (Dir × AnyCell) × α)) : List α :=
   (tagged.mergeSort fun a b => keyLe a.1 b.1).map (·.2)
 
 /-- First-occurrence-order bucketing of scopes by their evaluated GROUP BY
-keys (NULLs compare equal — `AnyCell.cmp`-based `==`). -/
-def insertGrouped (acc : List (List AnyCell × List Scope))
-    (k : List AnyCell) (sc : Scope) : List (List AnyCell × List Scope) :=
+keys (the typed key row uses SQL cell equality, including NULLs). -/
+def insertGrouped {α : Type} [BEq α] (acc : List (α × List Scope))
+    (k : α) (sc : Scope) : List (α × List Scope) :=
   match acc with
   | [] => [(k, [sc])]
   | (k', ms) :: rest =>
@@ -55,9 +55,8 @@ def insertGrouped (acc : List (List AnyCell × List Scope))
 
 mutual
 
-/-- Evaluate an expression over the scopes of the current group
-(singleton = ungrouped row context). Structural subqueries evaluate by
-recursion — a correlated subquery receives the evaluation site's scope,
+/-- Evaluate an ordinary row expression. Structural subqueries evaluate by
+recursion — a correlated subquery receives the evaluation site's row scope,
 inner alias numbering continuing from its length (the alias counter always
 equals the scope length along any evaluation path). -/
 def SqlExprP.evalG {c : SqlType} (ee : EvalEnv ts) : List Scope → SqlExpr ts c →
@@ -73,7 +72,6 @@ def SqlExprP.evalG {c : SqlType} (ee : EvalEnv ts) : List Scope → SqlExpr ts c
   | _, .nullC _ => pure none
   | _, .paramE (inst := i) _ => pure (SqlType.toNullable (i.get ee.params))
   | scs, .widen (t := t₀) e => SqlExprP.evalG (c := ⟨t₀, false⟩) ee scs e
-  | scs, .groupKey _ e => e.evalG ee scs
   | scs, .field ⟨t', _⟩ row name =>
       match scs.head? with
       | none => .error (.internal s!"no row in scope for {row.alias}.{name}")
@@ -121,10 +119,8 @@ def SqlExprP.evalG {c : SqlType} (ee : EvalEnv ts) : List Scope → SqlExpr ts c
               pure (if hits.any (· == some true) then some true
                     else if hits.any (·.isNone) then none
                     else some false)
-  -- the subquery evaluates in the *current* scope, so correlated outer
-  -- references resolve; in aggregate positions (several member scopes)
-  -- the group's first member stands for the group, the same convention
-  -- bare column reads use
+  -- The subquery evaluates in the current row scope, so correlated
+  -- outer references resolve through the enclosing expression.
   | scs, .inSub (t := t₀) e sq => do
       let rows ← sq.evalRowsIn ee (scs.head?.getD [])
       if rows.isEmpty then return some false
@@ -145,9 +141,6 @@ def SqlExprP.evalG {c : SqlType} (ee : EvalEnv ts) : List Scope → SqlExpr ts c
   -- evaluates, so a guarded division cannot error
   | scs, .caseWhen c a b => do
       if (← c.evalG ee scs) == some true then a.evalG ee scs else b.evalG ee scs
-  | scs, .aggE (t := t₁) op e => do
-      t₁.aggV op ((← scs.mapM fun sc => e.evalG ee [sc]).filterMap id)
-  | scs, .countAll => pure (some (scs.length : Int))
   | scs, .abs (c := c₀) (numeric := _) e => do strict1 (← e.evalG ee scs) c₀.ty.absV
   | scs, .round (c := c₀) (numeric := _) e digits => do strict1 (← e.evalG ee scs) (c₀.ty.roundV digits)
   | scs, .ceiling (c := c₀) (numeric := _) e => do strict1 (← e.evalG ee scs) c₀.ty.ceilV
@@ -189,6 +182,131 @@ def SqlExprP.evalGList (ee : EvalEnv ts) (scs : List Scope) :
   | ⟨p, e⟩ :: es => do
       pure (⟨p.ty, ← e.evalG ee scs⟩ :: (← SqlExprP.evalGList ee scs es))
 
+/-- Evaluate a grouped expression against its bound key values and member
+scopes. Key lookup is total; aggregate operands remain ordinary row expressions. -/
+def GroupedExprP.evalG {c : SqlType} (ee : EvalEnv ts) (keys : Values ks) :
+    List Scope → GroupedExprP AliasOf ts ks c →
+    Except EvalError (Nullable c.ty)
+  | _, .intC i => pure (some i)
+  | _, .longC i => pure (some i)
+  | _, .doubleC f => pure (some f)
+  | _, .decimalC d => pure (some (parseDecimal d))
+  | _, .stringC s => pure (some s)
+  | _, .boolC b => pure (some b)
+  | _, .dateTimeC s => pure (some (normDateTime s))
+  | _, .guidC g => pure (some g.toLower)
+  | _, .nullC _ => pure none
+  | _, .paramE (inst := i) _ => pure (SqlType.toNullable (i.get ee.params))
+  | scs, .widen (t := t₀) e => GroupedExprP.evalG (c := ⟨t₀, false⟩) ee keys scs e
+  | _, .key ref => pure (SqlType.toNullable (ref.getValues keys))
+  | scs, .arith (c := c₀) (numeric := _) op a b => do
+      strict2 (← a.evalG ee keys scs) (← b.evalG ee keys scs) (c₀.ty.arithV op)
+  | scs, .concat a b => do
+      strict2 (← a.evalG ee keys scs) (← b.evalG ee keys scs) fun x y => pure (some (x ++ y))
+  | scs, .cmp (t := t₀) op a b => do
+      strict2 (← a.evalG ee keys scs) (← b.evalG ee keys scs) fun x y =>
+        pure (some (op.holds (t₀.cmpV x y)))
+  | scs, .and a b => do
+      pure (match (← a.evalG ee keys scs), (← b.evalG ee keys scs) with
+        | some false, _ => some false
+        | _, some false => some false
+        | some true, some true => some true
+        | _, _ => none)
+  | scs, .or a b => do
+      pure (match (← a.evalG ee keys scs), (← b.evalG ee keys scs) with
+        | some true, _ => some true
+        | _, some true => some true
+        | some false, some false => some false
+        | _, _ => none)
+  | scs, .not a => do pure ((← a.evalG ee keys scs).map (!·))
+  | scs, .isNull e => do pure (some (← e.evalG ee keys scs).isNone)
+  | scs, .isNotNull e => do pure (some (← e.evalG ee keys scs).isSome)
+  | scs, .like e p => do
+      strict2 (← e.evalG ee keys scs) (← p.evalG ee keys scs) fun s pat =>
+        pure (some (likeMatch s pat))
+  | scs, .inList (c := ⟨t₀, _⟩) e es => do
+      -- `x IN ()` is FALSE without evaluating x (mirrors the compiled `(1 = 0)`)
+      match es with
+      | .nil => pure (some false)
+      | es =>
+          match (← e.evalG ee keys scs) with
+          | none => pure none
+          | some v =>
+              let hits := (← GroupedExprsP.evalCells ee keys scs es).map fun ⟨u, cell⟩ =>
+                if h : u = t₀ then
+                  (h ▸ cell).map (fun w => t₀.cmpV v w == Ordering.eq)
+                else some false
+              pure (if hits.any (· == some true) then some true
+                    else if hits.any (·.isNone) then none
+                    else some false)
+  -- CASE is lazy in its branches (SQL semantics): only the taken branch
+  -- evaluates, so a guarded division cannot error
+  | scs, .caseWhen c a b => do
+      if (← c.evalG ee keys scs) == some true then a.evalG ee keys scs else b.evalG ee keys scs
+  | scs, .aggE (t := t₁) op e => do
+      t₁.aggV op ((← scs.mapM fun sc => e.evalG ee [sc]).filterMap id)
+  | scs, .countAll => pure (some (scs.length : Int))
+  | scs, .abs (c := c₀) (numeric := _) e => do strict1 (← e.evalG ee keys scs) c₀.ty.absV
+  | scs, .round (c := c₀) (numeric := _) e digits => do strict1 (← e.evalG ee keys scs) (c₀.ty.roundV digits)
+  | scs, .ceiling (c := c₀) (numeric := _) e => do strict1 (← e.evalG ee keys scs) c₀.ty.ceilV
+  | scs, .floor (c := c₀) (numeric := _) e => do strict1 (← e.evalG ee keys scs) c₀.ty.floorV
+  | scs, .substring e start len => do
+      strict1 (← e.evalG ee keys scs) fun s =>
+        pure (some (sqlSubstring s start len))
+  | scs, .upper e => do pure ((← e.evalG ee keys scs).map (·.toUpper))
+  | scs, .lower e => do pure ((← e.evalG ee keys scs).map (·.toLower))
+  | scs, .trim e => do pure ((← e.evalG ee keys scs).map sqlTrim)
+  | scs, .length e => do pure ((← e.evalG ee keys scs).map (fun s => (s.length : Int)))
+  | _, .now =>
+      match ee.now with
+      | some s => pure (some s)
+      | none => .error .noClock
+  | scs, .datePart u e => do
+      pure ((← e.evalG ee keys scs).map fun s =>
+        match u with
+        | .year => (parseYMD s).1
+        | .month => (parseYMD s).2.1
+        | .day => (parseYMD s).2.2)
+  | scs, .dateAdd u e n => do
+      pure ((← e.evalG ee keys scs).map fun s =>
+        match u with
+        | .day => dateAddDays s n
+        | .month => dateAddMonths s n
+        | .year => dateAddYears s n)
+  | scs, .dateDiff u a b => do
+      strict2 (← a.evalG ee keys scs) (← b.evalG ee keys scs) fun x y =>
+        pure (some (match u with
+          | .day => dateDiffDays x y
+          | .month => dateDiffMonths x y
+          | .year => dateDiffYears x y))
+
+
+def GroupedExprsP.evalCells (ee : EvalEnv ts) (keys : Values ks) (scs : List Scope) :
+    GroupedExprsP AliasOf ts ks → Except EvalError (List ((u : SqlPrim) × Nullable u))
+  | .nil => pure []
+  | .cons (c := c) e es => do
+      pure (⟨c.ty, ← e.evalG ee keys scs⟩ :: (← es.evalCells ee keys scs))
+
+/-- A grouped projection consumes exactly the key binding of its terminal. -/
+def GroupedRowP.evalRow (ee : EvalEnv ts) (keys : Values ks) (scs : List Scope) :
+    {s : Schema} → GroupedRowP AliasOf ts ks s → Except EvalError (Values s)
+  | _, .nil => pure .nil
+  | _, .cons (name := nm) e r => do
+      pure (.cons (← SqlType.ofNullable nm _ (← e.evalG ee keys scs))
+        (← r.evalRow ee keys scs))
+
+def GroupedHavingP.evalHaving (ee : EvalEnv ts) (keys : Values ks) (scs : List Scope) :
+    GroupedHavingP AliasOf ts ks → Except EvalError Bool
+  | .none => pure true
+  | .some e => do pure ((← e.evalG ee keys scs) == some true)
+
+def GroupedOrdersP.evalOrderCells (ee : EvalEnv ts) (keys : Values ks) (scs : List Scope) :
+    GroupedOrdersP AliasOf ts ks → Except EvalError (List (Dir × AnyCell))
+  | .nil => pure []
+  | .cons (c := c) e d rest => do
+      pure ((d, (⟨c.ty, ← e.evalG ee keys scs⟩ : AnyCell)) ::
+        (← rest.evalOrderCells ee keys scs))
+
 /-- Evaluate every cell of a projected row — the construction boundary
 where `Nullable` computation results become honest cells: a NOT NULL
 column receiving `none` is a loud internal error, never a silent NULL. -/
@@ -198,14 +316,7 @@ def RowP.evalRow (ee : EvalEnv ts) (scs : List Scope) :
   | _, .cons (name := nm) e r => do
       pure (.cons (← SqlType.ofNullable nm _ (← e.evalG ee scs)) (← r.evalRow ee scs))
 
-/-- GROUP BY keys over one scope, as comparable cells. -/
-def evalKeyCells (ee : EvalEnv ts) (sc : Scope) :
-    List (KeyExpr ts) → Except EvalError (List AnyCell)
-  | [] => pure []
-  | ⟨c, e⟩ :: ks => do
-      pure ((⟨c.ty, ← e.evalG ee [sc]⟩ : AnyCell) :: (← evalKeyCells ee sc ks))
-
-/-- ORDER BY keys over a member-scope list (grouped keys may aggregate). -/
+/-- ORDER BY keys over ordinary row scopes. -/
 def evalOrderCells (ee : EvalEnv ts) (scs : List Scope) :
     List (OrderKey ts) → Except EvalError (List (Dir × AnyCell))
   | [] => pure []
@@ -222,18 +333,14 @@ def SpineQP.evalScopes : SpineQ ts g s → EvalEnv ts → Nat → List Scope →
     Except EvalError (List (List Scope × Values s))
   | .yield r, ee, _, scopes =>
       scopes.mapM fun sc => do pure ([sc], ← r.evalRow ee [sc])
-  | .groupYield ⟨c, e⟩ ks hv ord r, ee, _, scopes => do
-      let keyed ← scopes.mapM fun sc => do
-        let first : AnyCell := ⟨c.ty, ← e.evalG ee [sc]⟩
-        pure (first :: (← evalKeyCells ee sc ks), sc)
+  | .groupYield keys _ hv ord r, ee, _, scopes => do
+      let keyed ← scopes.mapM fun sc => do pure (← keys.evalRow ee [sc], sc)
       let groups := keyed.foldl (init := []) fun acc (kv, sc) => insertGrouped acc kv sc
-      let tagged? ← groups.mapM fun (_, ms) => do
-        let ok ← match hv with
-          | none => pure true
-          | some h => do pure ((← h.evalG ee ms) == some true)
+      let tagged? ← groups.mapM fun (kv, ms) => do
+        let ok ← hv.evalHaving ee kv ms
         if ok then
-          let oks ← evalOrderCells ee ms ord
-          pure (some (oks, (ms, ← r.evalRow ee ms)))
+          let oks ← ord.evalOrderCells ee kv ms
+          pure (some (oks, (ms, ← r.evalRow ee kv ms)))
         else pure none
       pure (sortTagged (tagged?.filterMap id))
   | .guard b rest, ee, n, scopes => do
@@ -321,15 +428,11 @@ derived sources retain their own value semantics for downstream predicates. -/
 def SpineQP.enumGroups : SpineQ ts g s → EvalEnv ts → Nat → List Scope →
     Except EvalError (List (List Scope))
   | .yield _, _, _, scopes => pure (scopes.map (fun sc => [sc]))
-  | .groupYield ⟨c, e⟩ ks hv _ _, ee, _, scopes => do
-      let keyed ← scopes.mapM fun sc => do
-        let first : AnyCell := ⟨c.ty, ← e.evalG ee [sc]⟩
-        pure (first :: (← evalKeyCells ee sc ks), sc)
+  | .groupYield keys _ hv _ _, ee, _, scopes => do
+      let keyed ← scopes.mapM fun sc => do pure (← keys.evalRow ee [sc], sc)
       let groups := keyed.foldl (init := []) fun acc (kv, sc) => insertGrouped acc kv sc
-      (groups.map (·.2)).filterM fun ms => do
-        match hv with
-        | none => pure true
-        | some h => pure ((← h.evalG ee ms) == some true)
+      let survivors ← groups.filterM fun (kv, ms) => hv.evalHaving ee kv ms
+      pure (survivors.map (·.2))
   | .guard b rest, ee, n, scopes => do
       let survivors ← scopes.filterM fun sc => do
         pure ((← b.evalG ee [sc]) == some true)
@@ -530,8 +633,8 @@ theorem sortTagged_length (t : List (List (Dir × AnyCell) × α)) :
     (sortTagged t).length = t.length := by
   simp [sortTagged, List.length_mergeSort]
 
-theorem insertGrouped_length_le (acc : List (List AnyCell × List Scope))
-    (k : List AnyCell) (sc : Scope) :
+theorem insertGrouped_length_le {α : Type} [BEq α] (acc : List (α × List Scope))
+    (k : α) (sc : Scope) :
     (insertGrouped acc k sc).length ≤ acc.length + 1 := by
   induction acc with
   | nil => simp [insertGrouped]
@@ -541,8 +644,8 @@ theorem insertGrouped_length_le (acc : List (List AnyCell × List Scope))
       · simp
       · simpa using Nat.succ_le_succ ih
 
-theorem foldl_insertGrouped_length_le (l : List (List AnyCell × Scope))
-    (acc : List (List AnyCell × List Scope)) :
+theorem foldl_insertGrouped_length_le {α : Type} [BEq α] (l : List (α × Scope))
+    (acc : List (α × List Scope)) :
     (l.foldl (init := acc) fun a kb => insertGrouped a kb.1 kb.2).length
       ≤ acc.length + l.length := by
   induction l generalizing acc with

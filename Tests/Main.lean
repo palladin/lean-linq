@@ -7,6 +7,7 @@ import Tests.CompilerRegressions
 import Tests.GroupedRegressions
 import Tests.ScalarTyping
 import Tests.AggregateTyping
+import Tests.GroupedAstTyping
 
 /-! # Golden-test runner
 

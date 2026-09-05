@@ -16,6 +16,8 @@ def source := Query.from' (ts := C) items
 -- Requiring a first key prevents the original two-statements-for-budget-1 bug.
 #check_failure source.groupBy (fun _ => (RowP.nil : RowP _ C []))
 #check_failure (source AliasOf).groupBy (fun _ => (RowP.nil : RowP _ C []))
+#check_failure (SpineQP.groupYield (RowP.nil : RowP AliasOf C []) (by decide)
+  .none .nil (.nil : GroupedRowP AliasOf C [] []) : SpineQP AliasOf C .grouped [])
 
 def emptyGrouped := (source.limit 0).groupBy (fun r => ![r["Id"].as "Id"])
   |>.select (fun _ a => ![a.count.as "Count"])

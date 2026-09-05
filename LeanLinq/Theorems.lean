@@ -170,8 +170,8 @@ theorem SpineQP.evalScopes_gcard_le {ts : Ctx} {g : Terminal} {s : Schema}
       rw [show ((SpineQP.yield r).gcardAux n) = Grade.nat 1 from rfl,
         Grade.eval_nat, Nat.mul_one]
       exact Nat.le_of_eq (List.length_mapM_except _ h)
-  | .groupYield ⟨c, e⟩ ks hv ord r, n, scopes, rs, _, h => by
-      rw [show ((SpineQP.groupYield ⟨c, e⟩ ks hv ord r).gcardAux n) = Grade.nat 1 from rfl,
+  | .groupYield keys nonempty hv ord r, n, scopes, rs, _, h => by
+      rw [show ((SpineQP.groupYield keys nonempty hv ord r).gcardAux n) = Grade.nat 1 from rfl,
         Grade.eval_nat, Nat.mul_one]
       rw [SpineQP.evalScopes.eq_def] at h
       simp only at h

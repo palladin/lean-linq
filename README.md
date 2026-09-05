@@ -6,8 +6,8 @@
 
 A type-safe, deeply-embedded SQL query DSL for Lean 4 — language-integrated queries built
 from intrinsically-typed GADTs and PHOAS binders: schemas index the types of queries and rows,
-so schema, column types, nullability, and the public grouped-expression API are
-checked at elaboration. Checked
+so schema, column types, and nullability are checked at elaboration. Separate
+row and grouped ASTs enforce grouping rules even for raw construction. Checked
 compilation rejects unsupported SQL compositions before native execution.
 
 Queries are staged: bound row variables carry *SQL expressions* (not runtime values) and
@@ -250,7 +250,7 @@ the library itself always emits parameterized SQL.
   takes an `Int` start and a `Nat` length; negative lengths are type errors.
   `round` precision remains an `Int`, so negative precision is accepted.
   Aggregate operators carry their input type as `Aggregate t`: `sum` and `avg`
-  require `SqlNumeric t` in both raw grouped and scalar query constructors.
+  require `SqlNumeric t` in both grouped-expression and scalar-query AST nodes.
   `min` and `max` preserve the existing input-type rules. The compiler and
   evaluator retain the operator's input type, so numeric aggregate validation
   happens during Lean elaboration.
@@ -303,12 +303,26 @@ ordinary `where'` fails during Lean elaboration. Each callback has a fresh scope
 type, so expressions from separate grouped queries cannot be mixed. These rules
 apply equally to grouped `having` and `orderBy`.
 
-The guarantee concerns the public grouped constructors and operators. The raw
-AST and manual elimination of implementation wrappers are low-level escape
-hatches; native drivers retain checked compilation for them and for unsupported
-SQL compositions. Grouped expressions have no public conversion to ordinary
-row expressions. To filter or compose a grouped result as ordinary rows, finish
-its `select` first and continue the query pipeline.
+The raw AST enforces this separation too. `SqlExprP` contains row expressions;
+`GroupedExprP` contains grouped keys, aggregates over row expressions, and
+functions of grouped values. A grouped key carries a `KeyRef` into the group's
+key schema, and `groupYield` requires matching typed keys, projection, HAVING,
+and ordering. Key lookup consumes a complete typed key row, so it needs no
+missing-key default. Ordinary spine ordering applies only to plain terminals.
+To filter or compose a grouped result as ordinary rows, finish its `select`
+first and continue the query pipeline.
+
+Manually eliminating a public wrapper exposes the intrinsic grouped AST; it
+does not convert the value into a row expression or an aggregate operand.
+The fresh scope type `κ` additionally prevents mixing public callbacks. Raw
+key references are local references interpreted by their current grouped
+terminal; they do not retain a particular callback's identity. Outer-row
+captures inside aggregate arguments and unsupported derived-table correlation
+still require checked compilation before native execution.
+
+Explicit grouped type annotations now include the key schema:
+`GroupExprP κ ρ ts ks c` and `GroupRowP κ ρ ts ks s`. Query callbacks normally
+infer `ks` from their declared keys.
 
 This changes the grouped API: replace lists of `.key` expressions with named
 row literals, and replace `a.sum r["Amount"]` in pipeline callbacks with
@@ -428,7 +442,7 @@ def demo : IO Unit := do
   The cardinality and operation-count theorems certify the in-memory semantics;
   native agreement is checked through differential tests. `execWithin` currently
   operates on an in-memory `TableEnv`; native execution has no sized equivalent.
-  Grouping requires at least one key, including through the pipeline API, so
+  Grouping requires at least one key, including in raw `groupYield` nodes, so
   an empty grouping cannot silently become a global aggregate. Use scalar
   `.count`, `.sum`, etc. when a global aggregate is intended.
 
@@ -547,10 +561,13 @@ return `Bool`/`Prop`, so SQL needs its own).
   parameters as capabilities, so the evaluator reads rows and bindings through them with no
   run-time resolution. A parameter's type comes from the context, not an annotation
   (`SqlExpr.param "minAge"`).
-- One mutual query algebra (PHOAS): expressions, rows, and the two query levels —
+- One mutual query algebra (PHOAS): row expressions and rows, schema-indexed
+  grouped expressions and rows, and the two query levels —
   `SpineQP` (the comprehension spine: `yield`/`groupYield`/`guard`/`fromT`/`joinT`/`order`/
   `fromQ`) and `QueryP` (boundary nodes: `distinct`, `limit`, set ops) — form a single
-  inductive family parameterized by the row representation `ρ : Schema → Type`. Binders
+  inductive family parameterized by the row representation `ρ : Schema → Type`.
+  `groupYield` carries a nonempty typed key row and grouped projection, HAVING,
+  and ordering indexed by that key schema; `order` accepts only plain spines. Binders
   take the opaque atom `ρ s` (the one slot a `∀ρ`-polymorphic term cannot inspect), which
   keeps every mutual occurrence positive; the smart constructors re-wrap with
   `RowP.ofAtom`, so surface lambdas receive rows. The public `Query ts s` is the bundle

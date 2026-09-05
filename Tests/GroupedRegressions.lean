@@ -20,8 +20,8 @@ def grouped := source.groupBy (fun r => ![r["Bucket"].as "Bucket"])
 #check_failure GroupAggP.mk
 #check_failure GroupAggP.source
 #check_failure GroupAggregateP.mk
-#check_failure (fun e : SqlExpr C .int => (⟨e⟩ : GroupExprP Unit AliasOf C .int))
-#check_failure (fun e : SqlExpr C .int => ({ raw := e } : GroupExprP Unit AliasOf C .int))
+#check_failure (fun e : SqlExpr C .int => (⟨e⟩ : GroupExprP Unit AliasOf C [] .int))
+#check_failure (fun e : SqlExpr C .int => ({ raw := e } : GroupExprP Unit AliasOf C [] .int))
 
 -- SELECT, HAVING, and ORDER BY cannot look up a field absent from the key row.
 #check_failure (grouped.select (fun keys _ => ![keys["Id"].as "Id"]))
@@ -47,7 +47,7 @@ def grouped := source.groupBy (fun r => ![r["Bucket"].as "Bucket"])
 
 -- Grouped SUBSTRING requires a natural-number length at construction time.
 #check_failure (grouped.select (fun _ _ =>
-  ![((GroupExprP.str "abc" : GroupExprP _ _ C .string).substring 1 (-1)).as "Text"]))
+  ![((GroupExprP.str "abc" : GroupExprP _ _ C _ .string).substring 1 (-1)).as "Text"]))
 
 -- Pin the intended type errors as well as merely requiring failure: a parser
 -- error or a renamed API must not make these central safety tests pass.
@@ -65,7 +65,7 @@ example : Query C [("Id", .int)] :=
 error: Type mismatch
   a.sum fun r => r.col "Id"
 has type
-  GroupExprP κ✝ ρ✝ CompilerRegressions.C { ty := SqlPrim.int, nullable := true }
+  GroupExprP κ✝ ρ✝ CompilerRegressions.C [("Bucket", SqlType.int)] { ty := SqlPrim.int, nullable := true }
 but is expected to have type
   SqlExprP ρ✝ CompilerRegressions.C { ty := SqlPrim.int, nullable := true }
 -/
@@ -147,7 +147,7 @@ def groupedLiterals := grouped.select (fun _ _ =>
   ![(GroupExprP.int 7).as "Integer", (GroupExprP.str "fixed").as "Text"])
 
 def groupedSubstring := grouped.select (fun _ _ =>
-  ![((GroupExprP.str "abc" : GroupExprP _ _ C .string).substring 1 2).as "Text"])
+  ![((GroupExprP.str "abc" : GroupExprP _ _ C _ .string).substring 1 2).as "Text"])
 
 abbrev ParamC : Ctx := { tables := C.tables, params := [("offset", .int)] }
 def parameterExpression := (Query.from' (ts := ParamC) items)

@@ -57,7 +57,7 @@ instance : OfNat (SqlExprP ρ ts ⟨.long, n⟩) k := ⟨.atFlag n (.longC (Int.
 instance : Neg (SqlExprP ρ ts ⟨.int, n⟩) := ⟨fun e => .arith .sub (.atFlag n (.intC 0)) e⟩
 
 /-- Render a scientific literal (`99.99`) as exact decimal digits. -/
-private def scientificDigits (m : Nat) (sign : Bool) (e : Nat) : String :=
+def scientificDigits (m : Nat) (sign : Bool) (e : Nat) : String :=
   if !sign then toString (m * 10 ^ e)
   else if e == 0 then toString m
   else

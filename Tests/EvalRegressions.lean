@@ -66,6 +66,19 @@ def noGroups := base.groupBy (fun r => ![r["k"].as "k"])
 #guard boolResult (SqlExpr.exists' noGroups) == .ok (some false)
 #guard boolResult (SqlExpr.exists' (groupedBad.offset 2)) == .ok (some false)
 
+-- EXISTS evaluates key-dependent HAVING but does not demand grouped ordering
+-- or projection values. Both contain division by zero as demand sentinels.
+def keyFilteredBad := base.groupBy (fun r => ![r["k"].as "Key"])
+  |>.having (fun keys _ => keys["Key"] ==. 1)
+  |>.orderBy (fun _ _ => [(GroupExprP.int 1 / GroupExprP.int 0).asc])
+  |>.select (fun _ _ => ![(GroupExprP.int 1 / GroupExprP.int 0).as "bad"])
+def keyFilteredEmpty := base.groupBy (fun r => ![r["k"].as "Key"])
+  |>.having (fun keys _ => keys["Key"] >. 99)
+  |>.orderBy (fun _ _ => [(GroupExprP.int 1 / GroupExprP.int 0).asc])
+  |>.select (fun _ _ => ![(GroupExprP.int 1 / GroupExprP.int 0).as "bad"])
+#guard boolResult (SqlExpr.exists' keyFilteredBad) == .ok (some true)
+#guard boolResult (SqlExpr.exists' keyFilteredEmpty) == .ok (some false)
+
 #guard (SqlExpr.str "  \t foo \n  " : SqlExpr C .string).trim.evalG ee [[]] ==
   .ok (some "\t foo \n")
 #guard sqlTrim "   " == ""

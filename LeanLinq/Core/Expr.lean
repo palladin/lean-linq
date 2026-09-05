@@ -47,6 +47,17 @@ inductive Terminal where
   | grouped
   deriving DecidableEq, Repr
 
+/-- A typed position in a key schema. References are local to the current
+GROUP BY binding; they never store the original source expression. -/
+inductive KeyRef : Schema → SqlType → Type where
+  | here : KeyRef ((name, c) :: rest) c
+  | there : KeyRef rest c → KeyRef (head :: rest) c
+
+/-- Total lookup in the values supplied by a grouping's declared key row. -/
+def KeyRef.getValues : KeyRef ks c → Values ks → c.interp
+  | .here, .cons v _ => v
+  | .there ref, .cons _ rest => ref.getValues rest
+
 /-! Intrinsically-typed SQL expressions: `SqlExpr ts c` can only be built
 from operations valid for the column type `c`, so ill-typed SQL is
 unrepresentable — and `c.nullable` tracks **nullability**, flowing by
@@ -95,10 +106,6 @@ inductive SqlExprP (ρ : Schema → Type) (ts : Ctx) : SqlType → Type where
   -- the strict→nullable subtyping node (`Coe` inserts it); compiler and
   -- evaluator treat it as identity
   | widen : SqlExprP ρ ts ⟨t, false⟩ → SqlExprP ρ ts ⟨t, true⟩
-  -- Internal lowering of an explicitly named grouping key. Its position
-  -- identifies the same expression in SELECT/HAVING/ORDER BY and GROUP BY,
-  -- including the literal parameters belonging to a computed key.
-  | groupKey (index : Nat) : SqlExprP ρ ts c → SqlExprP ρ ts c
   -- operators: flags OR (SQL NULL propagation)
   | arith (op : ArithOp) [numeric : SqlNumeric c.ty] : SqlExprP ρ ts c → SqlExprP ρ ts c → SqlExprP ρ ts c
   -- text/comparison/branch operators take operands at the nullable flag
@@ -131,10 +138,6 @@ inductive SqlExprP (ρ : Schema → Type) (ts : Ctx) : SqlType → Type where
   | scalarSub : ScalarQueryP ρ ts ⟨t, n⟩ → SqlExprP ρ ts ⟨t, true⟩
   | caseWhen : SqlExprP ρ ts ⟨.bool, nc⟩ → SqlExprP ρ ts ⟨t, true⟩ → SqlExprP ρ ts ⟨t, true⟩ →
       SqlExprP ρ ts ⟨t, true⟩
-  -- aggregates (meaningful in grouped selects / HAVING / scalar queries):
-  -- SUM/AVG/MIN/MAX over an empty group are NULL; COUNT never is
-  | aggE (op : Aggregate t) : SqlExprP ρ ts ⟨t, n⟩ → SqlExprP ρ ts ⟨t, true⟩
-  | countAll : SqlExprP ρ ts .int
   -- Numeric functions preserve type/nullability and require numeric operands.
   | abs [numeric : SqlNumeric c.ty] : SqlExprP ρ ts c → SqlExprP ρ ts c
   | round [numeric : SqlNumeric c.ty] : SqlExprP ρ ts c → Int → SqlExprP ρ ts c
@@ -151,6 +154,73 @@ inductive SqlExprP (ρ : Schema → Type) (ts : Ctx) : SqlType → Type where
   | dateAdd (u : DateUnit) : SqlExprP ρ ts ⟨.dateTime, n⟩ → Int → SqlExprP ρ ts ⟨.dateTime, n⟩
   | dateDiff (u : DateUnit) : SqlExprP ρ ts ⟨.dateTime, n₁⟩ → SqlExprP ρ ts ⟨.dateTime, n₂⟩ →
       SqlExprP ρ ts ⟨.int, n₁ || n₂⟩
+
+/-- Expressions under one GROUP BY key binding. Row fields and a general
+row-expression lift are absent. Aggregates consume only ordinary expressions,
+so same-statement aggregate nesting cannot be constructed. -/
+inductive GroupedExprP (ρ : Schema → Type) (ts : Ctx) : Schema → SqlType → Type where
+  | key : KeyRef ks c → GroupedExprP ρ ts ks c
+  | aggE (op : Aggregate t) : SqlExprP ρ ts ⟨t, n⟩ → GroupedExprP ρ ts ks ⟨t, true⟩
+  | countAll : GroupedExprP ρ ts ks .int
+  | intC (i : Int) : GroupedExprP ρ ts ks .int
+  | longC (i : Int) : GroupedExprP ρ ts ks .long
+  | doubleC (f : Float) : GroupedExprP ρ ts ks .double
+  | decimalC (digits : String) : GroupedExprP ρ ts ks .decimal
+  | stringC (s : String) : GroupedExprP ρ ts ks .string
+  | boolC (b : Bool) : GroupedExprP ρ ts ks .bool
+  | dateTimeC (iso : String) : GroupedExprP ρ ts ks .dateTime
+  | guidC (g : String) : GroupedExprP ρ ts ks .guid
+  | nullC (t : SqlPrim) : GroupedExprP ρ ts ks ⟨t, true⟩
+  | paramE (name : String) {pc : SqlType}
+      [inst : HasParam ts.params name pc] : GroupedExprP ρ ts ks pc
+  | widen : GroupedExprP ρ ts ks ⟨t, false⟩ → GroupedExprP ρ ts ks ⟨t, true⟩
+  | arith (op : ArithOp) [numeric : SqlNumeric c.ty] : GroupedExprP ρ ts ks c → GroupedExprP ρ ts ks c → GroupedExprP ρ ts ks c
+  | concat : GroupedExprP ρ ts ks ⟨.string, n⟩ → GroupedExprP ρ ts ks ⟨.string, n⟩ → GroupedExprP ρ ts ks ⟨.string, n⟩
+  | cmp (op : CmpOp) : GroupedExprP ρ ts ks ⟨t, true⟩ → GroupedExprP ρ ts ks ⟨t, true⟩ → GroupedExprP ρ ts ks ⟨.bool, true⟩
+  | and : GroupedExprP ρ ts ks ⟨.bool, n₁⟩ → GroupedExprP ρ ts ks ⟨.bool, n₂⟩ → GroupedExprP ρ ts ks ⟨.bool, n₁ || n₂⟩
+  | or : GroupedExprP ρ ts ks ⟨.bool, n₁⟩ → GroupedExprP ρ ts ks ⟨.bool, n₂⟩ → GroupedExprP ρ ts ks ⟨.bool, n₁ || n₂⟩
+  | not : GroupedExprP ρ ts ks ⟨.bool, n⟩ → GroupedExprP ρ ts ks ⟨.bool, n⟩
+  | isNull : GroupedExprP ρ ts ks c → GroupedExprP ρ ts ks .bool
+  | isNotNull : GroupedExprP ρ ts ks c → GroupedExprP ρ ts ks .bool
+  | like : GroupedExprP ρ ts ks ⟨.string, true⟩ → GroupedExprP ρ ts ks ⟨.string, true⟩ → GroupedExprP ρ ts ks ⟨.bool, true⟩
+  | caseWhen : GroupedExprP ρ ts ks ⟨.bool, nc⟩ → GroupedExprP ρ ts ks ⟨t, true⟩ → GroupedExprP ρ ts ks ⟨t, true⟩ →
+      GroupedExprP ρ ts ks ⟨t, true⟩
+  | abs [numeric : SqlNumeric c.ty] : GroupedExprP ρ ts ks c → GroupedExprP ρ ts ks c
+  | round [numeric : SqlNumeric c.ty] : GroupedExprP ρ ts ks c → Int → GroupedExprP ρ ts ks c
+  | ceiling [numeric : SqlNumeric c.ty] : GroupedExprP ρ ts ks c → GroupedExprP ρ ts ks c
+  | floor [numeric : SqlNumeric c.ty] : GroupedExprP ρ ts ks c → GroupedExprP ρ ts ks c
+  | substring : GroupedExprP ρ ts ks ⟨.string, n⟩ → Int → Nat → GroupedExprP ρ ts ks ⟨.string, n⟩
+  | upper : GroupedExprP ρ ts ks ⟨.string, n⟩ → GroupedExprP ρ ts ks ⟨.string, n⟩
+  | lower : GroupedExprP ρ ts ks ⟨.string, n⟩ → GroupedExprP ρ ts ks ⟨.string, n⟩
+  | trim : GroupedExprP ρ ts ks ⟨.string, n⟩ → GroupedExprP ρ ts ks ⟨.string, n⟩
+  | length : GroupedExprP ρ ts ks ⟨.string, n⟩ → GroupedExprP ρ ts ks ⟨.int, n⟩
+  | now : GroupedExprP ρ ts ks .dateTime
+  | datePart (u : DateUnit) : GroupedExprP ρ ts ks ⟨.dateTime, n⟩ → GroupedExprP ρ ts ks ⟨.int, n⟩
+  | dateAdd (u : DateUnit) : GroupedExprP ρ ts ks ⟨.dateTime, n⟩ → Int → GroupedExprP ρ ts ks ⟨.dateTime, n⟩
+  | dateDiff (u : DateUnit) : GroupedExprP ρ ts ks ⟨.dateTime, n₁⟩ → GroupedExprP ρ ts ks ⟨.dateTime, n₂⟩ →
+      GroupedExprP ρ ts ks ⟨.int, n₁ || n₂⟩
+  | inList : GroupedExprP ρ ts ks c → GroupedExprsP ρ ts ks →
+      GroupedExprP ρ ts ks ⟨.bool, true⟩
+
+/-- Indexed containers keep the key binding fixed throughout grouped clauses.
+Dedicated constructors are needed because nested List/Option parameters cannot
+contain a local index of this mutual inductive family. -/
+inductive GroupedExprsP (ρ : Schema → Type) (ts : Ctx) : Schema → Type where
+  | nil : GroupedExprsP ρ ts ks
+  | cons : GroupedExprP ρ ts ks c → GroupedExprsP ρ ts ks → GroupedExprsP ρ ts ks
+
+inductive GroupedRowP (ρ : Schema → Type) (ts : Ctx) : Schema → Schema → Type where
+  | nil : GroupedRowP ρ ts ks []
+  | cons : {name : String} → GroupedExprP ρ ts ks c → GroupedRowP ρ ts ks s →
+      GroupedRowP ρ ts ks ((name, c) :: s)
+
+inductive GroupedHavingP (ρ : Schema → Type) (ts : Ctx) : Schema → Type where
+  | none : GroupedHavingP ρ ts ks
+  | some : GroupedExprP ρ ts ks ⟨.bool, true⟩ → GroupedHavingP ρ ts ks
+
+inductive GroupedOrdersP (ρ : Schema → Type) (ts : Ctx) : Schema → Type where
+  | nil : GroupedOrdersP ρ ts ks
+  | cons : GroupedExprP ρ ts ks c → Dir → GroupedOrdersP ρ ts ks → GroupedOrdersP ρ ts ks
 
 /-- A heterogeneous tuple of SQL expressions indexed by a schema: the staged
 value flowing through query combinators (each column is an expression, not a
@@ -170,11 +240,6 @@ structure OrderKeyP (ρ : Schema → Type) (ts : Ctx) where
   col : SqlType
   expr : SqlExprP ρ ts col
   dir : Dir
-
-/-- A heterogeneously-typed GROUP BY key; build with `e.key`. -/
-structure KeyExprP (ρ : Schema → Type) (ts : Ctx) where
-  col : SqlType
-  expr : SqlExprP ρ ts col
 
 /-- The comprehension *spine*: the monadic core that always compiles to one
 flat SELECT. `fromT`/`joinT` bind row variables over sources, `guard` adds a
@@ -202,18 +267,18 @@ inductive SpineQP (ρ : Schema → Type) (ts : Ctx) : Terminal → Schema → Ty
   -- grouped statement), and the grouped projection
   -- A first key is required: empty-key grouping would compile as a global
   -- aggregate, which produces a row even when the input cardinality is zero.
-  | groupYield : {s : Schema} → KeyExprP ρ ts → List (KeyExprP ρ ts) →
-      Option (SqlExprP ρ ts ⟨.bool, true⟩) → List (OrderKeyP ρ ts) →
-      RowP ρ ts s → SpineQP ρ ts .grouped s
+  | groupYield : {ks s : Schema} → RowP ρ ts ks → ks ≠ [] →
+      GroupedHavingP ρ ts ks → GroupedOrdersP ρ ts ks →
+      GroupedRowP ρ ts ks s → SpineQP ρ ts .grouped s
   | guard : {g : Terminal} → {s : Schema} → {nb : Bool} →
       SqlExprP ρ ts ⟨.bool, nb⟩ → SpineQP ρ ts g s → SpineQP ρ ts g s
   -- ORDER BY belongs to the statement being assembled, so it lives on the
   -- spine (keys already applied to the bound rows) and `bind` splices
   -- through it — projections/filters after `orderBy` fuse into the same
   -- flat statement (SQL Server in particular forbids ORDER BY inside a
-  -- derived table). In a grouped spine the keys may reference aggregates.
-  | order : {g : Terminal} → {s : Schema} →
-      List (OrderKeyP ρ ts) → SpineQP ρ ts g s → SpineQP ρ ts g s
+  -- derived table). Grouped ordering belongs exclusively to groupYield.
+  | order : {s : Schema} →
+      List (OrderKeyP ρ ts) → SpineQP ρ ts .plain s → SpineQP ρ ts .plain s
   | fromT : {g : Terminal} → {n : String} → {s s' : Schema} →
       [inst : HasTable ts.tables n s] → Table n s →
       (ρ s → SpineQP ρ ts g s') → SpineQP ρ ts g s'
@@ -298,6 +363,24 @@ surface lambdas receive rows while the AST stores only the opaque atom. -/
 def RowP.ofAtom {s : Schema} (a : ρ s) : RowP ρ ts s :=
   RowP.ofAtomAux a s
 
+/-- Total positional lookup in ordinary and grouped expression rows. -/
+def RowP.get : KeyRef s c → RowP ρ ts s → SqlExprP ρ ts c
+  | .here, .cons e _ => e
+  | .there ref, .cons _ rest => RowP.get ref rest
+
+def GroupedRowP.get : KeyRef s c → GroupedRowP ρ ts ks s → GroupedExprP ρ ts ks c
+  | .here, .cons e _ => e
+  | .there ref, .cons _ rest => GroupedRowP.get ref rest
+
+def GroupedRowP.append : GroupedRowP ρ ts ks a → GroupedRowP ρ ts ks b →
+    GroupedRowP ρ ts ks (a ++ b)
+  | .nil, b => b
+  | .cons e a, b => .cons e (a.append b)
+
+def GroupedOrdersP.isEmpty : GroupedOrdersP ρ ts ks → Bool
+  | .nil => true
+  | .cons .. => false
+
 /-- Strict expressions embed into nullable positions (`widen` is identity
 at compile time and run time). -/
 instance : Coe (SqlExprP ρ ts ⟨t, false⟩) (SqlExprP ρ ts ⟨t, true⟩) := ⟨.widen⟩
@@ -305,17 +388,20 @@ instance : Coe (SqlExprP ρ ts ⟨t, false⟩) (SqlExprP ρ ts ⟨t, true⟩) :=
 /-- Evidence that an expression of flag `ne` fits a position of flag
 `nl`, carrying the transport (identity or `widen`). Strict fits anywhere;
 nullable fits only nullable — so a NULL-capable value into a NOT NULL
-column has **no instance** and fails at elaboration. The strict instances
-are high priority: an undetermined literal flag resolves to strict. -/
+column has **no instance** and fails at elaboration. The validity proof
+also supports grouped expressions without lifting ordinary expression trees.
+The strict instances are high priority: an undetermined literal flag resolves
+to strict. -/
 class FlagFits (ne nl : Bool) where
+  valid : ne = true → nl = true
   fit : {ρ : Schema → Type} → {ts : Ctx} → {t : SqlPrim} →
     SqlExprP ρ ts ⟨t, ne⟩ → SqlExprP ρ ts ⟨t, nl⟩
 
-instance : FlagFits true true := ⟨id⟩
+instance : FlagFits true true := ⟨id, id⟩
 -- default instances (an expression flag nothing else determines resolves
 -- late): identity-at-strict outranks widening
-@[default_instance 1100] instance : FlagFits false false := ⟨id⟩
-@[default_instance] instance : FlagFits false true := ⟨.widen⟩
+@[default_instance 1100] instance : FlagFits false false := ⟨Bool.noConfusion, id⟩
+@[default_instance] instance : FlagFits false true := ⟨fun _ => rfl, .widen⟩
 
 /-- `p0`, `p1`, … are the compiler's auto-parameter names (one per inlined
 literal); a user parameter with such a name would silently alias a
@@ -408,9 +494,5 @@ abbrev OrderKey : Ctx → Type := OrderKeyP AliasOf
 
 def SqlExprP.asc (e : SqlExprP ρ ts c) : OrderKeyP ρ ts := ⟨c, e, .asc⟩
 def SqlExprP.desc (e : SqlExprP ρ ts c) : OrderKeyP ρ ts := ⟨c, e, .desc⟩
-
-abbrev KeyExpr : Ctx → Type := KeyExprP AliasOf
-
-def SqlExprP.key (e : SqlExprP ρ ts c) : KeyExprP ρ ts := ⟨c, e⟩
 
 end LeanLinq

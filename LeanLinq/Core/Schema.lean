@@ -86,13 +86,17 @@ reliably. A misspelled column fails at compile time with
 `failed to synthesize HasCol …`. -/
 
 class HasCol (s : Schema) (name : String) (c : outParam SqlType) where
-  getImpl : {ρ : Schema → Type} → {ts : Ctx} → RowP ρ ts s → SqlExprP ρ ts c
+  ref : KeyRef s c
 
 instance (priority := high) : HasCol ((name, c) :: s) name c where
-  getImpl | .cons e _ => e
+  ref := .here
 
 instance [i : HasCol s name c] : HasCol ((n', c') :: s) name c where
-  getImpl | .cons _ r => i.getImpl r
+  ref := .there i.ref
+
+/-- Read the typed position selected by column-name resolution. -/
+def HasCol.getImpl (i : HasCol s name c) (r : RowP ρ ts s) : SqlExprP ρ ts c :=
+  RowP.get i.ref r
 
 /-- Column access by name: `r.col "Name"`. Prefer the bracket sugar
 `r["Name"]`. The expression carries the column's declared nullability. -/
@@ -170,8 +174,8 @@ open Lean Elab Term Meta in
       -- the nullability flag of `SqlExpr ts ⟨t, n⟩` (whnf unfolds the
       -- reducible per-type constants like `SqlType.long` to mk-apps)
       let flagOf : Expr → TermElabM (Option Expr) := fun ty => do
-        if ty.isAppOfArity ``LeanLinq.SqlExprP 3 || ty.isAppOfArity `LeanLinq.GroupExprP 4 then
-          let col ← whnf (ty.getArg! (if ty.isAppOf ``LeanLinq.SqlExprP then 2 else 3))
+        if ty.isAppOfArity ``LeanLinq.SqlExprP 3 || ty.isAppOfArity `LeanLinq.GroupExprP 5 then
+          let col ← whnf (ty.getArg! (if ty.isAppOf ``LeanLinq.SqlExprP then 2 else 4))
           if col.isAppOfArity ``LeanLinq.SqlType.mk 2 then
             return some (col.getArg! 1)
           else if col.isMVar then return some col   -- undecided

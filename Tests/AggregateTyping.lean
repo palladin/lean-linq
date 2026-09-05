@@ -29,8 +29,8 @@ example {t : SqlPrim} : Aggregate t := .max
 
 -- Pin both raw node signatures: their operator has exactly the operand's
 -- primitive, and every aggregate result remains nullable.
-example {ρ : Schema → Type} {t : SqlPrim} {n : Bool} :
-    Aggregate t → SqlExprP ρ C ⟨t, n⟩ → SqlExprP ρ C ⟨t, true⟩ := SqlExprP.aggE
+example {ρ : Schema → Type} {ks : Schema} {t : SqlPrim} {n : Bool} :
+    Aggregate t → SqlExprP ρ C ⟨t, n⟩ → GroupedExprP ρ C ks ⟨t, true⟩ := GroupedExprP.aggE
 example {ρ : Schema → Type} {t : SqlPrim} {n : Bool} :
     Aggregate t → SpineQP ρ C .plain [("Value", ⟨t, n⟩)] → ScalarQueryP ρ C ⟨t, true⟩ :=
   ScalarQueryP.aggQ
@@ -43,7 +43,7 @@ example : SelSpec [("Value", .int)] := .aggSel (Aggregate.sum : Aggregate .int)
 
 private def numericNodes {t : SqlPrim} {n : Bool} [SqlNumeric t]
     (e : SqlExpr C ⟨t, n⟩) (sp : SpineQP AliasOf C .plain [("Value", ⟨t, n⟩)]) :
-    List (SqlExpr C ⟨t, true⟩) × List (ScalarQueryP AliasOf C ⟨t, true⟩) :=
+    List (GroupedExprP AliasOf C [] ⟨t, true⟩) × List (ScalarQueryP AliasOf C ⟨t, true⟩) :=
   ([.aggE .sum e, .aggE .avg e, .aggE .min e, .aggE .max e],
    [.aggQ .sum sp, .aggQ .avg sp, .aggQ .min sp, .aggQ .max sp])
 
@@ -59,10 +59,10 @@ example (n : Bool) (e : SqlExpr C ⟨.decimal, n⟩)
 
 -- Raw grouped-expression construction must reject both SUM and AVG, whether
 -- the operand is a strict literal or a nullable expression.
-#check_failure (SqlExprP.aggE .sum (.stringC "abc") : SqlExpr C (.null .string))
-#check_failure (SqlExprP.aggE .avg (.stringC "abc") : SqlExpr C (.null .string))
-#check_failure (SqlExprP.aggE .sum (.nullC .string) : SqlExpr C (.null .string))
-#check_failure (SqlExprP.aggE .avg (.nullC .bool) : SqlExpr C (.null .bool))
+#check_failure (GroupedExprP.aggE .sum (.stringC "abc") : GroupedExprP AliasOf C [] (.null .string))
+#check_failure (GroupedExprP.aggE .avg (.stringC "abc") : GroupedExprP AliasOf C [] (.null .string))
+#check_failure (GroupedExprP.aggE .sum (.nullC .string) : GroupedExprP AliasOf C [] (.null .string))
+#check_failure (GroupedExprP.aggE .avg (.nullC .bool) : GroupedExprP AliasOf C [] (.null .bool))
 
 private def rawText : SpineQP AliasOf C .plain [("Value", .string)] :=
   .yield (.cons (.stringC "abc") .nil)
@@ -89,7 +89,7 @@ error: failed to synthesize instance of type class
 Hint: Type class instance resolution failures can be inspected with the `set_option trace.Meta.synthInstance true` command.
 -/
 #guard_msgs in
-example : SqlExpr C (.null .string) := .aggE .sum (.stringC "abc")
+example : GroupedExprP AliasOf C [] (.null .string) := .aggE .sum (.stringC "abc")
 
 /--
 error: failed to synthesize instance of type class

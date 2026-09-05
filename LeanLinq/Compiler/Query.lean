@@ -111,13 +111,33 @@ parameters are distinct occurrences; SQL Server also rejects constant-only
 GROUP BY expressions. Named computed keys become source columns on both. -/
 private def simpleGroupKey : SqlExpr ts c → Bool
   | .field .. => true
-  | .groupKey _ e | .widen e => simpleGroupKey e
+  | .widen e => simpleGroupKey e
   | _ => false
 
-private def explicitGroupKey : SqlExpr ts c → Bool
-  | .groupKey .. => true
-  | .widen e => explicitGroupKey e
-  | _ => false
+private def RowP.hasComputedKey : Row ts ks → Bool
+  | .nil => false
+  | .cons e tail => !simpleGroupKey e || tail.hasComputedKey
+
+/-- The current key binding is total and indexed by its actual schema. -/
+structure CompiledGroupKey where
+  sql : String
+  isPredicate : Bool
+
+inductive GroupKeyEnv : Schema → Type where
+  | nil : GroupKeyEnv []
+  | cons : CompiledGroupKey → GroupKeyEnv rest → GroupKeyEnv ((name, c) :: rest)
+
+def GroupKeyEnv.get : GroupKeyEnv ks → KeyRef ks c → CompiledGroupKey
+  | .cons value _, .here => value
+  | .cons _ rest, .there ref => rest.get ref
+
+def GroupKeyEnv.isPredicate (keys : GroupKeyEnv ks) {c : SqlType} (ref : KeyRef ks c) : Bool :=
+  (keys.get ref).isPredicate
+
+def GroupKeyEnv.groupByItems : GroupKeyEnv ks → CompileM (List String)
+  | .nil => pure []
+  | .cons key rest => do
+      return (← valueWrap key.isPredicate key.sql) :: (← rest.groupByItems)
 
 private def projectGroupValue (sql : String) : CompileM String := do
   match (← get).groupProjection with
@@ -144,23 +164,6 @@ def SqlExprP.compile : SqlExpr ts c → CompileM String
   | .nullC _       => pure "NULL"
   | .paramE (inst := _) name => refParam name
   | .widen e => e.compile
-  | .groupKey index e => do
-      match (← get).groupKeySql with
-      | none =>
-          recordCompileError (.invalidGrouping "grouping key outside its grouped statement")
-          e.compile
-      | some keys =>
-          match keys.find? (·.1 == index) with
-          | some (_, sql) => pure sql
-          | none =>
-              let materializing := (← get).groupProjection.isSome
-              let sourceSql ← withoutGroupProjection (withAggregateContext false e.compile)
-              let scalarSql ← if materializing then valueWrap e.isPredicate sourceSql else pure sourceSql
-              let projected ← projectGroupValue scalarSql
-              let sql ← if materializing && e.isPredicate then predWrap false projected else pure projected
-              modify fun st => { st with
-                groupKeySql := st.groupKeySql.map (fun keys => keys ++ [(index, sql)]) }
-              pure sql
   | .field _ row name => do
       checkFieldScope row.alias name
       if row.alias.isEmpty then quote name
@@ -196,15 +199,6 @@ def SqlExprP.compile : SqlExpr ts c → CompileM String
   | .scalarSub sub => return s!"({← withCompileStatement sub.compileScalar})"
   | .caseWhen c a b =>
       return s!"CASE WHEN {← predWrap c.isPredicate (← c.compile)} THEN {← valueWrap a.isPredicate (← a.compile)} ELSE {← valueWrap b.isPredicate (← b.compile)} END"
-  | .aggE op e => do
-      checkAggregate
-      let sourceArg ← withAggregateArgument do
-        withoutGroupProjection do valueWrap e.isPredicate (← e.compile)
-      let arg ← projectGroupValue sourceArg
-      return s!"{op.token}({arg})"
-  | .countAll => do
-      checkAggregate
-      pure "COUNT(*)"
   | .abs (numeric := _) e => return s!"ABS({← valueWrap e.isPredicate (← e.compile)})"
   | .round (numeric := _) e digits => do
       let p ← pushParam (.int digits)
@@ -288,6 +282,138 @@ def SqlExprP.compile : SqlExpr ts c → CompileM String
           | .month => s!"((YEAR({y}) - YEAR({x})) * 12 + (MONTH({y}) - MONTH({x})))"
           | .year => s!"(YEAR({y}) - YEAR({x}))"
 
+
+def GroupedExprP.compile (keys : GroupKeyEnv ks) :
+    GroupedExprP AliasOf ts ks c → CompileM String
+  | .intC i        => pushParam (.int i)
+  | .longC i       => pushParam (.long i)
+  | .doubleC f     => pushParam (.double f)
+  | .decimalC d    => pushParam (.decimal d)
+  | .stringC s     => pushParam (.string s)
+  | .boolC b       => pushParam (.bool b)
+  | .dateTimeC s   => pushParam (.dateTime (normDateTime s)) -- SQLite compares strings: ship the normalized form the evaluator uses
+  | .guidC g       => pushParam (.guid g)
+  | .nullC _       => pure "NULL"
+  | .paramE (inst := _) name => refParam name
+  | .widen e => e.compile keys
+  | .key ref => pure (keys.get ref).sql
+  | .arith (c := c₀) (numeric := _) op a b  => do
+      -- MySQL: `/` on integers yields DECIMAL; integer division is DIV
+      let tok := if (← read) == .mysql && op == .div
+          && (c₀.ty == .int || c₀.ty == .long)
+        then "DIV" else op.token
+      return s!"({← valueWrap (a.isPredicate keys.isPredicate) (← a.compile keys)} {tok} {← valueWrap (b.isPredicate keys.isPredicate) (← b.compile keys)})"
+  | .concat a b    => do
+      -- MySQL: || is logical OR — string concatenation is CONCAT
+      if (← read) == .mysql then
+        return s!"CONCAT({← a.compile keys}, {← b.compile keys})"
+      let tok := if (← read) == .sqlServer then "+" else "||"
+      return s!"({← a.compile keys} {tok} {← b.compile keys})"
+  | .cmp op a b => do
+      let sa ← valueWrap (a.isPredicate keys.isPredicate) (← a.compile keys)
+      let sb ← valueWrap (b.isPredicate keys.isPredicate) (← b.compile keys)
+      return s!"({sa} {op.token} {sb})"
+  | .and a b       => return s!"({← predWrap (a.isPredicate keys.isPredicate) (← a.compile keys)} AND {← predWrap (b.isPredicate keys.isPredicate) (← b.compile keys)})"
+  | .or a b        => return s!"({← predWrap (a.isPredicate keys.isPredicate) (← a.compile keys)} OR {← predWrap (b.isPredicate keys.isPredicate) (← b.compile keys)})"
+  | .not a         => return s!"(NOT {← predWrap (a.isPredicate keys.isPredicate) (← a.compile keys)})"
+  | .isNull e      => return s!"{← valueWrap (e.isPredicate keys.isPredicate) (← e.compile keys)} IS NULL"
+  | .isNotNull e   => return s!"{← valueWrap (e.isPredicate keys.isPredicate) (← e.compile keys)} IS NOT NULL"
+  | .like e p      => return s!"{← e.compile keys} LIKE {← p.compile keys}"
+  -- an empty IN list is invalid SQL (PostgreSQL/SQL Server reject `IN ()`);
+  -- SQL's `x IN (empty)` is FALSE without evaluating x, so compile exactly that
+  | .inList _ .nil   => return "(1 = 0)"
+  | .inList e es   => return s!"{← valueWrap (e.isPredicate keys.isPredicate) (← e.compile keys)} IN ({String.intercalate ", " (← GroupedExprsP.compileList keys es)})"
+  | .caseWhen c a b =>
+      return s!"CASE WHEN {← predWrap (c.isPredicate keys.isPredicate) (← c.compile keys)} THEN {← valueWrap (a.isPredicate keys.isPredicate) (← a.compile keys)} ELSE {← valueWrap (b.isPredicate keys.isPredicate) (← b.compile keys)} END"
+  | .aggE op e => do
+      let sourceArg ← withAggregateArgument do
+        withoutGroupProjection do valueWrap e.isPredicate (← e.compile)
+      let arg ← projectGroupValue sourceArg
+      return s!"{op.token}({arg})"
+  | .countAll => pure "COUNT(*)"
+  | .abs (numeric := _) e => return s!"ABS({← valueWrap (e.isPredicate keys.isPredicate) (← e.compile keys)})"
+  | .round (numeric := _) e digits => do
+      let p ← pushParam (.int digits)
+      return s!"ROUND({← valueWrap (e.isPredicate keys.isPredicate) (← e.compile keys)}, {p})"
+  | .ceiling (numeric := _) e => do
+      let name := match (← read) with
+        | .sqlite => "CEIL"
+        | _ => "CEILING"
+      return s!"{name}({← valueWrap (e.isPredicate keys.isPredicate) (← e.compile keys)})"
+  | .floor (numeric := _) e => return s!"FLOOR({← valueWrap (e.isPredicate keys.isPredicate) (← e.compile keys)})"
+  | .substring e start len => do
+      let db ← read
+      let name := if db == .sqlite then "SUBSTR" else "SUBSTRING"
+      let len : Int := len
+      -- PostgreSQL/SQL Server count positions before the first character
+      -- against the requested length; SQLite/MySQL use different native
+      -- conventions for zero/negative starts, so lower those explicitly.
+      let (start, len) :=
+        if (db == .sqlite || db == .mysql) && start ≤ 0 then
+          (1, max 0 (len + start - 1))
+        else (start, len)
+      let p1 ← pushParam (.int start)
+      let p2 ← pushParam (.int len)
+      return s!"{name}({← e.compile keys}, {p1}, {p2})"
+  | .upper e       => return s!"UPPER({← e.compile keys})"
+  | .lower e       => return s!"LOWER({← e.compile keys})"
+  | .trim e        => return s!"TRIM({← e.compile keys})"
+  | .length e      => do
+      -- MySQL LENGTH is bytes; CHAR_LENGTH is characters (the semantics)
+      let name := match (← read) with
+        | .sqlServer => "LEN"
+        | .mysql => "CHAR_LENGTH"
+        | _ => "LENGTH"
+      return s!"{name}({← e.compile keys})"
+  | .now           =>
+      return match (← read) with
+        | .sqlServer => "GETDATE()"
+        | .sqlite => "datetime('now')"
+        | .postgres => "NOW()"
+        | .mysql => "NOW()"
+  | .datePart u e  => do
+      let x ← e.compile keys
+      return match (← read) with
+        | .sqlServer => s!"{u.upperName}({x})"
+        | .sqlite => s!"CAST(strftime('{u.strftimeFmt}', {x}) AS INTEGER)"
+        | .postgres => s!"EXTRACT({u.upperName} FROM {x})"
+        | .mysql => s!"EXTRACT({u.upperName} FROM {x})"
+  | .dateAdd u e n => do
+      let x ← e.compile keys
+      match (← read) with
+      | .sqlServer => do
+          let p ← pushParam (.int n)
+          return s!"DATEADD({u.token}, {p}, {x})"
+      | .sqlite =>
+          let amount := if n ≥ 0 then s!"+{n}" else toString n
+          return s!"datetime({x}, '{amount} {u.token}')"
+      | .postgres =>
+          return s!"({x} + INTERVAL '{n} {u.token}')"
+      | .mysql =>
+          return s!"DATE_ADD({x}, INTERVAL {n} {u.token.toUpper})"
+  | .dateDiff u a b => do
+      let x ← a.compile keys
+      let y ← b.compile keys
+      return match (← read) with
+        | .sqlServer => s!"DATEDIFF({u.token}, {x}, {y})"
+        | .sqlite =>
+          match u with
+          | .day => s!"CAST((julianday({y}) - julianday({x})) AS INTEGER)"
+          | .month => s!"CAST(((CAST(strftime('%Y', {y}) AS INTEGER) - CAST(strftime('%Y', {x}) AS INTEGER)) * 12 + (CAST(strftime('%m', {y}) AS INTEGER) - CAST(strftime('%m', {x}) AS INTEGER))) AS INTEGER)"
+          | .year => s!"CAST((CAST(strftime('%Y', {y}) AS INTEGER) - CAST(strftime('%Y', {x}) AS INTEGER)) AS INTEGER)"
+        | .postgres =>
+          match u with
+          | .day => s!"EXTRACT(DAY FROM ({y} - {x}))"
+          | .month => s!"(EXTRACT(YEAR FROM {y}) - EXTRACT(YEAR FROM {x})) * 12 + (EXTRACT(MONTH FROM {y}) - EXTRACT(MONTH FROM {x}))"
+          | .year => s!"(EXTRACT(YEAR FROM {y}) - EXTRACT(YEAR FROM {x}))"
+        | .mysql =>
+          -- calendar-component convention (the evaluator's), not
+          -- TIMESTAMPDIFF's anniversary counting
+          match u with
+          | .day => s!"DATEDIFF({y}, {x})"
+          | .month => s!"((YEAR({y}) - YEAR({x})) * 12 + (MONTH({y}) - MONTH({x})))"
+          | .year => s!"(YEAR({y}) - YEAR({x}))"
+
 def SqlExprP.compileList :
     List ((p : SqlType) × SqlExpr ts p) → CompileM (List String)
   | [] => pure []
@@ -313,10 +439,46 @@ def compileOrderKeyItems : List (OrderKey ts) → CompileM (List String)
       let item := s!"{x} {if dir == .asc then "ASC" else "DESC"}{nulls}"
       return item :: (← compileOrderKeyItems ks)
 
-def compileGroupKeyItems : List (KeyExpr ts) → CompileM (List String)
-  | [] => pure []
-  | ⟨_, e⟩ :: ks => do
-      return (← valueWrap e.isPredicate (← e.compile)) :: (← compileGroupKeyItems ks)
+/-- Render each key once; the indexed environment has no missing-key case. -/
+def RowP.compileGroupKeys : Row ts ks → CompileM (GroupKeyEnv ks)
+  | .nil => pure .nil
+  | .cons e rest => do
+      let materializing := (← get).groupProjection.isSome
+      let sourceSql ← withoutGroupProjection e.compile
+      let scalarSql ← if materializing then valueWrap e.isPredicate sourceSql else pure sourceSql
+      let sql ← projectGroupValue scalarSql
+      let tail ← rest.compileGroupKeys
+      return .cons { sql, isPredicate := !materializing && e.isPredicate } tail
+
+def GroupedExprsP.compileList (keys : GroupKeyEnv ks) :
+    GroupedExprsP AliasOf ts ks → CompileM (List String)
+  | .nil => pure []
+  | .cons e rest => do
+      return (← valueWrap (e.isPredicate keys.isPredicate) (← e.compile keys)) ::
+        (← rest.compileList keys)
+
+def GroupedRowP.selectList (keys : GroupKeyEnv ks) :
+    {s : Schema} → GroupedRowP AliasOf ts ks s → CompileM (List String)
+  | [], .nil => pure []
+  | (name, _) :: _, .cons e rest => do
+      let item ← valueWrap (e.isPredicate keys.isPredicate) (← e.compile keys)
+      return s!"{item} AS {← quote name}" :: (← rest.selectList keys)
+
+def GroupedHavingP.compileClause (keys : GroupKeyEnv ks) :
+    GroupedHavingP AliasOf ts ks → CompileM String
+  | .none => pure ""
+  | .some e => do
+      return s!" HAVING {← predWrap (e.isPredicate keys.isPredicate) (← e.compile keys)}"
+
+def GroupedOrdersP.compileItems (keys : GroupKeyEnv ks) :
+    GroupedOrdersP AliasOf ts ks → CompileM (List String)
+  | .nil => pure []
+  | .cons e dir rest => do
+      let x ← valueWrap (e.isPredicate keys.isPredicate) (← e.compile keys)
+      let nulls := if (← read) == .postgres then
+          (if dir == .asc then " NULLS FIRST" else " NULLS LAST") else ""
+      let item := s!"{x} {if dir == .asc then "ASC" else "DESC"}{nulls}"
+      return item :: (← rest.compileItems keys)
 
 /-- Compile a full query. Boundary clauses (DISTINCT, LIMIT, set ops,
 GROUP BY) decorate the statement produced by the spine underneath. -/
@@ -410,32 +572,20 @@ def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec s → CompileM 
       return s!"{head} {sel}{renderFroms acc.froms}{renderWheres acc.wheres}{tail}{orderClause}"
   -- the grouped terminal carries its own projection and GROUP BY/HAVING/
   -- ORDER BY tail; the projection spec is plain-only and ignored here
-  | .groupYield key ks hv ord r, acc, _ => do
-      let outerKeys := (← get).groupKeySql
+  | .groupYield rowKeys _ hv ord r, acc, _ => do
       let outerProjection := (← get).groupProjection
-      let computed := (match key with | ⟨_, e⟩ => !simpleGroupKey e) ||
-        ks.any (fun k => match k with | ⟨_, e⟩ => !simpleGroupKey e)
-      let explicitKeys := (match key with | ⟨_, e⟩ => explicitGroupKey e) &&
-        ks.all (fun k => match k with | ⟨_, e⟩ => explicitGroupKey e)
       let dialect ← read
-      let materialize := (dialect == .mysql || dialect == .sqlServer) && computed && explicitKeys
+      let materialize := (dialect == .mysql || dialect == .sqlServer) && rowKeys.hasComputedKey
       let projection ← if materialize then do
           pure (some ({ alias := ← freshAlias } : GroupProjection))
         else pure none
-      modify fun st => { st with groupKeySql := some [], groupProjection := projection }
-      let items ← withAggregateContext true r.selectList
-      let keyStr ← match key with
-        | ⟨_, e⟩ => valueWrap e.isPredicate (← e.compile)
-      let ksStr := String.intercalate ", " (keyStr :: (← compileGroupKeyItems ks))
-      let hvStr ← match hv with
-        | none => pure ""
-        | some h => do
-            let hs ← withAggregateContext true do predWrap h.isPredicate (← h.compile)
-            pure s!" HAVING {hs}"
-      let ownOb ← match ord with
-        | [] => pure ""
-        | _ => do
-            pure s!" ORDER BY {String.intercalate ", " (← withAggregateContext true (compileOrderKeyItems ord))}"
+      modify fun st => { st with groupProjection := projection }
+      let keys ← rowKeys.compileGroupKeys
+      let items ← r.selectList keys
+      let ksStr := String.intercalate ", " (← keys.groupByItems)
+      let hvStr ← hv.compileClause keys
+      let ownOb ← if ord.isEmpty then pure "" else do
+        pure s!" ORDER BY {String.intercalate ", " (← ord.compileItems keys)}"
       let head := if acc.distinct then "SELECT DISTINCT" else "SELECT"
       let orderClause :=
         if acc.orders.isEmpty then ""
@@ -451,18 +601,18 @@ def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec s → CompileM 
             let boundary := if dialect == .mysql then " LIMIT 18446744073709551615" else ""
             let inner := s!"SELECT {String.intercalate ", " innerItems}{renderFroms acc.froms}{renderWheres acc.wheres}{boundary}"
             pure s!" FROM ({inner}) {← quote projection.alias}"
-      modify fun st => { st with groupKeySql := outerKeys, groupProjection := outerProjection }
+      modify fun st => { st with groupProjection := outerProjection }
       return s!"{head} {String.intercalate ", " items}{fromClause}{gb}{hvStr}{ownOb}{orderClause}"
   | .guard b rest, acc, k => do
       let w ← predWrap b.isPredicate (← b.compile)
       rest.compileSpine { acc with wheres := acc.wheres.push w } k
-  | .order (g := g) ks rest, acc, k => do
+  | .order ks rest, acc, k => do
       if ks.isEmpty then return ← rest.compileSpine acc k
       match k with
       | .countSel => rest.compileSpine acc .countSel
       | .aggSel op => rest.compileSpine acc (.aggSel op)
       | .defaultSel =>
-          let rendered := String.intercalate ", " (← withAggregateContext (g == .grouped) (compileOrderKeyItems ks))
+          let rendered := String.intercalate ", " (← compileOrderKeyItems ks)
           rest.compileSpine { acc with orders := acc.orders.push rendered } .defaultSel
   | .fromT (n := nm) (inst := _) _ f, acc, k => do
       let alias ← freshAlias

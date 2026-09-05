@@ -4,8 +4,6 @@ import LeanLinq.Core.Grade
 namespace LeanLinq
 
 instance : Inhabited (SpineQ ts .plain s) := ⟨.yield default⟩
-instance : Inhabited (SpineQ ts .grouped s) :=
-  ⟨.groupYield ⟨.int, .intC 0⟩ [] none [] default⟩
 instance : Inhabited (QueryA ts s) := ⟨.spine (.yield default)⟩
 
 namespace SpineQ
@@ -21,7 +19,12 @@ private def _root_.LeanLinq.SpineQP.bindAux {ρ : Schema → Type} :
   | _, _, .yield r,         _, k => k r
   | _, _, .groupYield ..,   h, _ => nomatch h
   | _, _, .guard b rest,    h, k => .guard b (bindAux rest h k)
-  | _, _, .order ks rest,   h, k => .order ks (bindAux rest h k)
+  | _, _, .order ks rest,   h, k =>
+      -- Pre-group row order has no meaning in the grouped statement.
+      -- Only its terminal can introduce grouped ordering.
+      match g with
+      | .plain => .order ks (bindAux rest h k)
+      | .grouped => bindAux rest h k
   -- rebuilding a source node reuses its *matched* membership instance —
   -- no fresh instance search
   | _, _, .fromT (inst := i) t f, h, k =>
@@ -51,7 +54,7 @@ aligned with it. -/
 def _root_.LeanLinq.SpineQP.dropOrders {ρ : Schema → Type} :
     SpineQP ρ ts g s → SpineQP ρ ts g s
   | .yield r => .yield r
-  | .groupYield key ks hv _ r => .groupYield key ks hv [] r
+  | .groupYield key ks hv _ r => .groupYield key ks hv .nil r
   | .guard b rest => .guard b rest.dropOrders
   | .order _ rest => rest.dropOrders
   | .fromT (inst := i) t f => .fromT (inst := i) t fun a => (f a).dropOrders

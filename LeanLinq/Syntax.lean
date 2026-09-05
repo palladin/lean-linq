@@ -24,8 +24,8 @@ expansion, so grouping discipline is enforced by the index, not at run time:
 - `join x in t on p` / `leftJoin x in t on p` ⇒ `SpineQ.joinT` (fuse into the
   same flat statement);
 - `where p` ⇒ `SpineQ.guard p …` (a WHERE conjunct);
-- `orderBy k, …` ⇒ `SpineQ.order` (spine ORDER BY — may reference aggregates
-  when grouped);
+- plain `orderBy k, …` ⇒ `SpineQ.order`; grouped ordering lives in the
+  grouped terminal and accepts only grouped expressions;
 - `groupBy ![…] into k, a` + optional `having p` turn the final `select r` into
   the grouped terminal (`SpineQ.groupYield`); `into a` *binds* the aggregate
   token and the named grouping-key row. Grouped expressions have a fresh

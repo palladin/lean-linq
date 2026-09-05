@@ -3,6 +3,7 @@ import LeanLinq.Driver.Postgres
 import LeanLinq.Driver.Mysql
 import Tests.CompilerRegressions
 import Tests.GroupedRegressions
+import Tests.GroupedAstTyping
 
 /-! Driver boundary regressions. The wire preparation checks need no servers;
 SQLite runs against an isolated in-memory database. Expected values are explicit,
@@ -96,6 +97,9 @@ def checkCompilerQueries
   let table := quote "compiler_items"
   execRaw s!"DROP TABLE IF EXISTS {table}; CREATE TABLE {table} ({quote "Id"} INTEGER, {quote "Bucket"} INTEGER, {quote "Value"} INTEGER); INSERT INTO {table} VALUES (1,1,NULL),(2,1,0),(3,2,2)"
   try
+    check (sameRows (← query GroupedAstTyping.rawQuery)
+      [.cons 11 (.cons 2 (.cons (some 0) .nil)), .cons 12 (.cons 3 (.cons (some 2) .nil))])
+      "two computed raw grouping keys retain their positions"
     check (sameRows (← query GroupedRegressions.computedKey)
       [.cons 2 .nil, .cons 3 .nil, .cons 5 .nil]) "named computed grouping key"
     check (sameRows (← query GroupedRegressions.computedLiteralKey)
@@ -129,7 +133,7 @@ def checkCompilerQueries
       .cons 2 (.cons 1 (.cons (some 0) .nil)),
       .cons 3 (.cons 2 (.cons (some 2) .nil))]
     for q in [CompilerRegressions.emptyOrder, CompilerRegressions.correlatedExpression,
-        CompilerRegressions.correlatedNestedExpression] do
+        CompilerRegressions.correlatedNestedExpression, CompilerRegressions.correlatedProjection] do
       check (sameRows (← query q) expected) "empty ordering or expression correlation"
     check (sameRows (← query CompilerRegressions.predicateProjection)
       [.cons none .nil, .cons (some false) .nil, .cons (some true) .nil])
@@ -216,15 +220,15 @@ private def checkSqlite : IO Unit := do
       expectRangeError (conn.query namedInt (params i))
     check ((← conn.query emptyGrouped) == []) "grouping an empty source produced a row"
     check ((← emptyGroupedBudget.execIO conn 1) == 0) "empty grouped fetch exceeded its cardinality budget"
-    -- Invalid trees must fail checked compilation before accessing the engine.
+    -- Unsupported outer captures must fail compilation before engine access.
     -- A closed connection makes accidental execution observable.
     conn.close
-    let invalid := source.select (fun _ => ![(SqlExprP.countAll).as "Count"])
     let error ← try
-      let _ ← conn.query invalid
+      let _ ← conn.query CompilerRegressions.outerAggregate
       pure ""
     catch e => pure (toString e)
-    check (error.startsWith "SQL compilation: invalid aggregate:")
+    check (error.startsWith
+      "SQL compilation: invalid aggregate: aggregate arguments cannot capture an outer query row")
       "SQLite executed a query that failed checked compilation"
   finally
     conn.close

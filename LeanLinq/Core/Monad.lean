@@ -7,7 +7,6 @@ native execution boundaries; the evaluator may still interpret the tree. -/
 inductive CompileError where
   | correlatedDerivedTable (alias column : String)
   | invalidAggregate (reason : String)
-  | invalidGrouping (reason : String)
   deriving Repr, BEq
 
 instance : ToString CompileError where
@@ -15,7 +14,6 @@ instance : ToString CompileError where
     | .correlatedDerivedTable alias column =>
         s!"correlated derived-table source is unsupported: {alias}.{column} references a source in the containing statement"
     | .invalidAggregate reason => s!"invalid aggregate: {reason}"
-    | .invalidGrouping reason => s!"invalid grouping: {reason}"
 
 /-- Preprojection for grouping keys that must become real columns before
 grouping, rather than repeated parameterized expressions. -/
@@ -34,14 +32,8 @@ structure CompileState where
   Outer expression-subquery scopes remain visible and are not in this range. -/
   forbiddenAliases : List (Nat × Nat) := []
   derivedDepth : Nat := 0
-  allowAggregate : Bool := false
-  inAggregate : Bool := false
-  /-- Aggregate argument ownership survives nested expression subqueries.
-  `inAggregate` separately tracks nesting within the current SQL statement. -/
+  /-- Aggregate argument ownership survives nested expression subqueries. -/
   aggregateOwners : List Nat := []
-  /-- Rendered explicit grouping keys in the current grouped statement.
-  Reusing their SQL preserves parameter identity for computed keys. -/
-  groupKeySql : Option (List (Nat × String)) := none
   groupProjection : Option GroupProjection := none
   error? : Option CompileError := none
 
@@ -57,16 +49,10 @@ def withCompileStatement (m : CompileM α) : CompileM α := do
   let outer ← get
   modify fun st => { st with
     statementStart := st.aliasCounter
-    allowAggregate := false
-    inAggregate := false
-    groupKeySql := none
     groupProjection := none }
   let result ← m
   modify fun st => { st with
     statementStart := outer.statementStart
-    allowAggregate := outer.allowAggregate
-    inAggregate := outer.inAggregate
-    groupKeySql := outer.groupKeySql
     groupProjection := outer.groupProjection }
   return result
 
@@ -78,15 +64,12 @@ def withDerivedSource (m : CompileM α) : CompileM α := do
     statementStart := st.aliasCounter
     forbiddenAliases := (outer.statementStart, outer.aliasCounter) :: outer.forbiddenAliases
     derivedDepth := outer.derivedDepth + 1
-    allowAggregate := false, inAggregate := false, groupKeySql := none
     groupProjection := none }
   let result ← m
   modify fun st => { st with
     statementStart := outer.statementStart
     forbiddenAliases := outer.forbiddenAliases
     derivedDepth := outer.derivedDepth
-    allowAggregate := outer.allowAggregate, inAggregate := outer.inAggregate
-    groupKeySql := outer.groupKeySql
     groupProjection := outer.groupProjection }
   return result
 
@@ -117,30 +100,14 @@ def checkFieldScope (alias column : String) : CompileM Unit := do
   if outerAggregate then
     recordCompileError (.invalidAggregate "aggregate arguments cannot capture an outer query row")
 
-def withAggregateContext (allowed : Bool) (m : CompileM α) : CompileM α := do
-  let previous := (← get).allowAggregate
-  modify fun st => { st with allowAggregate := allowed }
-  let result ← m
-  modify fun st => { st with allowAggregate := previous }
-  return result
-
 def withAggregateArgument (m : CompileM α) : CompileM α := do
   let outer ← get
   modify fun st => { st with
-    inAggregate := true
     aggregateOwners := st.statementStart :: st.aggregateOwners }
   let result ← m
   modify fun st => { st with
-    inAggregate := outer.inAggregate
     aggregateOwners := outer.aggregateOwners }
   return result
-
-def checkAggregate : CompileM Unit := do
-  let st ← get
-  if st.inAggregate then
-    recordCompileError (.invalidAggregate "aggregate functions cannot be nested")
-  else if !st.allowAggregate then
-    recordCompileError (.invalidAggregate "aggregate outside grouped SELECT, HAVING, or ORDER BY")
 
 /-- Allocate a fresh source alias: `a0`, `a1`, … -/
 def freshAlias : CompileM String := fun _ =>

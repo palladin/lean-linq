@@ -57,8 +57,12 @@ def correlatedNestedExpression := source.where' (fun outer => SqlExpr.exists' (
   QueryP.from' (ts := C) items
     |>.where' (fun inner => inner["Bucket"] ==. outer["Bucket"])
     |>.limit 1 |>.select (fun r => r)))
+def correlatedProjection := source.where' (fun outer => SqlExpr.exists' (
+  QueryP.from' (ts := C) items
+    |>.select (fun _ => ![outer["Id"].as "Id"])))
 #guard correlatedExpression.toSqlChecked.isOk
 #guard correlatedNestedExpression.toSqlChecked.isOk
+#guard correlatedProjection.toSqlChecked.isOk
 
 -- Some SQL engines hoist an outer-only aggregate out of a scalar subquery,
 -- producing one row even when the outer source has LIMIT 0. Reject captures
@@ -78,6 +82,19 @@ def correlatedLocalAggregate := source.select (fun outer =>
   | .error (.invalidAggregate "aggregate arguments cannot capture an outer query row") => true
   | _ => false
 #guard correlatedLocalAggregate.toSqlChecked.isOk
+
+-- The intrinsically grouped aggregate path retains the same outer-capture
+-- check. Its aggregate is in HAVING, so EXISTS must demand it.
+def groupedOuterAggregate := (source.limit 0).where' (fun outer => SqlExpr.exists' (
+  QueryP.from' (ts := C) items
+    |>.groupBy (fun inner => ![inner["Bucket"].as "Bucket"])
+    |>.having (fun _ a => a.sum (fun _ => outer["Id"]) >. 0)
+    |>.select (fun keys _ => ![keys["Bucket"].as "Bucket"])))
+#guard groupedOuterAggregate.gcard.eval (fun _ => 99) == 0
+#guard [DatabaseType.sqlite, .postgres, .mysql, .sqlServer].all fun db =>
+  match groupedOuterAggregate.toSqlChecked db with
+  | .error (.invalidAggregate "aggregate arguments cannot capture an outer query row") => true
+  | _ => false
 
 -- A nested expression subquery must not hide the aggregate's outer capture.
 def hiddenOuterAggregate := (source.limit 0).select (fun outer =>
@@ -138,18 +155,12 @@ def insertFlag : InsertStmt FlagC "compiler_flags" FlagS :=
 
 #check_failure (source.groupBy (fun r => ![r["Bucket"].as "Bucket"])
   |>.select (fun _ a => ![(a.sum (fun _ => a.sum (fun r => r["Id"]))).as "Sum"]))
--- The explicit raw AST escape hatch keeps its checked-compilation backstop.
-def nestedAggregateRaw : Query C [("Sum", .null .int)] := fun _ =>
-  .spine (.fromT items (fun atom =>
-    let r := RowP.ofAtom atom
-    .groupYield r["Bucket"].key [] none []
-      ![(SqlExprP.aggE .sum (.aggE .sum r["Id"])).as "Sum"]))
-#guard [DatabaseType.sqlite, .postgres, .mysql, .sqlServer].all fun db =>
-  match nestedAggregateRaw.toSqlChecked db with
-  | .error (.invalidAggregate "aggregate functions cannot be nested") => true
-  | _ => false
-def misplacedAggregate := source.where' (fun _ => (SqlExprP.countAll : SqlExprP _ C .int).anyNull >. 0)
-#guard !misplacedAggregate.toSqlChecked.isOk
+-- Raw grouped aggregates also reject nesting and ordinary WHERE placement.
+#check_failure (GroupedExprP.aggE .sum
+  (GroupedExprP.aggE .sum (.intC 1) : GroupedExprP AliasOf C [] (.null .int)))
+#check_failure (source.where' (fun _ =>
+  (GroupedExprP.cmp .gt (.widen .countAll) (.widen (.intC 0)) :
+    GroupedExprP _ C [] (.null .bool))))
 #guard grouped.toSqlChecked.isOk
 
 def substringZero := source.select (fun _ => ![(SqlExpr.str "abcd" |>.substring 0 2).as "Text"])

@@ -33,7 +33,15 @@ def SqlExprP.isPredicate : SqlExpr ts c → Bool
   | .cmp .. | .and .. | .or .. | .not .. | .isNull .. | .isNotNull ..
   | .like .. | .inList .. | .inSub .. | .existsSub .. => true
   | .widen e => e.isPredicate
-  | .groupKey _ e => e.isPredicate
+  | _ => false
+
+/-- Key predicates are classified by their current, total binding environment. -/
+def GroupedExprP.isPredicate (keyIsPredicate : {c : SqlType} → KeyRef ks c → Bool) :
+    GroupedExprP ρ ts ks c → Bool
+  | .key ref => keyIsPredicate ref
+  | .cmp .. | .and .. | .or .. | .not .. | .isNull .. | .isNotNull ..
+  | .like .. | .inList .. => true
+  | .widen e => e.isPredicate keyIsPredicate
   | _ => false
 
 namespace SqlExpr
