@@ -56,11 +56,11 @@ def badOrdering := base.orderBy fun _ =>
 #guard boolResult (SqlExpr.exists' (duplicateValues.except otherValues)) == .ok (some true)
 #guard (badProjection.limit 0).run env == .ok []
 
-def groupedBad := base.groupBy (fun r => [r["k"].key])
-  |>.select (fun _ _ => ![((SqlExpr.int 1 : SqlExprP _ C .int) / SqlExpr.int 0).as "bad"])
-def noGroups := base.groupBy (fun r => [r["k"].key])
+def groupedBad := base.groupBy (fun r => ![r["k"].as "k"])
+  |>.select (fun _ _ => ![(GroupExprP.int 1 / GroupExprP.int 0).as "bad"])
+def noGroups := base.groupBy (fun r => ![r["k"].as "k"])
   |>.having (fun _ a => a.count >. 99)
-  |>.select (fun _ _ => ![((SqlExpr.int 1 : SqlExprP _ C .int) / SqlExpr.int 0).as "bad"])
+  |>.select (fun _ _ => ![(GroupExprP.int 1 / GroupExprP.int 0).as "bad"])
 
 #guard boolResult (SqlExpr.exists' groupedBad) == .ok (some true)
 #guard boolResult (SqlExpr.exists' noGroups) == .ok (some false)

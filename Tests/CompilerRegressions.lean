@@ -15,7 +15,7 @@ def env : TableEnv C.tables := .cons [
   .cons 2 (.cons 1 (.cons (some 0) .nil)),
   .cons 3 (.cons 2 (.cons (some 2) .nil))] .nil
 
-def grouped := source.groupBy (fun r => [r["Bucket"].key])
+def grouped := source.groupBy (fun r => ![r["Bucket"].as "Bucket"])
   |>.orderBy (fun r _ => [r["Bucket"].asc])
   |>.select (fun r a => ![r["Bucket"].as "Bucket", a.count.as "Count"])
 def groupedUnion := grouped.union grouped
@@ -136,12 +136,19 @@ def insertFlag : InsertStmt FlagC "compiler_flags" FlagS :=
 #guard updateFlag.toSqlChecked.isOk
 #guard insertFlag.toSqlChecked.isOk
 
-def nestedAggregate := source.groupBy (fun r => [r["Bucket"].key])
-  |>.select (fun r a => ![(a.sum (a.sum r["Id"])).as "Sum"])
-def misplacedAggregate := source.where' (fun _ => Agg.count ⟨⟩ >. 0)
-#guard match nestedAggregate.toSqlChecked with
+#check_failure (source.groupBy (fun r => ![r["Bucket"].as "Bucket"])
+  |>.select (fun _ a => ![(a.sum (fun _ => a.sum (fun r => r["Id"]))).as "Sum"]))
+-- The explicit raw AST escape hatch keeps its checked-compilation backstop.
+def nestedAggregateRaw : Query C [("Sum", .null .int)] := fun _ =>
+  .spine (.fromT items (fun atom =>
+    let r := RowP.ofAtom atom
+    .groupYield r["Bucket"].key [] none []
+      ![(SqlExprP.aggE .sum (.aggE .sum r["Id"])).as "Sum"]))
+#guard [DatabaseType.sqlite, .postgres, .mysql, .sqlServer].all fun db =>
+  match nestedAggregateRaw.toSqlChecked db with
   | .error (.invalidAggregate "aggregate functions cannot be nested") => true
   | _ => false
+def misplacedAggregate := source.where' (fun _ => (SqlExprP.countAll : SqlExprP _ C .int).anyNull >. 0)
 #guard !misplacedAggregate.toSqlChecked.isOk
 #guard grouped.toSqlChecked.isOk
 

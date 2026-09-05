@@ -245,43 +245,6 @@ def SpineQP.joinLeftR (t : Table n s) [HasTable ts.tables n s]
     (k : RowP ρ ts s.asNull → SpineQP ρ ts g s') : SpineQP ρ ts g s' :=
   .joinLeftT t (fun a => on' (.ofAtom a)) (fun a => k (.ofAtom a))
 
-/-- A query grouped by keys, awaiting `having`/`orderBy`/`select` (staged
-GroupBy → Having → OrderBy → Select surface; aggregates in a plain `where'`
-are unrepresentable). -/
-structure GroupedQueryP (ρ : Schema → Type) (ts : Ctx) (s : Schema) where
-  query : QueryP ρ ts s
-  keys : RowP ρ ts s → List (KeyExprP ρ ts)
-  nonempty : ∀ r, keys r ≠ []
-  having? : Option (RowP ρ ts s → SqlExprP ρ ts ⟨.bool, true⟩) := none
-  orderKeys? : Option (RowP ρ ts s → List (OrderKeyP ρ ts)) := none
-
-/-- `GROUP BY` one or more keys: `q.groupBy (fun c => [c["Age"].key])`. -/
-def QueryP.groupBy (q : QueryP ρ ts s) (keys : RowP ρ ts s → List (KeyExprP ρ ts))
-    (nonempty : ∀ r, keys r ≠ [] := by intro r; simp) :
-    GroupedQueryP ρ ts s :=
-  ⟨q, keys, nonempty, none, none⟩
-
-/-- `HAVING` over the grouped rows; the `Agg` token builds aggregates:
-`g.having (fun c a => 1 <. a.count)`. -/
-def GroupedQueryP.having (g : GroupedQueryP ρ ts s)
-    (p : RowP ρ ts s → Agg → SqlExprP ρ ts ⟨.bool, nb⟩) : GroupedQueryP ρ ts s :=
-  { g with having? := some (fun r => (p r ⟨⟩).anyNull) }
-
-/-- Aggregate-aware `ORDER BY` on a grouped query, before its `select`:
-`g.orderBy (fun o a => [(a.sum o["Amount"]).desc, (a.count).asc])` — renders
-inside the grouped statement (`… GROUP BY … HAVING … ORDER BY SUM(…) DESC`). -/
-def GroupedQueryP.orderBy (g : GroupedQueryP ρ ts s)
-    (ks : RowP ρ ts s → Agg → List (OrderKeyP ρ ts)) : GroupedQueryP ρ ts s :=
-  { g with orderKeys? := some (fun r => ks r ⟨⟩) }
-
-/-- Grouped projection over keys and aggregates:
-`g.select (fun c a => ![c["Age"].as "Age", (a.count).as "Cnt"])`. -/
-def GroupedQueryP.select (g : GroupedQueryP ρ ts s) (f : RowP ρ ts s → Agg → RowP ρ ts s') :
-    QueryP ρ ts s' :=
-  .spine (g.query.asPlainSpine.dropOrders.bind fun r =>
-    .groupYield ((g.keys r).head (g.nonempty r)) (g.keys r).tail (g.having?.map (· r))
-      ((g.orderKeys?.map (· r)).getD []) (f r ⟨⟩))
-
 /-- `COUNT(*)` over a query. -/
 def QueryP.count (q : QueryP ρ ts s) : ScalarQueryP ρ ts .int := .countQ q.asPlainSpine
 
@@ -370,34 +333,6 @@ def union (a b : QueryB ts s) : QueryB ts s := fun ρ => QueryP.union (a ρ) (b 
 def intersect (a b : QueryB ts s) : QueryB ts s :=
   fun ρ => QueryP.intersect (a ρ) (b ρ)
 def except (a b : QueryB ts s) : QueryB ts s := fun ρ => QueryP.except (a ρ) (b ρ)
-
-/-- The grouped pipeline at the bundle level: callbacks are stored
-polymorphically and instantiated with the query. -/
-structure GroupedB (ts : Ctx) (s : Schema) : Type 1 where
-  q : QueryB ts s
-  keys : ∀ {ρ}, RowP ρ ts s → List (KeyExprP ρ ts)
-  nonempty : ∀ {ρ} (r : RowP ρ ts s), keys r ≠ []
-  having? : Option (∀ {ρ}, RowP ρ ts s → SqlExprP ρ ts ⟨.bool, true⟩) := none
-  orderKeys? : Option (∀ {ρ}, RowP ρ ts s → List (OrderKeyP ρ ts)) := none
-
-def groupBy (q : QueryB ts s)
-    (keys : ∀ {ρ}, RowP ρ ts s → List (KeyExprP ρ ts))
-    (nonempty : ∀ {ρ} (r : RowP ρ ts s), keys r ≠ [] := by intros; simp) : GroupedB ts s :=
-  ⟨q, keys, nonempty, none, none⟩
-
-def GroupedB.having (g : GroupedB ts s)
-    (p : ∀ {ρ}, RowP ρ ts s → Agg → SqlExprP ρ ts ⟨.bool, nb⟩) : GroupedB ts s :=
-  { g with having? := some fun r => SqlExprP.anyNull (p r ⟨⟩) }
-
-def GroupedB.orderBy (g : GroupedB ts s)
-    (ks : ∀ {ρ}, RowP ρ ts s → Agg → List (OrderKeyP ρ ts)) : GroupedB ts s :=
-  { g with orderKeys? := some fun r => ks r ⟨⟩ }
-
-def GroupedB.select (g : GroupedB ts s)
-    (f : ∀ {ρ}, RowP ρ ts s → Agg → RowP ρ ts s') : QueryB ts s' :=
-  fun ρ => GroupedQueryP.select
-    ⟨g.q ρ, g.keys, g.nonempty, g.having?.map (fun h r => h r),
-     g.orderKeys?.map (fun ks r => ks r)⟩ f
 
 end QueryB
 

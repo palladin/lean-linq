@@ -90,6 +90,10 @@ inductive SqlExprP (ρ : Schema → Type) (ts : Ctx) : SqlType → Type where
   -- the strict→nullable subtyping node (`Coe` inserts it); compiler and
   -- evaluator treat it as identity
   | widen : SqlExprP ρ ts ⟨t, false⟩ → SqlExprP ρ ts ⟨t, true⟩
+  -- Internal lowering of an explicitly named grouping key. Its position
+  -- identifies the same expression in SELECT/HAVING/ORDER BY and GROUP BY,
+  -- including the literal parameters belonging to a computed key.
+  | groupKey (index : Nat) : SqlExprP ρ ts c → SqlExprP ρ ts c
   -- operators: flags OR (SQL NULL propagation)
   | arith (op : ArithOp) : SqlExprP ρ ts c → SqlExprP ρ ts c → SqlExprP ρ ts c
   -- text/comparison/branch operators take operands at the nullable flag
@@ -402,15 +406,5 @@ def SqlExprP.desc (e : SqlExprP ρ ts c) : OrderKeyP ρ ts := ⟨c, e, .desc⟩
 abbrev KeyExpr : Ctx → Type := KeyExprP AliasOf
 
 def SqlExprP.key (e : SqlExprP ρ ts c) : KeyExprP ρ ts := ⟨c, e⟩
-
-/-- The aggregate builder token passed to grouped `select`/`having` lambdas
-(mirrors passing an aggregate-function object in LINQ-style APIs). -/
-structure Agg where
-
-def Agg.count (_ : Agg) : SqlExprP ρ ts ⟨.int, true⟩ := .widen .countAll
-def Agg.sum (_ : Agg) (e : SqlExprP ρ ts ⟨t, n⟩) [SqlNumeric t] : SqlExprP ρ ts ⟨t, true⟩ := .aggE .sum e
-def Agg.avg (_ : Agg) (e : SqlExprP ρ ts ⟨t, n⟩) [SqlNumeric t] : SqlExprP ρ ts ⟨t, true⟩ := .aggE .avg e
-def Agg.min (_ : Agg) (e : SqlExprP ρ ts ⟨t, n⟩) : SqlExprP ρ ts ⟨t, true⟩ := .aggE .min e
-def Agg.max (_ : Agg) (e : SqlExprP ρ ts ⟨t, n⟩) : SqlExprP ρ ts ⟨t, true⟩ := .aggE .max e
 
 end LeanLinq

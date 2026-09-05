@@ -241,11 +241,11 @@ example (o : Row BasicCtx OrdersS.asNull) : SqlExpr BasicCtx ⟨.int, true⟩ :=
 -- a parameter named like an auto parameter (p0, p1, …) would alias a
 -- literal's placeholder — reserved, statically refused
 #check_failure (SqlExpr.param (ts := BasicCtx) "p1")
--- the `into a` aggregate binder is not in scope for the groupBy keys:
+-- the `into k, a` aggregate binder is not in scope for the groupBy keys:
 -- grouping BY an aggregate is meaningless SQL
 #check_failure (query! {
   from c in customers
-  groupBy (a.count).key into a
+  groupBy ![(a.count).as "N"] into k, a
   select ![(a.count).as "N"]
 } : Query BasicCtx _)
 -- classic N+1: one fetch per row of a runtime collection — the grade is
@@ -384,4 +384,3 @@ def perRowCard : Db BasicCtx 4 (List Nat) := db! {
 }
 
 #guard (perRowCard.exec 4 demoEnv |>.toOption) == some [0, 0]
-

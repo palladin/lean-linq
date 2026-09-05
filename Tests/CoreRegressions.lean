@@ -14,10 +14,10 @@ def source := Query.from' (ts := C) items
 
 -- A global aggregate has different empty-input cardinality from GROUP BY.
 -- Requiring a first key prevents the original two-statements-for-budget-1 bug.
-#check_failure source.groupBy (fun _ => [])
-#check_failure (source AliasOf).groupBy (fun _ => [])
+#check_failure source.groupBy (fun _ => (RowP.nil : RowP _ C []))
+#check_failure (source AliasOf).groupBy (fun _ => (RowP.nil : RowP _ C []))
 
-def emptyGrouped := (source.limit 0).groupBy (fun r => [r["Id"].key])
+def emptyGrouped := (source.limit 0).groupBy (fun r => ![r["Id"].as "Id"])
   |>.select (fun _ a => ![a.count.as "Count"])
 
 def emptyFanOut : Db C 1 Nat := db! {
@@ -46,6 +46,7 @@ def decimalPowers := source.select (fun _ =>
 def textQuery := source.select (fun _ => ![(SqlExpr.str "hello").as "Text"])
 #check_failure textQuery.sum
 #check_failure textQuery.avg
-#check_failure (LeanLinq.Agg.sum ⟨⟩ (SqlExpr.str "hello" : SqlExpr C .string))
+#check_failure ((source.groupBy (fun r => ![r["Id"].as "Id"]))
+  |>.select (fun _ a => ![(a.sum (fun _ => SqlExpr.str "hello")).as "Sum"]))
 
 end CoreRegressions

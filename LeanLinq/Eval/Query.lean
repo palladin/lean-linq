@@ -73,6 +73,7 @@ def SqlExprP.evalG {c : SqlType} (ee : EvalEnv ts) : List Scope → SqlExpr ts c
   | _, .nullC _ => pure none
   | _, .paramE (inst := i) _ => pure (SqlType.toNullable (i.get ee.params))
   | scs, .widen (t := t₀) e => SqlExprP.evalG (c := ⟨t₀, false⟩) ee scs e
+  | scs, .groupKey _ e => e.evalG ee scs
   | scs, .field ⟨t', _⟩ row name =>
       match scs.head? with
       | none => .error (.internal s!"no row in scope for {row.alias}.{name}")

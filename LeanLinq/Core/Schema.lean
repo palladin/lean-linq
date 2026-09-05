@@ -36,12 +36,26 @@ scope with LeanLinq notation open, because Lean does not backtrack syntax
 choice nodes during pattern elaboration. -/
 scoped syntax (name := rowLit) "![" term,+ "]" : term
 
-@[macro rowLit] def expandRowLit : Lean.Macro := fun stx => do
+open Lean Elab Term Meta in
+@[term_elab rowLit] def elabRowLit : TermElab := fun stx expectedType? => do
   let cells := stx[1].getSepArgs
-  let mut acc ← `(LeanLinq.RowP.nil)
+  let family? ← match expectedType? with
+    | some ty => do
+        let ty ← whnf (← instantiateMVars ty)
+        pure (if ty.isAppOf `LeanLinq.GroupRowP then some true
+          else if ty.isAppOf ``LeanLinq.RowP then some false else none)
+    | none => pure none
+  let grouped ← match family? with
+    | some grouped => pure grouped
+    | none => do
+        let first ← elabTerm cells[0]! none
+        pure ((← whnf (← instantiateMVars (← inferType first))).isAppOf `LeanLinq.GroupCellP)
+  let nilName := if grouped then `LeanLinq.GroupRowP.nil else ``LeanLinq.RowP.nil
+  let consName := if grouped then `LeanLinq.GroupRowP.consCell else ``LeanLinq.RowP.consCell
+  let mut acc : Term := ⟨mkIdent nilName⟩
   for c in cells.reverse do
-    acc ← `(LeanLinq.RowP.consCell $(⟨c⟩) $acc)
-  return acc
+    acc ← `($(mkIdent consName) $(⟨c⟩) $acc)
+  elabTerm acc expectedType?
 
 /-- Materialize the marker row of an alias: every column becomes a `field`
 reference through it (empty alias ⇒ bare column names). The statement
@@ -141,6 +155,8 @@ open Lean Elab Term Meta in
         elabTerm (← `(LeanLinq.Values.cellLit $(⟨stx[0]⟩) $(⟨stx[2]⟩))) none
       else
         elabTerm (← `(LeanLinq.Values.get $(⟨stx[0]⟩) $(⟨stx[2]⟩))) none
+    else if rTy.isAppOf `LeanLinq.GroupRowP then
+      elabTerm (← `($(mkIdent `LeanLinq.GroupRowP.col) $(⟨stx[0]⟩) $(⟨stx[2]⟩))) none
     else
       elabTerm (← `(LeanLinq.RowP.col $(⟨stx[0]⟩) $(⟨stx[2]⟩))) none
   match expectedType? with
@@ -154,8 +170,8 @@ open Lean Elab Term Meta in
       -- the nullability flag of `SqlExpr ts ⟨t, n⟩` (whnf unfolds the
       -- reducible per-type constants like `SqlType.long` to mk-apps)
       let flagOf : Expr → TermElabM (Option Expr) := fun ty => do
-        if ty.isAppOfArity ``LeanLinq.SqlExprP 3 then
-          let col ← whnf (ty.getArg! 2)
+        if ty.isAppOfArity ``LeanLinq.SqlExprP 3 || ty.isAppOfArity `LeanLinq.GroupExprP 4 then
+          let col ← whnf (ty.getArg! (if ty.isAppOf ``LeanLinq.SqlExprP then 2 else 3))
           if col.isAppOfArity ``LeanLinq.SqlType.mk 2 then
             return some (col.getArg! 1)
           else if col.isMVar then return some col   -- undecided
@@ -170,7 +186,9 @@ open Lean Elab Term Meta in
           match ← flagOf expW with
           | some fe =>
               if f.isConstOf ``Bool.false && fe.isConstOf ``Bool.true then
-                ensureHasType exp (← mkAppM ``LeanLinq.SqlExprP.widen #[e])
+                let widen := if eTy.isAppOf `LeanLinq.GroupExprP then
+                  `LeanLinq.GroupExprP.widen else ``LeanLinq.SqlExprP.widen
+                ensureHasType exp (← mkAppM widen #[e])
               else
                 ensureHasType exp e
           | none => ensureHasType exp e

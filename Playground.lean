@@ -61,10 +61,10 @@ def adults' := query! PlayCtx {
 def spending := Query.from' (ts := PlayCtx) customers
   |>.innerJoin orders (fun c o => c["Id"] ==. o["CustomerId"])
       (fun c o => ![c["Id"].as "CustId", c["Name"].as "Name", o["Amount"].as "Amount"])
-  |>.groupBy (fun r => [r["CustId"].key, r["Name"].key])
+  |>.groupBy (fun r => ![r["CustId"].as "CustId", r["Name"].as "Name"])
   |>.having (fun _ a => 1 <. a.count)
-  |>.orderBy (fun r a => [(a.sum r["Amount"]).desc])
-  |>.select (fun r a => ![r["Name"].as "Name", (a.sum r["Amount"]).as "Total"])
+  |>.orderBy (fun _ a => [(a.sum fun r => r["Amount"]).desc])
+  |>.select (fun k a => ![k["Name"].as "Name", (a.sum fun r => r["Amount"]).as "Total"])
   |>.limit 10
 
 #eval (spending.toSql .sqlite).sql
@@ -72,10 +72,10 @@ def spending := Query.from' (ts := PlayCtx) customers
 def spending' := query! PlayCtx {
   from c in customers
   join o in orders on c["Id"] ==. o["CustomerId"]
-  groupBy c["Id"].key, c["Name"].key into a
+  groupBy ![c["Id"].as "Id", c["Name"].as "Name"] into k, a
   having a.count >. 1
   orderBy (a.sum o["Amount"]).desc
-  select ![c["Name"].as "Name", (a.sum o["Amount"]).as "Total"]
+  select ![k["Name"].as "Name", (a.sum o["Amount"]).as "Total"]
   limit 10
 }
 
@@ -472,6 +472,6 @@ example {res : {p : Nat × TableEnv PlayCtx.tables × Nat //
 
 #eval ((query! { from o in orders
                  where a.count >. 1     -- binder `a` not in scope before groupBy
-                 groupBy o["CustomerId"].key into a
+                 groupBy ![o["CustomerId"].as "CustomerId"] into k, a
                  select ![o["CustomerId"].as "Cid"] } : Query PlayCtx _)).toSql .sqlite
 -/

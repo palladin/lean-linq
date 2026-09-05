@@ -226,18 +226,18 @@ def FromWhereSelectWhereFromNested :=
 def FromWhereSelectWhereNested := FromWhereSelectWhereFromNested
 
 def FromGroupBySelect := Query.from' (ts := TestCtx) customers
-  |>.groupBy (fun c => [c["Age"].key])
+  |>.groupBy (fun c => ![c["Age"].as "Age"])
   |>.select (fun c a => ![c["Age"].as "Age", (a.count).as "Count"])
 def FromGroupByMultipleSelect := Query.from' (ts := TestCtx) customers
-  |>.groupBy (fun c => [c["Age"].key, c["Name"].key])
+  |>.groupBy (fun c => ![c["Age"].as "Age", c["Name"].as "Name"])
   |>.select (fun c a => ![c["Age"].as "Age", c["Name"].as "Name", (a.count).as "Count"])
 def FromGroupByHavingSelect := Query.from' (ts := TestCtx) customers
-  |>.groupBy (fun c => [c["Age"].key])
+  |>.groupBy (fun c => ![c["Age"].as "Age"])
   |>.having (fun _ a => a.count >. 1)
   |>.select (fun c a => ![c["Age"].as "Age", (a.count).as "Count"])
 def FromWhereGroupBySelect := Query.from' (ts := TestCtx) customers
   |>.where' (fun c => c["Age"] >=. 18)
-  |>.groupBy (fun c => [c["Age"].key])
+  |>.groupBy (fun c => ![c["Age"].as "Age"])
   |>.select (fun c a => ![c["Age"].as "Age", (a.count).as "Count"])
 
 def InnerJoinBasic := Query.from' (ts := TestCtx) customers
@@ -282,17 +282,17 @@ def InnerJoinWithGroupBy := Query.from' (ts := TestCtx) customers
   |>.innerJoin orders (fun c o => c["Id"] ==. o["CustomerId"])
       (fun c o => ![c["Id"].as "CustomerId", c["Name"].as "CustomerName",
                     o["Amount"].as "Amount"])
-  |>.groupBy (fun r => [r["CustomerId"].key, r["CustomerName"].key])
+  |>.groupBy (fun r => ![r["CustomerId"].as "CustomerId", r["CustomerName"].as "CustomerName"])
   |>.select (fun r a => ![r["CustomerId"].as "CustomerId",
                           r["CustomerName"].as "CustomerName",
-                          (a.sum r["Amount"]).as "TotalAmount"])
+                          (a.sum (fun r => r["Amount"])).as "TotalAmount"])
 def LeftJoinWithAggregates := Query.from' (ts := TestCtx) customers
   |>.leftJoin orders (fun c o => c["Id"] ==. o["CustomerId"])
       (fun c o => ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age",
                     o["Amount"].as "Amount"])
-  |>.groupBy (fun r => [r["Id"].key])
+  |>.groupBy (fun r => ![r["Id"].as "Id"])
   |>.select (fun r a => ![r["Id"].as "CustomerId", (a.count).as "OrderCount",
-                          (a.sum r["Amount"]).as "TotalSpent"])
+                          (a.sum (fun r => r["Amount"])).as "TotalSpent"])
 def MultipleInnerJoinsFusion := Query.from' (ts := TestCtx) customers
   |>.innerJoin orders (fun c o => c["Id"] ==. o["CustomerId"])
       (fun c o => ![c["Id"].as "Id", c["Name"].as "Name",
@@ -318,69 +318,69 @@ def JoinFusionWithWhere := Query.from' (ts := TestCtx) customers
   |>.where' (fun r => r["Amount"] >. 100)
 
 def FromGroupByOrderBySelect := Query.from' (ts := TestCtx) orders
-  |>.groupBy (fun o => [o["CustomerId"].key])
-  |>.orderBy (fun o a => [(a.sum o["Amount"]).desc])
-  |>.select (fun o a => ![o["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "TotalAmount"])
+  |>.groupBy (fun o => ![o["CustomerId"].as "CustomerId"])
+  |>.orderBy (fun o a => [(a.sum (fun o => o["Amount"])).desc])
+  |>.select (fun o a => ![o["CustomerId"].as "CustomerId", (a.sum (fun o => o["Amount"])).as "TotalAmount"])
 def FromGroupByOrderByMultipleSelect := Query.from' (ts := TestCtx) orders
-  |>.groupBy (fun o => [o["CustomerId"].key])
-  |>.orderBy (fun o a => [(a.sum o["Amount"]).desc, (a.count).asc])
+  |>.groupBy (fun o => ![o["CustomerId"].as "CustomerId"])
+  |>.orderBy (fun o a => [(a.sum (fun o => o["Amount"])).desc, (a.count).asc])
   |>.select (fun o a => ![o["CustomerId"].as "CustomerId",
-                          (a.sum o["Amount"]).as "TotalAmount", (a.count).as "OrderCount"])
+                          (a.sum (fun o => o["Amount"])).as "TotalAmount", (a.count).as "OrderCount"])
 def FromGroupByOrderByThreeKeysSelect := Query.from' (ts := TestCtx) orders
-  |>.groupBy (fun o => [o["CustomerId"].key])
-  |>.orderBy (fun o a => [(a.sum o["Amount"]).desc, (a.count).asc, o["CustomerId"].asc])
+  |>.groupBy (fun o => ![o["CustomerId"].as "CustomerId"])
+  |>.orderBy (fun o a => [(a.sum (fun o => o["Amount"])).desc, (a.count).asc, o["CustomerId"].asc])
   |>.select (fun o a => ![o["CustomerId"].as "CustomerId",
-                          (a.sum o["Amount"]).as "TotalAmount", (a.count).as "OrderCount"])
+                          (a.sum (fun o => o["Amount"])).as "TotalAmount", (a.count).as "OrderCount"])
 def FromGroupByMultipleOrderBySelect := Query.from' (ts := TestCtx) customers
-  |>.groupBy (fun c => [c["Age"].key, c["Name"].key])
+  |>.groupBy (fun c => ![c["Age"].as "Age", c["Name"].as "Name"])
   |>.orderBy (fun _ a => [(a.count).desc])
   |>.select (fun c a => ![c["Age"].as "Age", c["Name"].as "Name", (a.count).as "Count"])
 def FromGroupByHavingOrderBySelect := Query.from' (ts := TestCtx) orders
-  |>.groupBy (fun o => [o["CustomerId"].key])
+  |>.groupBy (fun o => ![o["CustomerId"].as "CustomerId"])
   |>.having (fun _ a => a.count >. 1)
-  |>.orderBy (fun o a => [(a.sum o["Amount"]).desc])
-  |>.select (fun o a => ![o["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "TotalAmount"])
+  |>.orderBy (fun o a => [(a.sum (fun o => o["Amount"])).desc])
+  |>.select (fun o a => ![o["CustomerId"].as "CustomerId", (a.sum (fun o => o["Amount"])).as "TotalAmount"])
 def ComplexJoinWhereGroupByHavingOrderBySelect := Query.from' (ts := TestCtx) customers
   |>.innerJoin orders (fun c o => c["Id"] ==. o["CustomerId"])
       (fun c o => ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age",
                     o["Amount"].as "Amount"])
   |>.where' (fun r => r["Age"] >=. 18 &&. r["Amount"] >. 50)
-  |>.groupBy (fun r => [r["Id"].key, r["Name"].key])
-  |>.having (fun r a => a.count >. 2 &&. a.sum r["Amount"] >. 500)
-  |>.orderBy (fun r a => [(a.sum r["Amount"]).desc, (a.count).asc])
+  |>.groupBy (fun r => ![r["Id"].as "Id", r["Name"].as "Name"])
+  |>.having (fun r a => a.count >. 2 &&. a.sum (fun r => r["Amount"]) >. 500)
+  |>.orderBy (fun r a => [(a.sum (fun r => r["Amount"])).desc, (a.count).asc])
   |>.select (fun r a => ![r["Id"].as "CustomerId", r["Name"].as "CustomerName",
-                          (a.count).as "TotalOrders", (a.sum r["Amount"]).as "TotalSpent",
-                          (a.sum r["Amount"] / (a.count).anyNull).as "AvgOrderValue"])
+                          (a.count).as "TotalOrders", (a.sum (fun r => r["Amount"])).as "TotalSpent",
+                          (a.sum (fun r => r["Amount"]) / (a.count).anyNull).as "AvgOrderValue"])
 def ComplexLeftJoinWhereGroupByOrderBySelect := Query.from' (ts := TestCtx) customers
   |>.leftJoin orders (fun c o => c["Id"] ==. o["CustomerId"])
       (fun c o => ![c["Id"].as "Id", c["Name"].as "Name", c["Age"].as "Age",
                     o["Amount"].as "Amount"])
   |>.where' (fun r => r["Age"] >=. 21)
-  |>.groupBy (fun r => [r["Id"].key, r["Name"].key])
-  |>.orderBy (fun r a => [(a.sum r["Amount"]).desc, r["Name"].asc])
+  |>.groupBy (fun r => ![r["Id"].as "Id", r["Name"].as "Name"])
+  |>.orderBy (fun r a => [(a.sum (fun r => r["Amount"])).desc, r["Name"].asc])
   |>.select (fun r a => ![r["Id"].as "CustomerId", r["Name"].as "CustomerName",
-                          (a.count).as "OrderCount", (a.sum r["Amount"]).as "TotalSpent"])
+                          (a.count).as "OrderCount", (a.sum (fun r => r["Amount"])).as "TotalSpent"])
 def FromGroupByMinMaxSelect := Query.from' (ts := TestCtx) orders
-  |>.groupBy (fun o => [o["CustomerId"].key])
+  |>.groupBy (fun o => ![o["CustomerId"].as "CustomerId"])
   |>.select (fun o a => ![o["CustomerId"].as "CustomerId",
-                          (a.min o["Amount"]).as "MinAmount", (a.max o["Amount"]).as "MaxAmount",
+                          (a.min (fun o => o["Amount"])).as "MinAmount", (a.max (fun o => o["Amount"])).as "MaxAmount",
                           (a.count).as "OrderCount"])
 def FromGroupByAvgSelect := Query.from' (ts := TestCtx) orders
-  |>.groupBy (fun o => [o["CustomerId"].key])
+  |>.groupBy (fun o => ![o["CustomerId"].as "CustomerId"])
   |>.select (fun o a => ![o["CustomerId"].as "CustomerId",
-                          (a.avg o["Amount"]).as "AvgAmount", (a.count).as "OrderCount"])
+                          (a.avg (fun o => o["Amount"])).as "AvgAmount", (a.count).as "OrderCount"])
 def FromGroupByDecimalAggregatesSelect := Query.from' (ts := TestCtx) products
-  |>.groupBy (fun p => [p["ProductName"].key])
+  |>.groupBy (fun p => ![p["ProductName"].as "ProductName"])
   |>.select (fun p a => ![p["ProductName"].as "ProductName",
-                          (a.sum p["Price"]).as "TotalPrice", (a.avg p["Price"]).as "AvgPrice",
-                          (a.min p["Price"]).as "MinPrice", (a.max p["Price"]).as "MaxPrice",
+                          (a.sum (fun p => p["Price"])).as "TotalPrice", (a.avg (fun p => p["Price"])).as "AvgPrice",
+                          (a.min (fun p => p["Price"])).as "MinPrice", (a.max (fun p => p["Price"])).as "MaxPrice",
                           (a.count).as "ProductCount"])
 def FromGroupByDecimalSumSelect := Query.from' (ts := TestCtx) products
-  |>.groupBy (fun p => [p["ProductName"].key])
-  |>.select (fun p a => ![p["ProductName"].as "ProductName", (a.sum p["Price"]).as "TotalPrice"])
+  |>.groupBy (fun p => ![p["ProductName"].as "ProductName"])
+  |>.select (fun p a => ![p["ProductName"].as "ProductName", (a.sum (fun p => p["Price"])).as "TotalPrice"])
 def FromGroupByDecimalAvgSelect := Query.from' (ts := TestCtx) products
-  |>.groupBy (fun p => [p["ProductName"].key])
-  |>.select (fun p a => ![p["ProductName"].as "ProductName", (a.avg p["Price"]).as "AvgPrice"])
+  |>.groupBy (fun p => ![p["ProductName"].as "ProductName"])
+  |>.select (fun p a => ![p["ProductName"].as "ProductName", (a.avg (fun p => p["Price"])).as "AvgPrice"])
 
 def FromSelectSum := Query.from' (ts := TestCtx) orders |>.select (fun o => ![o["Amount"].as "Amount"]) |>.sum
 def FromSelectAvg := Query.from' (ts := TestCtx) orders |>.select (fun o => ![o["Amount"].as "Amount"]) |>.avg

@@ -5,6 +5,7 @@ import LeanLinq.Core.Expr
 import LeanLinq.Core.Schema
 import LeanLinq.Core.Table
 import LeanLinq.Core.Query
+import LeanLinq.Core.Grouped
 import LeanLinq.Notation
 import LeanLinq.Syntax
 import LeanLinq.Eval.Expr

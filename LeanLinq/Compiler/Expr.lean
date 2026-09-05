@@ -30,6 +30,7 @@ def SqlExprP.isPredicate : SqlExpr ts c → Bool
   | .cmp .. | .and .. | .or .. | .not .. | .isNull .. | .isNotNull ..
   | .like .. | .inList .. | .inSub .. | .existsSub .. => true
   | .widen e => e.isPredicate
+  | .groupKey _ e => e.isPredicate
   | _ => false
 
 namespace SqlExpr

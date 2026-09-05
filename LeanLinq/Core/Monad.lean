@@ -8,6 +8,7 @@ inductive CompileError where
   | correlatedDerivedTable (alias column : String)
   | negativeSubstringLength (length : Int)
   | invalidAggregate (reason : String)
+  | invalidGrouping (reason : String)
   deriving Repr, BEq
 
 instance : ToString CompileError where
@@ -17,6 +18,13 @@ instance : ToString CompileError where
     | .negativeSubstringLength length =>
         s!"SUBSTRING length must be nonnegative, got {length}"
     | .invalidAggregate reason => s!"invalid aggregate: {reason}"
+    | .invalidGrouping reason => s!"invalid grouping: {reason}"
+
+/-- Preprojection for grouping keys that must become real columns before
+grouping, rather than repeated parameterized expressions. -/
+structure GroupProjection where
+  alias : String
+  items : Array (String × String) := #[]
 
 /-- State threaded through SQL generation: a counter for source aliases and
 the accumulated named parameters. -/
@@ -34,6 +42,10 @@ structure CompileState where
   /-- Aggregate argument ownership survives nested expression subqueries.
   `inAggregate` separately tracks nesting within the current SQL statement. -/
   aggregateOwners : List Nat := []
+  /-- Rendered explicit grouping keys in the current grouped statement.
+  Reusing their SQL preserves parameter identity for computed keys. -/
+  groupKeySql : Option (List (Nat × String)) := none
+  groupProjection : Option GroupProjection := none
   error? : Option CompileError := none
 
 /-- Compilation reads the target dialect and threads `CompileState`. -/
@@ -49,12 +61,16 @@ def withCompileStatement (m : CompileM α) : CompileM α := do
   modify fun st => { st with
     statementStart := st.aliasCounter
     allowAggregate := false
-    inAggregate := false }
+    inAggregate := false
+    groupKeySql := none
+    groupProjection := none }
   let result ← m
   modify fun st => { st with
     statementStart := outer.statementStart
     allowAggregate := outer.allowAggregate
-    inAggregate := outer.inAggregate }
+    inAggregate := outer.inAggregate
+    groupKeySql := outer.groupKeySql
+    groupProjection := outer.groupProjection }
   return result
 
 /-- FROM-derived tables cannot capture sibling FROM sources without LATERAL
@@ -65,13 +81,25 @@ def withDerivedSource (m : CompileM α) : CompileM α := do
     statementStart := st.aliasCounter
     forbiddenAliases := (outer.statementStart, outer.aliasCounter) :: outer.forbiddenAliases
     derivedDepth := outer.derivedDepth + 1
-    allowAggregate := false, inAggregate := false }
+    allowAggregate := false, inAggregate := false, groupKeySql := none
+    groupProjection := none }
   let result ← m
   modify fun st => { st with
     statementStart := outer.statementStart
     forbiddenAliases := outer.forbiddenAliases
     derivedDepth := outer.derivedDepth
-    allowAggregate := outer.allowAggregate, inAggregate := outer.inAggregate }
+    allowAggregate := outer.allowAggregate, inAggregate := outer.inAggregate
+    groupKeySql := outer.groupKeySql
+    groupProjection := outer.groupProjection }
+  return result
+
+/-- Key expressions and aggregate arguments belong to the source projection,
+so their own children must compile against the original source aliases. -/
+def withoutGroupProjection (m : CompileM α) : CompileM α := do
+  let outer := (← get).groupProjection
+  modify fun st => { st with groupProjection := none }
+  let result ← m
+  modify fun st => { st with groupProjection := outer }
   return result
 
 def checkFieldScope (alias column : String) : CompileM Unit := do

@@ -416,25 +416,25 @@ def CFromWhereSelectWhereFromNested := (query! {
 def CFromWhereSelectWhereNested := CFromWhereSelectWhereFromNested
 def CFromGroupBySelect := (query! {
   from c in customers
-  groupBy c["Age"].key into a
-  select ![c["Age"].as "Age", (a.count).as "Count"]
+  groupBy ![c["Age"].as "Age"] into k, a
+  select ![k["Age"].as "Age", (a.count).as "Count"]
 } : Query TestCtx _)
 def CFromGroupByMultipleSelect := (query! {
   from c in customers
-  groupBy c["Age"].key, c["Name"].key into a
-  select ![c["Age"].as "Age", c["Name"].as "Name", (a.count).as "Count"]
+  groupBy ![c["Age"].as "Age", c["Name"].as "Name"] into k, a
+  select ![k["Age"].as "Age", k["Name"].as "Name", (a.count).as "Count"]
 } : Query TestCtx _)
 def CFromGroupByHavingSelect := (query! {
   from c in customers
-  groupBy c["Age"].key into a
+  groupBy ![c["Age"].as "Age"] into k, a
   having a.count >. 1
-  select ![c["Age"].as "Age", (a.count).as "Count"]
+  select ![k["Age"].as "Age", (a.count).as "Count"]
 } : Query TestCtx _)
 def CFromWhereGroupBySelect := (query! {
   from c in customers
   where c["Age"] >=. 18
-  groupBy c["Age"].key into a
-  select ![c["Age"].as "Age", (a.count).as "Count"]
+  groupBy ![c["Age"].as "Age"] into k, a
+  select ![k["Age"].as "Age", (a.count).as "Count"]
 } : Query TestCtx _)
 def CInnerJoinBasic := (query! {
   from c in customers
@@ -491,15 +491,15 @@ def CLeftJoinWithOrderBy := (query! {
 def CInnerJoinWithGroupBy := (query! {
   from c in customers
   join o in orders on c["Id"] ==. o["CustomerId"]
-  groupBy c["Id"].key, c["Name"].key into a
-  select ![c["Id"].as "CustomerId", c["Name"].as "CustomerName",
+  groupBy ![c["Id"].as "Id", c["Name"].as "Name"] into k, a
+  select ![k["Id"].as "CustomerId", k["Name"].as "CustomerName",
            (a.sum o["Amount"]).as "TotalAmount"]
 } : Query TestCtx _)
 def CLeftJoinWithAggregates := (query! {
   from c in customers
   leftJoin o in orders on c["Id"] ==. o["CustomerId"]
-  groupBy c["Id"].key into a
-  select ![c["Id"].as "CustomerId", (a.count).as "OrderCount",
+  groupBy ![c["Id"].as "Id"] into k, a
+  select ![k["Id"].as "CustomerId", (a.count).as "OrderCount",
            (a.sum o["Amount"]).as "TotalSpent"]
 } : Query TestCtx _)
 def CMultipleInnerJoinsFusion := (query! {
@@ -527,45 +527,45 @@ def CJoinFusionWithWhere := (query! {
 } : Query TestCtx _)
 def CFromGroupByOrderBySelect := (query! {
   from o in orders
-  groupBy o["CustomerId"].key into a
+  groupBy ![o["CustomerId"].as "CustomerId"] into k, a
   orderBy (a.sum o["Amount"]).desc
-  select ![o["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "TotalAmount"]
+  select ![k["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "TotalAmount"]
 } : Query TestCtx _)
 def CFromGroupByOrderByMultipleSelect := (query! {
   from o in orders
-  groupBy o["CustomerId"].key into a
+  groupBy ![o["CustomerId"].as "CustomerId"] into k, a
   orderBy (a.sum o["Amount"]).desc, (a.count).asc
-  select ![o["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "TotalAmount",
+  select ![k["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "TotalAmount",
            (a.count).as "OrderCount"]
 } : Query TestCtx _)
 def CFromGroupByOrderByThreeKeysSelect := (query! {
   from o in orders
-  groupBy o["CustomerId"].key into a
-  orderBy (a.sum o["Amount"]).desc, (a.count).asc, o["CustomerId"].asc
-  select ![o["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "TotalAmount",
+  groupBy ![o["CustomerId"].as "CustomerId"] into k, a
+  orderBy (a.sum o["Amount"]).desc, (a.count).asc, k["CustomerId"].asc
+  select ![k["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "TotalAmount",
            (a.count).as "OrderCount"]
 } : Query TestCtx _)
 def CFromGroupByMultipleOrderBySelect := (query! {
   from c in customers
-  groupBy c["Age"].key, c["Name"].key into a
+  groupBy ![c["Age"].as "Age", c["Name"].as "Name"] into k, a
   orderBy (a.count).desc
-  select ![c["Age"].as "Age", c["Name"].as "Name", (a.count).as "Count"]
+  select ![k["Age"].as "Age", k["Name"].as "Name", (a.count).as "Count"]
 } : Query TestCtx _)
 def CFromGroupByHavingOrderBySelect := (query! {
   from o in orders
-  groupBy o["CustomerId"].key into a
+  groupBy ![o["CustomerId"].as "CustomerId"] into k, a
   having a.count >. 1
   orderBy (a.sum o["Amount"]).desc
-  select ![o["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "TotalAmount"]
+  select ![k["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "TotalAmount"]
 } : Query TestCtx _)
 def CComplexJoinWhereGroupByHavingOrderBySelect := (query! {
   from c in customers
   join o in orders on c["Id"] ==. o["CustomerId"]
   where c["Age"] >=. 18 &&. o["Amount"] >. 50
-  groupBy c["Id"].key, c["Name"].key into a
+  groupBy ![c["Id"].as "Id", c["Name"].as "Name"] into k, a
   having a.count >. 2 &&. a.sum o["Amount"] >. 500
   orderBy (a.sum o["Amount"]).desc, (a.count).asc
-  select ![c["Id"].as "CustomerId", c["Name"].as "CustomerName",
+  select ![k["Id"].as "CustomerId", k["Name"].as "CustomerName",
            (a.count).as "TotalOrders", (a.sum o["Amount"]).as "TotalSpent",
            (a.sum o["Amount"] / (a.count).anyNull).as "AvgOrderValue"]
 } : Query TestCtx _)
@@ -573,39 +573,39 @@ def CComplexLeftJoinWhereGroupByOrderBySelect := (query! {
   from c in customers
   leftJoin o in orders on c["Id"] ==. o["CustomerId"]
   where c["Age"] >=. 21
-  groupBy c["Id"].key, c["Name"].key into a
-  orderBy (a.sum o["Amount"]).desc, c["Name"].asc
-  select ![c["Id"].as "CustomerId", c["Name"].as "CustomerName",
+  groupBy ![c["Id"].as "Id", c["Name"].as "Name"] into k, a
+  orderBy (a.sum o["Amount"]).desc, k["Name"].asc
+  select ![k["Id"].as "CustomerId", k["Name"].as "CustomerName",
            (a.count).as "OrderCount", (a.sum o["Amount"]).as "TotalSpent"]
 } : Query TestCtx _)
 def CFromGroupByMinMaxSelect := (query! {
   from o in orders
-  groupBy o["CustomerId"].key into a
-  select ![o["CustomerId"].as "CustomerId", (a.min o["Amount"]).as "MinAmount",
+  groupBy ![o["CustomerId"].as "CustomerId"] into k, a
+  select ![k["CustomerId"].as "CustomerId", (a.min o["Amount"]).as "MinAmount",
            (a.max o["Amount"]).as "MaxAmount", (a.count).as "OrderCount"]
 } : Query TestCtx _)
 def CFromGroupByAvgSelect := (query! {
   from o in orders
-  groupBy o["CustomerId"].key into a
-  select ![o["CustomerId"].as "CustomerId", (a.avg o["Amount"]).as "AvgAmount",
+  groupBy ![o["CustomerId"].as "CustomerId"] into k, a
+  select ![k["CustomerId"].as "CustomerId", (a.avg o["Amount"]).as "AvgAmount",
            (a.count).as "OrderCount"]
 } : Query TestCtx _)
 def CFromGroupByDecimalAggregatesSelect := (query! {
   from p in products
-  groupBy p["ProductName"].key into a
-  select ![p["ProductName"].as "ProductName", (a.sum p["Price"]).as "TotalPrice",
+  groupBy ![p["ProductName"].as "ProductName"] into k, a
+  select ![k["ProductName"].as "ProductName", (a.sum p["Price"]).as "TotalPrice",
            (a.avg p["Price"]).as "AvgPrice", (a.min p["Price"]).as "MinPrice",
            (a.max p["Price"]).as "MaxPrice", (a.count).as "ProductCount"]
 } : Query TestCtx _)
 def CFromGroupByDecimalSumSelect := (query! {
   from p in products
-  groupBy p["ProductName"].key into a
-  select ![p["ProductName"].as "ProductName", (a.sum p["Price"]).as "TotalPrice"]
+  groupBy ![p["ProductName"].as "ProductName"] into k, a
+  select ![k["ProductName"].as "ProductName", (a.sum p["Price"]).as "TotalPrice"]
 } : Query TestCtx _)
 def CFromGroupByDecimalAvgSelect := (query! {
   from p in products
-  groupBy p["ProductName"].key into a
-  select ![p["ProductName"].as "ProductName", (a.avg p["Price"]).as "AvgPrice"]
+  groupBy ![p["ProductName"].as "ProductName"] into k, a
+  select ![k["ProductName"].as "ProductName", (a.avg p["Price"]).as "AvgPrice"]
 } : Query TestCtx _)
 def CFromSelectSum := ((query! {
   from o in orders

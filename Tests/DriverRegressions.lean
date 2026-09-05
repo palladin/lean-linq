@@ -2,6 +2,7 @@ import LeanLinq.Driver.Sqlite
 import LeanLinq.Driver.Postgres
 import LeanLinq.Driver.Mysql
 import Tests.CompilerRegressions
+import Tests.GroupedRegressions
 
 /-! Driver boundary regressions. The wire preparation checks need no servers;
 SQLite runs against an isolated in-memory database. Expected values are explicit,
@@ -70,9 +71,10 @@ private def floatProjection (f : Float) : Query FloatCtx FloatResult := fun _ =>
 /-- The same literal and named-parameter precision check on every native driver.
 These queries have no FROM clause and create or modify no tables. -/
 def checkDoubleQueries
-    (query : Query FloatCtx FloatResult → ParamEnv FloatCtx.params → IO (List (Values FloatResult))) :
+    (query : Query FloatCtx FloatResult → ParamEnv FloatCtx.params → IO (List (Values FloatResult)))
+    (samples : List Float := [0.1, 1.23456789, 0.0000001, -0.0000001, -123456.789123]) :
     IO Unit := do
-  for f in [0.1, 1.23456789, 0.0000001, -0.0000001, -123456.789123] do
+  for f in samples do
     let rows ← query (floatProjection f) (.cons f .nil)
     match rows with
     | [.cons literal (.cons named .nil)] =>
@@ -94,8 +96,30 @@ def checkCompilerQueries
   let table := quote "compiler_items"
   execRaw s!"DROP TABLE IF EXISTS {table}; CREATE TABLE {table} ({quote "Id"} INTEGER, {quote "Bucket"} INTEGER, {quote "Value"} INTEGER); INSERT INTO {table} VALUES (1,1,NULL),(2,1,0),(3,2,2)"
   try
+    check (sameRows (← query GroupedRegressions.computedKey)
+      [.cons 2 .nil, .cons 3 .nil, .cons 5 .nil]) "named computed grouping key"
+    check (sameRows (← query GroupedRegressions.computedLiteralKey)
+      [.cons 2 .nil, .cons 3 .nil]) "computed grouping key literal parameter reuse"
+    check (sameRows (← query GroupedRegressions.computedKeyAggregate)
+      [.cons 2 (.cons (some 3) .nil), .cons 3 (.cons (some 3) .nil)])
+      "computed grouping key with SUM, HAVING, and ORDER BY"
+    check (sameRows (← query GroupedRegressions.computedKeyCountOnly)
+      [.cons (some 2) .nil, .cons (some 1) .nil]) "count-only computed-key grouping"
+    check (sameRows (← query GroupedRegressions.computedKeyCase)
+      [.cons (some 3) (.cons 12 .nil), .cons (some 6) (.cons 13 .nil)])
+      "computed grouping key inside CASE and arithmetic"
+    check ((← query GroupedRegressions.constantKey) == [.cons 1 (.cons (some 3) .nil)])
+      "constant grouping key"
+    check ((← query GroupedRegressions.emptyConstantKey) == [])
+      "constant grouping key over an empty source"
+    check (sameRows (← query GroupedRegressions.predicateKey)
+      [.cons none (.cons (some 1) .nil), .cons (some false) (.cons (some 1) .nil),
+       .cons (some true) (.cons (some 1) .nil)]) "predicate grouping key preserves NULL/false/true"
+    check (sameRows (← query GroupedRegressions.nonkeyAggregates)
+      [.cons 1 (.cons (some 3) (.cons (some 0) .nil)),
+       .cons 2 (.cons (some 3) (.cons (some 2) .nil))]) "row-selector aggregates"
     let emptyGroups := CompilerRegressions.source.limit 0
-      |>.groupBy (fun r => [r["Bucket"].key])
+      |>.groupBy (fun r => ![r["Bucket"].as "Bucket"])
       |>.select (fun _ a => ![a.count.as "Count"])
     check ((← query emptyGroups) == []) "grouping a LIMIT 0 source produced a row"
     check (sameRows (← query CompilerRegressions.groupedUnion)
@@ -133,7 +157,7 @@ private abbrev NamedCtx : Ctx := {
 private def codecTable : Table "driver_codec" CodecS := ⟨⟩
 
 private def emptyGrouped := (Query.from' (ts := CodecCtx) codecTable |>.limit 0)
-  |>.groupBy (fun r => [r["I"].key])
+  |>.groupBy (fun r => ![r["I"].as "I"])
   |>.select (fun _ a => ![a.count.as "Count"])
 
 private def emptyGroupedBudget : Db CodecCtx 1 Nat := db! {
@@ -157,6 +181,10 @@ private def checkSqlite : IO Unit := do
   let conn ← Sqlite.connect ":memory:"
   try
     checkDoubleQueries (fun q ps => conn.query q ps)
+    -- Exercise bind_double/column_double across binary64 boundaries, including
+    -- negative zero. SQLite's SQL decimal parser varies across versions and
+    -- can overflow exact DBL_MAX text; the driver binds doubles in binary.
+    checkDoubleQueries (fun q ps => conn.query q ps) (finiteBits.toList.map Float.ofBits)
     checkCompilerQueries .sqlite (fun q => conn.query q) conn.execRaw
     conn.execRaw "CREATE TABLE compiler_quoted (\"a\"\"b\" INTEGER); INSERT INTO compiler_quoted VALUES (7)"
     check ((← conn.query CompilerRegressions.quoted) == [.cons 7 .nil]) "escaped identifier"
@@ -186,18 +214,8 @@ private def checkSqlite : IO Unit := do
       expectRangeError (conn.query (source.select (fun _ => ![(SqlExpr.int i).as "I"])))
       expectRangeError (conn.query namedLong (params i))
       expectRangeError (conn.query namedInt (params i))
-    -- SQLite's own decimal parser is an independent check of wire formatting.
-    -- Ignore signed zero here: SQLite storage canonicalizes its sign.
     check ((← conn.query emptyGrouped) == []) "grouping an empty source produced a row"
     check ((← emptyGroupedBudget.execIO conn 1) == 0) "empty grouped fetch exceeded its cardinality budget"
-    let floats := source.select (fun r => ![r["F"].as "F"])
-    for bits in finiteBits do
-      if bits == 0x8000000000000000 then continue
-      conn.execRaw s!"UPDATE driver_codec SET F = {Driver.floatText (Float.ofBits bits)}"
-      let rows ← conn.query floats
-      match rows with
-      | [.cons f .nil] => check (f.toBits == bits) s!"SQLite decimal parser changed double bits {bits}"
-      | _ => throw (IO.userError "driver regression: SQLite float row shape")
     -- Invalid trees must fail checked compilation before accessing the engine.
     -- A closed connection makes accidental execution observable.
     conn.close

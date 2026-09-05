@@ -280,7 +280,7 @@ cannot express it: the spine's order nodes are stripped at construction,
 leaving one clean GROUP BY statement. -/
 def FromOrderByGroupBySelect := Query.from' (ts := TestCtx) customers
   |>.orderBy (fun c => [c["Name"].asc])
-  |>.groupBy (fun c => [c["Age"].key])
+  |>.groupBy (fun c => ![c["Age"].as "Age"])
   |>.select (fun r a => ![r["Age"].as "Age", (a.count).as "N"])
 
 /-- A boolean column in predicate position: T-SQL bit values are not
@@ -375,14 +375,14 @@ def LinqOrderBy := (query! {
 } : Query TestCtx _)
 def LinqGroupBy := (query! {
   from o in orders
-  groupBy o["CustomerId"].key into a
-  select ![o["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "Total"]
+  groupBy ![o["CustomerId"].as "CustomerId"] into k, a
+  select ![k["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "Total"]
 } : Query TestCtx _)
 def LinqGroupByHaving := (query! {
   from o in orders
-  groupBy o["CustomerId"].key into a
+  groupBy ![o["CustomerId"].as "CustomerId"] into k, a
   having a.count >. 1
-  select ![o["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "Total"]
+  select ![k["CustomerId"].as "CustomerId", (a.sum o["Amount"]).as "Total"]
 } : Query TestCtx _)
 def LinqDistinctLimit := (query! {
   from c in customers
@@ -396,10 +396,10 @@ def LinqComplex := (query! {
   from c in customers
   join o in orders on c["Id"] ==. o["CustomerId"]
   where c["Age"] >=. 18
-  groupBy c["Id"].key, c["Name"].key into a
+  groupBy ![c["Id"].as "Id", c["Name"].as "Name"] into k, a
   having a.count >. 1
   orderBy (a.sum o["Amount"]).desc
-  select ![c["Id"].as "CustomerId", c["Name"].as "CustomerName",
+  select ![k["Id"].as "CustomerId", k["Name"].as "CustomerName",
            (a.sum o["Amount"]).as "TotalSpent"]
 } : Query TestCtx _)
 def LinqLimitOffset := (query! {

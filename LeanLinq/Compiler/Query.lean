@@ -111,6 +111,28 @@ private def checkAggregateType (op : AggOp) (t : SqlPrim) : CompileM Unit := do
       !(t == .int || t == .long || t == .double || t == .decimal) then
     recordCompileError (.invalidAggregate s!"{op.token} requires a numeric argument")
 
+/-- Simple field keys need no preprojection. MySQL's positional prepared
+parameters are distinct occurrences; SQL Server also rejects constant-only
+GROUP BY expressions. Named computed keys become source columns on both. -/
+private def simpleGroupKey : SqlExpr ts c → Bool
+  | .field .. => true
+  | .groupKey _ e | .widen e => simpleGroupKey e
+  | _ => false
+
+private def explicitGroupKey : SqlExpr ts c → Bool
+  | .groupKey .. => true
+  | .widen e => explicitGroupKey e
+  | _ => false
+
+private def projectGroupValue (sql : String) : CompileM String := do
+  match (← get).groupProjection with
+  | none => pure sql
+  | some projection =>
+      let name := s!"g{projection.items.size}"
+      modify fun st => { st with groupProjection := st.groupProjection.map fun p =>
+        { p with items := p.items.push (name, sql) } }
+      return s!"{← quote projection.alias}.{← quote name}"
+
 mutual
 
 /-- Render an expression to SQL text for the ambient dialect, allocating a
@@ -127,6 +149,23 @@ def SqlExprP.compile : SqlExpr ts c → CompileM String
   | .nullC _       => pure "NULL"
   | .paramE (inst := _) name => refParam name
   | .widen e => e.compile
+  | .groupKey index e => do
+      match (← get).groupKeySql with
+      | none =>
+          recordCompileError (.invalidGrouping "grouping key outside its grouped statement")
+          e.compile
+      | some keys =>
+          match keys.find? (·.1 == index) with
+          | some (_, sql) => pure sql
+          | none =>
+              let materializing := (← get).groupProjection.isSome
+              let sourceSql ← withoutGroupProjection (withAggregateContext false e.compile)
+              let scalarSql ← if materializing then valueWrap e.isPredicate sourceSql else pure sourceSql
+              let projected ← projectGroupValue scalarSql
+              let sql ← if materializing && e.isPredicate then predWrap false projected else pure projected
+              modify fun st => { st with
+                groupKeySql := st.groupKeySql.map (fun keys => keys ++ [(index, sql)]) }
+              pure sql
   | .field _ row name => do
       checkFieldScope row.alias name
       if row.alias.isEmpty then quote name
@@ -165,7 +204,9 @@ def SqlExprP.compile : SqlExpr ts c → CompileM String
   | .aggE (t := t) op e => do
       checkAggregate
       checkAggregateType op t
-      let arg ← withAggregateArgument do valueWrap e.isPredicate (← e.compile)
+      let sourceArg ← withAggregateArgument do
+        withoutGroupProjection do valueWrap e.isPredicate (← e.compile)
+      let arg ← projectGroupValue sourceArg
       return s!"{op.token}({arg})"
   | .countAll => do
       checkAggregate
@@ -379,6 +420,18 @@ def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec → CompileM St
   -- the grouped terminal carries its own projection and GROUP BY/HAVING/
   -- ORDER BY tail; the projection spec is plain-only and ignored here
   | .groupYield key ks hv ord r, acc, _ => do
+      let outerKeys := (← get).groupKeySql
+      let outerProjection := (← get).groupProjection
+      let computed := (match key with | ⟨_, e⟩ => !simpleGroupKey e) ||
+        ks.any (fun k => match k with | ⟨_, e⟩ => !simpleGroupKey e)
+      let explicitKeys := (match key with | ⟨_, e⟩ => explicitGroupKey e) &&
+        ks.all (fun k => match k with | ⟨_, e⟩ => explicitGroupKey e)
+      let dialect ← read
+      let materialize := (dialect == .mysql || dialect == .sqlServer) && computed && explicitKeys
+      let projection ← if materialize then do
+          pure (some ({ alias := ← freshAlias } : GroupProjection))
+        else pure none
+      modify fun st => { st with groupKeySql := some [], groupProjection := projection }
       let items ← withAggregateContext true r.selectList
       let keyStr ← match key with
         | ⟨_, e⟩ => valueWrap e.isPredicate (← e.compile)
@@ -397,7 +450,18 @@ def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec → CompileM St
         if acc.orders.isEmpty then ""
         else s!" ORDER BY {String.intercalate ", " acc.orders.toList}"
       let gb := s!" GROUP BY {ksStr}"
-      return s!"{head} {String.intercalate ", " items}{renderFroms acc.froms}{renderWheres acc.wheres}{gb}{hvStr}{ownOb}{orderClause}"
+      let fromClause ← match (← get).groupProjection with
+        | none => pure (renderFroms acc.froms ++ renderWheres acc.wheres)
+        | some projection => do
+            let innerItems ← projection.items.toList.mapM fun (name, sql) => do
+              pure s!"{sql} AS {← quote name}"
+            -- Preserve MySQL's projection boundary: prepared key comparisons in
+            -- HAVING can change meaning if the derived query is merged/pushed down.
+            let boundary := if dialect == .mysql then " LIMIT 18446744073709551615" else ""
+            let inner := s!"SELECT {String.intercalate ", " innerItems}{renderFroms acc.froms}{renderWheres acc.wheres}{boundary}"
+            pure s!" FROM ({inner}) {← quote projection.alias}"
+      modify fun st => { st with groupKeySql := outerKeys, groupProjection := outerProjection }
+      return s!"{head} {String.intercalate ", " items}{fromClause}{gb}{hvStr}{ownOb}{orderClause}"
   | .guard b rest, acc, k => do
       let w ← predWrap b.isPredicate (← b.compile)
       rest.compileSpine { acc with wheres := acc.wheres.push w } k

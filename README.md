@@ -6,7 +6,8 @@
 
 A type-safe, deeply-embedded SQL query DSL for Lean 4 — language-integrated queries built
 from intrinsically-typed GADTs and PHOAS binders: schemas index the types of queries and rows,
-so schema, column types, and nullability are checked at elaboration. Checked
+so schema, column types, nullability, and the public grouped-expression API are
+checked at elaboration. Checked
 compilation rejects unsupported SQL compositions before native execution.
 
 Queries are staged: bound row variables carry *SQL expressions* (not runtime values) and
@@ -271,18 +272,45 @@ def report := Query.from' (ts := ShopDb) customers
   |>.where' (fun c => 18 <. c["Age"])
   |>.innerJoin orders (fun c o => c["Id"] ==. o["CustomerId"])
       (fun c o => ![c["Id"].as "CustId", c["Name"].as "Name", o["Amount"].as "Amount"])
-  |>.groupBy (fun r => [r["CustId"].key, r["Name"].key])
+  |>.groupBy (fun r => ![r["CustId"].as "CustId", r["Name"].as "Name"])
   |>.having (fun _ a => 1 <. a.count)
-  |>.select (fun r a => ![r["Name"].as "Name", (a.sum r["Amount"]).as "Total"])
+  |>.select (fun k a => ![k["Name"].as "Name", (a.sum fun r => r["Amount"]).as "Total"])
   |>.orderBy (fun r => [r["Total"].desc])
   |>.limit 10
 ```
 
 Available: `from'` / `where'` / `select`, `innerJoin` / `leftJoin`, `orderBy` (multi-key),
-`groupBy` / `having` / grouped `select` (the lambda receives an `Agg` token: `a.count`,
-`a.sum e`, …), `distinct`, `limitOffset`/`limit`/`offset`, `union`/`intersect`/`except`,
+`groupBy` / `having` / grouped `select` (callbacks receive named keys and an aggregate
+builder: `a.count`, `a.sum (fun r => r["Amount"])`, …), `distinct`,
+`limitOffset`/`limit`/`offset`, `union`/`intersect`/`except`,
 and scalar queries (`count`/`sum`/`avg`/`min`/`max`, embeddable in expressions via
 `.embed`, subqueries via `inQuery`).
+
+Grouping has its own expression type. The first callback argument contains
+**only the named grouping keys**; aggregate selectors receive ordinary input
+rows. Selecting a missing key, inserting an ordinary row expression into a
+grouped projection, nesting aggregates, or using a grouped expression in an
+ordinary `where'` fails during Lean elaboration. Each callback has a fresh scope
+type, so expressions from separate grouped queries cannot be mixed. These rules
+apply equally to grouped `having` and `orderBy`.
+
+The guarantee concerns the public grouped constructors and operators. The raw
+AST and manual elimination of implementation wrappers are low-level escape
+hatches; native drivers retain checked compilation for them and for unsupported
+SQL compositions. Grouped expressions have no public conversion to ordinary
+row expressions. To filter or compose a grouped result as ordinary rows, finish
+its `select` first and continue the query pipeline.
+
+This changes the grouped API: replace lists of `.key` expressions with named
+row literals, and replace `a.sum r["Amount"]` in pipeline callbacks with
+`a.sum (fun r => r["Amount"])`. Computed keys are accessed by their chosen name:
+grouping by `![(r["Age"] + 1).as "NextAge"]` exposes `k["NextAge"]`, without
+exposing `k["Age"]`. The compiler preserves the key's parameter identities when
+rendering it in multiple SQL clauses. MySQL and SQL Server compute these keys
+in an inner projection before grouping; MySQL preserves that boundary to keep
+prepared `HAVING` comparisons consistent. Computed-key queries can therefore
+require an extra materialization step on MySQL. Simple column keys retain their
+existing SQL shape.
 
 Queries **normalize at construction time** (`Query.bind`, the comprehension monad):
 `where'` splices a conjunct, `select` replaces the projection, joins extend the FROM clause,
@@ -303,25 +331,26 @@ how C# desugars LINQ into `SelectMany`):
 | `join x in t on p` / `leftJoin x in t on p` | `Query.joinOn` | `INNER/LEFT JOIN … ON` |
 | `where p` | `Query.guard p …` | a `WHERE` conjunct |
 | `orderBy k, …` | `Query.orderWith` | `ORDER BY` (may reference aggregates when grouped) |
-| `groupBy k, … into a` + `having p` | grouped terminal (`Query.groupYieldQ`) | `GROUP BY … HAVING` |
+| `groupBy ![…] into k, a` + `having p` | typed grouped terminal (`groupYieldR`) | `GROUP BY … HAVING` |
 | `select r` | `Query.yield r` | the `SELECT` list |
 | trailing `distinct`, `limit n [offset m]`, `offset n` | `.distinct`/`.limitOffset` | `DISTINCT`, `LIMIT/OFFSET` |
 
 Sources are tables *or* queries via the `QuerySource` class (nested `from`s are cross
-products). `groupBy … into a` *binds* the aggregate token — like C#'s `group … into g` —
-so `a.count` / `a.sum e` are in scope only in the clauses after the grouping; `where` after
-`groupBy` and `having` without `groupBy` are rejected. Ordering by an aggregate *expression*
-is something only the comprehension can express in one statement:
+products). `groupBy … into k, a` binds the named key row and aggregate token.
+Source rows remain available as aggregate operands (`a.sum o["Amount"]`), while
+grouped projections use `k` for keys. `where` after `groupBy`, `having` without
+`groupBy`, and grouped ordering placed before `groupBy` are rejected at
+elaboration. Grouped ordering can refer to keys and aggregate expressions:
 
 ```lean
 query! {
   from c in customers
   join o in orders on c["Id"] ==. o["CustomerId"]
   where c["Age"] >=. 18
-  groupBy c["Id"].key, c["Name"].key into a
+  groupBy ![c["Id"].as "Id", c["Name"].as "Name"] into k, a
   having a.count >. 1
   orderBy (a.sum o["Amount"]).desc
-  select ![c["Id"].as "CustomerId", (a.sum o["Amount"]).as "TotalSpent"]
+  select ![k["Id"].as "CustomerId", (a.sum o["Amount"]).as "TotalSpent"]
 }
 ```
 
@@ -548,7 +577,6 @@ Known limitations: trailing `orderBy` after
 them). Integer AVG semantics differ by engine, including in HAVING predicates.
 Transactions currently require explicit raw BEGIN/COMMIT/ROLLBACK statements;
 queries materialize all result rows, and PostgreSQL Db execution is sequential.
-Possible next steps: checking that grouped projections use only grouping keys
-or aggregates, transaction helpers, sized native budgets, COALESCE/casts,
+Possible next steps: transaction helpers, sized native budgets, COALESCE/casts,
 UNION ALL, returned/generated keys and upsert, followed by CTEs, window functions,
 streaming, prepared-statement reuse, and applicative pipeline batching.

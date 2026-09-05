@@ -1,4 +1,4 @@
-import LeanLinq.Core.Query
+import LeanLinq.Core.Grouped
 
 /-! # C#-style LINQ comprehension syntax
 
@@ -7,10 +7,10 @@ query! {
   from c in customers
   join o in orders on c["Id"] ==. o["CustomerId"]
   where c["Age"] >=. 18
-  groupBy c["Id"].key, c["Name"].key into a
+  groupBy ![c["Id"].as "Id", c["Name"].as "Name"] into k, a
   having a.count >. 1
   orderBy (a.sum o["Amount"]).desc
-  select ![c["Id"].as "CustomerId", (a.sum o["Amount"]).as "TotalSpent"]
+  select ![k["Id"].as "CustomerId", (a.sum o["Amount"]).as "TotalSpent"]
   distinct
   limit 5 offset 10
 }
@@ -26,10 +26,11 @@ expansion, so grouping discipline is enforced by the index, not at run time:
 - `where p` ⇒ `SpineQ.guard p …` (a WHERE conjunct);
 - `orderBy k, …` ⇒ `SpineQ.order` (spine ORDER BY — may reference aggregates
   when grouped);
-- `groupBy k, … into a` + optional `having p` turn the final `select r` into
+- `groupBy ![…] into k, a` + optional `having p` turn the final `select r` into
   the grouped terminal (`SpineQ.groupYield`); `into a` *binds* the aggregate
-  token (C#'s `group … into g`), so `a.count`/`a.sum e`/… are in scope only
-  in the clauses after the grouping;
+  token and the named grouping-key row. Grouped expressions have a fresh
+  scope type; raw input columns cannot be projected, and aggregate results
+  cannot be used as aggregate arguments or ordinary row predicates;
 - plain `select r` ⇒ `SpineQ.yield r`;
 - the fold wraps into `Query.spine`, and trailing `distinct` /
   `limit n [offset m]` / `offset n` decorate the finished query.
@@ -61,7 +62,7 @@ syntax (name := sqlJoin) &"join " ident " in " term:max &"on " term : sqlClause
 syntax (name := sqlLeftJoin) &"leftJoin " ident " in " term:max &"on " term : sqlClause
 syntax (name := sqlWhere) "where " term : sqlClause
 syntax (name := sqlOrderBy) &"orderBy " term,+ : sqlClause
-syntax (name := sqlGroupBy) &"groupBy " term:max,+ &"into " ident : sqlClause
+syntax (name := sqlGroupBy) &"groupBy " term:max &"into " ident ", " ident : sqlClause
 syntax (name := sqlHaving) &"having " term : sqlClause
 syntax (name := sqlSelect) &"select " term : sqlClause
 syntax (name := sqlDistinct) &"distinct" : sqlClause
@@ -139,6 +140,8 @@ private def expandClauses (clauses : List Syntax) : MacroM Term := do
           Macro.throwErrorAt g' "duplicate `groupBy` clause"
         if let some h := before.find? (·.isOfKind ``sqlHaving) then
           Macro.throwErrorAt h "`having` must follow the `groupBy` clause"
+        if let some o := before.find? (·.isOfKind ``sqlOrderBy) then
+          Macro.throwErrorAt o "grouped `orderBy` must follow `groupBy` and use grouping keys or aggregates"
         -- after the grouping, only `having` (at most once) and `orderBy` —
         -- the aggregate binder is not in scope for `where`/`from`/joins
         let havings := after.filter (·.isOfKind ``sqlHaving)
@@ -151,19 +154,15 @@ private def expandClauses (clauses : List Syntax) : MacroM Term := do
         let hv ← match havings with
           | [] => `(Option.none)
           | h :: _ => `(Option.some $(⟨h[1]⟩))
-        let terminal ← `(LeanLinq.SpineQP.groupYield __gkey __gkeys $hv [] $selRow)
-        let grouped ← orderBys.foldrM (fun c acc => foldLeading acc c) terminal
-        -- `into a` binds the aggregate token over having/orderBy/select —
-        -- but NOT over the keys: grouping *by* an aggregate is meaningless
-        -- SQL, so the keys elaborate outside the binder (referencing `a`
-        -- in a key is an unknown identifier, as it should be)
-        let binder : Ident := ⟨g[3]⟩
-        let keys := (sepTerms g[1]).getElems
-        let first := keys[0]!
-        let rest := keys.extract 1 keys.size
-        let withBinder ← `(let __gkey := $first
-          let __gkeys := [$rest,*]
-          (fun ($binder : LeanLinq.Agg) => $grouped) LeanLinq.Agg.mk)
+        let orders := (orderBys.toArray.flatMap fun c => (sepTerms c[1]).getElems)
+        -- Only the named key row and aggregate results inhabit the grouped
+        -- expression type. Source rows remain in scope for aggregate operands.
+        let keyBinder : Ident := ⟨g[3]⟩
+        let aggregateBinder : Ident := ⟨g[5]⟩
+        let keys : Term := ⟨g[1]⟩
+        let withBinder ← `(LeanLinq.groupYieldR $keys
+          (fun $keyBinder $aggregateBinder =>
+            { row := $selRow, having? := $hv, order := [$orders,*] }))
         before.foldrM (fun c acc => foldLeading acc c) withBinder
     let coreQ ← `(LeanLinq.QueryP.spine $core)
     post.foldlM applyTrailing coreQ
