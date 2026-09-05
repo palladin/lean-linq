@@ -10,6 +10,9 @@ import Tests.AggregateTyping
 import Tests.GroupedAstTyping
 import Tests.AggregateProjection
 import Tests.AggregateDml
+import Tests.Transactions
+import Tests.Raise
+import Tests.TransactionLifecycle
 
 /-! # Golden-test runner
 
@@ -45,6 +48,7 @@ def allCases : List (String × (DatabaseType → CompiledSql)) :=
   (queryCases ++ twinCases ++ statementCases).map fun (n, c) => (n, c.compile)
 
 def main (args : List String) : IO UInt32 := do
+  TransactionLifecycle.run
   let update := args.contains "--update"
   let mut failures := 0
   let mut total := 0

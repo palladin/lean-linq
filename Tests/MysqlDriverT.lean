@@ -1,6 +1,7 @@
 import LeanLinq.Driver.Mysql
 import Tests.DriverSweep
 import Tests.DriverRegressions
+import Tests.TransactionDriver
 
 /-! # Native MySQL driver — differential test (`lake exe mysqldriver`)
 
@@ -21,6 +22,12 @@ def main : IO UInt32 := do
       IO.eprintln "[mysqldriver] MySQL unreachable — skipped (is `docker compose up -d --wait` running?)"
       return 0
   | some conn =>
+  TransactionDriver.run .mysql {
+    withTransaction := fun action => conn.withTransaction action
+    execRaw := conn.execRaw
+    query := fun q => conn.query q
+    update := fun u => conn.execUpdate u
+    runDb := fun p => p.execMyAll conn }
   DriverRegressions.checkDoubleQueries (fun q ps => conn.query q ps)
   DriverRegressions.checkCompilerQueries .mysql (fun q => conn.query q) conn.execRaw
   DriverRegressions.checkAggregateDml .mysql {
@@ -58,6 +65,9 @@ def main : IO UInt32 := do
   unless ← checkWholeTableFanOut (← wholeTableFanOut.execMyAll conn seedParams) do
     failures := failures + 1
   conn.close
+  TransactionDriver.checkClosed (fun action => conn.withTransaction action)
+    (conn.execRaw "SELECT 1") (discard (conn.query TransactionDriver.rows))
+    (discard (conn.execUpdate (TransactionDriver.bump 1)))
   if failures == 0 then
     IO.println s!"driver(mysql): {passed} cases match the evaluator (typed), {skipped} skipped — all green"
     return 0

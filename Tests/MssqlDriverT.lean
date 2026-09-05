@@ -1,6 +1,7 @@
 import LeanLinq.Driver.Mssql
 import Tests.DriverSweep
 import Tests.DriverRegressions
+import Tests.TransactionDriver
 
 /-! # Native SQL Server driver — differential test (`lake exe mssqldriver`)
 
@@ -31,6 +32,12 @@ def main : IO UInt32 := do
     IO.eprintln "[mssqldriver] SQL Server unreachable — skipped (is `docker compose up -d --wait` running?)"
     return 0
   let conn ← Ms.connect msHost msPort msUser msPass (db := "testdb")
+  TransactionDriver.run .sqlServer {
+    withTransaction := fun action => conn.withTransaction action
+    execRaw := conn.execRaw
+    query := fun q => conn.query q
+    update := fun u => conn.execUpdate u
+    runDb := fun p => p.execMsAll conn }
   DriverRegressions.checkDoubleQueries (fun q ps => conn.query q ps)
   DriverRegressions.checkCompilerQueries .sqlServer (fun q => conn.query q) conn.execRaw
   DriverRegressions.checkAggregateDml .sqlServer {
@@ -77,6 +84,9 @@ def main : IO UInt32 := do
     IO.eprintln s!"ERROR-ROUTING CHECK failed: got {repr errText}"
     failures := failures + 1
   conn.close
+  TransactionDriver.checkClosed (fun action => conn.withTransaction action)
+    (conn.execRaw "SELECT 1") (discard (conn.query TransactionDriver.rows))
+    (discard (conn.execUpdate (TransactionDriver.bump 1)))
   if failures == 0 then
     IO.println s!"driver(mssql): {passed} cases match the evaluator (typed), {skipped} skipped — all green"
     return 0

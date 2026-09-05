@@ -15,6 +15,7 @@
 #include <lean/lean.h>
 #include <mysql.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 
 /* libmysqlclient 8+ removed my_bool (MariaDB kept it) */
 #if defined(MYSQL_VERSION_ID) && MYSQL_VERSION_ID >= 80000 && !defined(MARIADB_BASE_VERSION)
@@ -29,6 +30,7 @@ typedef bool my_bool;
 
 typedef struct {
     MYSQL *conn;
+    atomic_bool managed_tx;
 } ll_myconn;
 
 static lean_external_class *g_myconn_class = NULL;
@@ -62,7 +64,8 @@ static lean_obj_res ll_my_err(const char *msg) {
 
 static lean_obj_res ll_my_err_conn(MYSQL *conn, const char *what) {
     char buf[1024];
-    snprintf(buf, sizeof buf, "mysql %s: %s", what, mysql_error(conn));
+    snprintf(buf, sizeof buf, "mysql %s: %s", what,
+             conn ? mysql_error(conn) : "connection is closed");
     return ll_my_err(buf);
 }
 
@@ -79,6 +82,13 @@ LEAN_EXPORT lean_obj_res ll_my_connect(b_lean_obj_arg host, uint32_t port,
     (void)w;
     MYSQL *conn = mysql_init(NULL);
     if (!conn) return ll_my_err("mysql_init failed");
+    /* A reconnect can lose transaction ownership and must never be hidden. */
+    my_bool reconnect = false;
+    if (mysql_options(conn, MYSQL_OPT_RECONNECT, &reconnect)) {
+        lean_obj_res e = ll_my_err_conn(conn, "disable reconnect");
+        mysql_close(conn);
+        return e;
+    }
     if (!mysql_real_connect(conn, lean_string_cstr(host), lean_string_cstr(user),
             lean_string_cstr(pass), lean_string_cstr(db), port, NULL,
             CLIENT_MULTI_STATEMENTS)) {
@@ -90,6 +100,7 @@ LEAN_EXPORT lean_obj_res ll_my_connect(b_lean_obj_arg host, uint32_t port,
     ll_myconn *c = (ll_myconn *)malloc(sizeof(ll_myconn));
     if (!c) { mysql_close(conn); return ll_my_err("mysql connect: out of memory"); }
     c->conn = conn;
+    atomic_init(&c->managed_tx, false);
     return lean_io_result_mk_ok(lean_alloc_external(myconn_class(), c));
 }
 
@@ -105,6 +116,7 @@ LEAN_EXPORT lean_obj_res ll_my_exec_raw(b_lean_obj_arg connO, b_lean_obj_arg sql
         lean_obj_arg w) {
     (void)w;
     MYSQL *conn = myconn_of(connO)->conn;
+    if (!conn) return ll_my_err("mysql execRaw: connection is closed");
     if (mysql_real_query(conn, lean_string_cstr(sql),
             (unsigned long)lean_string_size(sql) - 1))
         return ll_my_err_conn(conn, "execRaw");
@@ -115,6 +127,51 @@ LEAN_EXPORT lean_obj_res ll_my_exec_raw(b_lean_obj_arg connO, b_lean_obj_arg sql
         else if (mysql_errno(conn)) return ll_my_err_conn(conn, "execRaw drain");
     } while (mysql_next_result(conn) == 0);
     if (mysql_errno(conn)) return ll_my_err_conn(conn, "execRaw next");
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+LEAN_EXPORT lean_obj_res ll_my_tx_claim(b_lean_obj_arg connO, lean_obj_arg w) {
+    (void)w;
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&myconn_of(connO)->managed_tx, &expected, true))
+        return ll_my_err("mysql transaction: managed transaction already active");
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+LEAN_EXPORT lean_obj_res ll_my_tx_release(b_lean_obj_arg connO, lean_obj_arg w) {
+    (void)w;
+    atomic_store(&myconn_of(connO)->managed_tx, false);
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+LEAN_EXPORT lean_obj_res ll_my_tx_state(b_lean_obj_arg connO, lean_obj_arg w) {
+    (void)w;
+    MYSQL *conn = myconn_of(connO)->conn;
+    if (!conn) return lean_io_result_mk_ok(lean_box_uint32(3));
+    /* Error packets need not carry transaction status (a deadlock can roll
+     * back the transaction). DO 0 returns a fresh OK/status packet, without
+     * reading a table or implicitly starting/committing a transaction. */
+    if (mysql_query(conn, "DO 0")) return ll_my_err_conn(conn, "transaction state");
+    uint32_t state = (conn->server_status & SERVER_STATUS_IN_TRANS) ? 1 : 0;
+    return lean_io_result_mk_ok(lean_box_uint32(state));
+}
+
+LEAN_EXPORT lean_obj_res ll_my_tx_control(b_lean_obj_arg connO, uint32_t op,
+                                          lean_obj_arg w) {
+    (void)w;
+    MYSQL *conn = myconn_of(connO)->conn;
+    if (!conn) return ll_my_err("mysql transaction: connection is closed");
+    if (op > 2) return ll_my_err("mysql transaction: invalid control operation");
+    /* Override completion_type for this command without changing the session:
+     * completion must neither start a new transaction nor release the connection. */
+    const char *sql = op == 0 ? "START TRANSACTION"
+                    : op == 1 ? "COMMIT AND NO CHAIN NO RELEASE"
+                              : "ROLLBACK AND NO CHAIN NO RELEASE";
+    int rc = mysql_query(conn, sql);
+    if (rc) return ll_my_err_conn(conn, op == 0 ? "BEGIN" : op == 1 ? "COMMIT" : "ROLLBACK");
+    bool active = (conn->server_status & SERVER_STATUS_IN_TRANS) != 0;
+    if (active != (op == 0))
+        return ll_my_err("mysql transaction: control returned an unexpected state");
     return lean_io_result_mk_ok(lean_box(0));
 }
 
@@ -154,6 +211,7 @@ LEAN_EXPORT lean_obj_res ll_my_query(b_lean_obj_arg connO, b_lean_obj_arg sql,
         b_lean_obj_arg vals, lean_obj_arg w) {
     (void)w;
     MYSQL *conn = myconn_of(connO)->conn;
+    if (!conn) return ll_my_err("mysql query: connection is closed");
     MYSQL_STMT *stmt = mysql_stmt_init(conn);
     if (!stmt) return ll_my_err_conn(conn, "stmt_init");
     lean_obj_res err = NULL;
@@ -234,6 +292,7 @@ LEAN_EXPORT lean_obj_res ll_my_exec_params(b_lean_obj_arg connO, b_lean_obj_arg 
         b_lean_obj_arg vals, lean_obj_arg w) {
     (void)w;
     MYSQL *conn = myconn_of(connO)->conn;
+    if (!conn) return ll_my_err("mysql execParams: connection is closed");
     MYSQL_STMT *stmt = mysql_stmt_init(conn);
     if (!stmt) return ll_my_err_conn(conn, "stmt_init");
     lean_obj_res err = NULL;

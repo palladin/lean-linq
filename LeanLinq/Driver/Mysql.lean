@@ -1,5 +1,6 @@
 import LeanLinq
 import LeanLinq.Driver.TextCell
+import LeanLinq.Driver.Transaction
 import LeanLinq.Driver.Wire
 
 /-! # Native MySQL driver (libmysqlclient)
@@ -41,6 +42,37 @@ opaque Conn.close (conn : @&Conn) : IO Unit
 /-- Execute a raw SQL batch (DDL / seed / BEGIN / ROLLBACK). -/
 @[extern "ll_my_exec_raw"]
 opaque Conn.execRaw (conn : @&Conn) (sql : @&String) : IO Unit
+
+@[extern "ll_my_tx_claim"]
+private opaque claimTransaction (conn : @&Conn) : IO Unit
+
+@[extern "ll_my_tx_release"]
+private opaque releaseTransaction (conn : @&Conn) : IO Unit
+
+@[extern "ll_my_tx_state"]
+private opaque transactionStateRaw (conn : @&Conn) : IO UInt32
+
+@[extern "ll_my_tx_control"]
+private opaque transactionControl (conn : @&Conn) (operation : UInt32) : IO Unit
+
+/-- Run a top-level transaction at the engine's default isolation level.
+The connection must be used exclusively throughout the action. Existing
+transactions and nested managed scopes are rejected. Transaction controls
+and state checks are separate from a `Db` body's operation bill. -/
+def Conn.withTransaction (conn : Conn) (action : IO α) : IO α :=
+  Driver.withTransaction {
+    claim := claimTransaction conn
+    release := releaseTransaction conn
+    state := do
+      match ← transactionStateRaw conn with
+      | 0 => return .idle
+      | 1 => return .active
+      | 2 => return .aborted
+      | _ => return .unusable
+    begin := transactionControl conn 0
+    commit := transactionControl conn 1
+    rollback := transactionControl conn 2
+    close := conn.close } action
 
 @[extern "ll_my_query"]
 private opaque queryRaw (conn : @&Conn) (sql : @&String)
@@ -140,7 +172,7 @@ def Conn.execInsertValues (conn : Conn) (st : InsertValuesStmt c n s)
 /-! ## `Db` interpretation (sequential, one statement per round) -/
 
 private def ops (conn : Conn) (ps : ParamEnv c.params) :
-    {β : Type} → DbE c β → IO β
+    {β : Type} → DbOp c β → IO β
   | _, .fetch q => conn.query q ps
   | _, .fetchCell sc => conn.queryCell sc ps
   | _, .insert (inst := _) i => conn.execInsert i ps
@@ -148,6 +180,14 @@ private def ops (conn : Conn) (ps : ParamEnv c.params) :
   | _, .delete (inst := _) d => conn.execDelete d ps
   | _, .insertSelect (inst := _) st => conn.execInsertSelect st ps
   | _, .insertValues (inst := _) st => conn.execInsertValues st ps
+  | _, .raise message => throw (IO.userError message)
+
+private def scopedOps (conn : Conn) (ps : ParamEnv c.params) :
+    {β : Type} → DbE c β → IO β
+  | _, .op e => ops conn ps e
+  | _, .transaction body =>
+      conn.withTransaction (FreerD.foldM (E := DbOp c) (m := IO)
+        (fun e => ops conn ps e) body)
 
 end Mysql
 
@@ -164,11 +204,15 @@ def DbP.execMy {w : Wp α} (f : DbP c α w) (conn : Mysql.Conn) (budget : Nat)
         | exact Grade.le_refl _
         | (apply Grade.nat_le_nat; omega)
         | assumption) : IO α :=
-  FreerD.foldM (E := DbE c) (fun e => Mysql.ops conn ps e) f
+  FreerD.foldM (E := DbE c) (m := IO) (fun e => Mysql.scopedOps conn ps e) f
 
 /-- The unchecked door over the wire: no budget, no obligation. -/
 def DbP.execMyAll {w : Wp α} (f : DbP c α w) (conn : Mysql.Conn)
     (ps : ParamEnv c.params := by exact .nil) : IO α :=
-  FreerD.foldM (E := DbE c) (fun e => Mysql.ops conn ps e) f
+  FreerD.foldM (E := DbE c) (m := IO) (fun e => Mysql.scopedOps conn ps e) f
+
+namespace FreerD
+export DbP (execMy execMyAll)
+end FreerD
 
 end LeanLinq

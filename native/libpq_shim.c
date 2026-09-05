@@ -10,6 +10,8 @@
 #include <lean/lean.h>
 #include <libpq-fe.h>
 #include <pthread.h>
+#include <stdatomic.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +20,7 @@
 
 typedef struct {
     PGconn *conn;
+    atomic_bool managed_tx;
 } ll_pgconn;
 
 typedef struct {
@@ -96,6 +99,7 @@ LEAN_EXPORT lean_obj_res ll_pq_connect(b_lean_obj_arg conninfo, lean_obj_arg w) 
     }
     ll_pgconn *c = (ll_pgconn *)malloc(sizeof(ll_pgconn));
     c->conn = conn;
+    atomic_init(&c->managed_tx, false);
     return lean_io_result_mk_ok(lean_alloc_external(pgconn_class(), c));
 }
 
@@ -124,6 +128,61 @@ LEAN_EXPORT lean_obj_res ll_pq_exec_raw(b_lean_obj_arg conn, b_lean_obj_arg sql,
         return e;
     }
     if (res) PQclear(res);
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+/* Managed scopes require exclusive connection use; the atomic flag only
+ * guards against another managed scope, not ordinary concurrent queries. */
+LEAN_EXPORT lean_obj_res ll_pq_tx_claim(b_lean_obj_arg conn, lean_obj_arg w) {
+    (void)w;
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&pgconn_of(conn)->managed_tx, &expected, true))
+        return ll_pg_err("libpq transaction: managed transaction already active");
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+LEAN_EXPORT lean_obj_res ll_pq_tx_release(b_lean_obj_arg conn, lean_obj_arg w) {
+    (void)w;
+    atomic_store(&pgconn_of(conn)->managed_tx, false);
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+LEAN_EXPORT lean_obj_res ll_pq_tx_state(b_lean_obj_arg conn, lean_obj_arg w) {
+    (void)w;
+    PGconn *db = pgconn_of(conn)->conn;
+    uint32_t state = 3;
+    if (db && PQstatus(db) == CONNECTION_OK) {
+        switch (PQtransactionStatus(db)) {
+            case PQTRANS_IDLE: state = 0; break;
+            case PQTRANS_INTRANS: state = 1; break;
+            case PQTRANS_INERROR: state = 2; break;
+            default: break;
+        }
+    }
+    return lean_io_result_mk_ok(lean_box_uint32(state));
+}
+
+LEAN_EXPORT lean_obj_res ll_pq_tx_control(b_lean_obj_arg conn, uint32_t op,
+                                          lean_obj_arg w) {
+    (void)w;
+    PGconn *db = pgconn_of(conn)->conn;
+    if (!db) return ll_pg_err("libpq transaction: connection is closed");
+    if (op > 2) return ll_pg_err("libpq transaction: invalid control operation");
+    const char *sql = op == 0 ? "BEGIN" : op == 1 ? "COMMIT" : "ROLLBACK";
+    PGresult *res = PQexec(db, sql);
+    if (!res || PQresultStatus(res) != PGRES_COMMAND_OK) {
+        lean_obj_res e = ll_pg_err_conn(db, sql);
+        if (res) PQclear(res);
+        return e;
+    }
+    /* COMMIT on an aborted transaction can return COMMAND_OK / ROLLBACK.
+     * Checking only the result status would falsely report a commit. */
+    bool tag_ok = strcmp(PQcmdStatus(res), sql) == 0;
+    PQclear(res);
+    if (!tag_ok) return ll_pg_err("libpq transaction: unexpected control command tag");
+    PGTransactionStatusType expected = op == 0 ? PQTRANS_INTRANS : PQTRANS_IDLE;
+    if (PQstatus(db) != CONNECTION_OK || PQtransactionStatus(db) != expected)
+        return ll_pg_err("libpq transaction: control returned an unexpected state");
     return lean_io_result_mk_ok(lean_box(0));
 }
 

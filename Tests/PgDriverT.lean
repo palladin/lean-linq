@@ -1,6 +1,7 @@
 import LeanLinq.Driver.Postgres
 import Tests.DriverSweep
 import Tests.DriverRegressions
+import Tests.TransactionDriver
 
 /-! # Native PostgreSQL driver — differential test (`lake exe pgdriver`)
 
@@ -22,6 +23,12 @@ def main : IO UInt32 := do
       IO.eprintln "[pgdriver] PostgreSQL unreachable — skipped (is `docker compose up -d --wait` running?)"
       return 0
   | some conn =>
+      TransactionDriver.run .postgres {
+        withTransaction := fun action => conn.withTransaction action
+        execRaw := conn.execRaw
+        query := fun q => conn.query q
+        update := fun u => conn.execUpdate u
+        runDb := fun p => p.execPgAll conn }
       DriverRegressions.checkDoubleQueries (fun q ps => conn.query q ps)
       DriverRegressions.checkCompilerQueries .postgres (fun q => conn.query q) conn.execRaw
       DriverRegressions.checkAggregateDml .postgres {
@@ -72,6 +79,9 @@ def main : IO UInt32 := do
         IO.eprintln "CONNECTION RECOVERY failed: connection wedged after error"
         failures := failures + 1
       conn.close
+      TransactionDriver.checkClosed (fun action => conn.withTransaction action)
+        (conn.execRaw "SELECT 1") (discard (conn.query TransactionDriver.rows))
+        (discard (conn.execUpdate (TransactionDriver.bump 1)))
       if failures == 0 then
         IO.println s!"driver(postgres): {passed} cases match the evaluator (typed), {skipped} skipped — all green"
         return 0

@@ -18,6 +18,8 @@
 #include <sybfront.h>
 #include <sybdb.h>
 #include <pthread.h>
+#include <stdatomic.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,6 +28,7 @@
 
 typedef struct {
     DBPROCESS *dbproc;
+    atomic_bool managed_tx;
     char err[1024];
     char msg[1024];
     /* malloc'd copies of RPC parameter values: dbrpcparam stores the raw
@@ -173,6 +176,7 @@ LEAN_EXPORT lean_obj_res ll_tds_connect(b_lean_obj_arg server, b_lean_obj_arg us
     ll_tdsconn *c = (ll_tdsconn *)malloc(sizeof(ll_tdsconn));
     if (!c) { dbclose(dbproc); return ll_tds_err(NULL, "conn alloc"); }
     c->dbproc = dbproc;
+    atomic_init(&c->managed_tx, false);
     c->err[0] = 0;
     c->msg[0] = 0;
     c->rpc_vals = NULL;
@@ -198,6 +202,7 @@ LEAN_EXPORT lean_obj_res ll_tds_close(b_lean_obj_arg conn, lean_obj_arg w) {
         dbclose(c->dbproc);
         c->dbproc = NULL;
     }
+    ll_tds_rpc_vals_clear(c);
     return lean_io_result_mk_ok(lean_box(0));
 }
 
@@ -237,6 +242,97 @@ LEAN_EXPORT lean_obj_res ll_tds_exec_raw(b_lean_obj_arg conn, b_lean_obj_arg sql
         return ll_tds_err(c, "dbcmd");
     if (dbsqlexec(c->dbproc) == FAIL) return ll_tds_err(c, "exec");
     if (drain_results(c->dbproc) == FAIL) return ll_tds_err(c, "exec results");
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+LEAN_EXPORT lean_obj_res ll_tds_tx_claim(b_lean_obj_arg conn, lean_obj_arg w) {
+    (void)w;
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&tdsconn_of(conn)->managed_tx, &expected, true))
+        return lean_io_result_mk_error(lean_mk_io_user_error(
+            lean_mk_string("freetds transaction: managed transaction already active")));
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+LEAN_EXPORT lean_obj_res ll_tds_tx_release(b_lean_obj_arg conn, lean_obj_arg w) {
+    (void)w;
+    atomic_store(&tdsconn_of(conn)->managed_tx, false);
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+#define LL_TDS_TX_STATE \
+    "SELECT CASE WHEN @@TRANCOUNT=0 AND XACT_STATE()=0 THEN 0 " \
+    "WHEN @@TRANCOUNT=1 AND XACT_STATE()=1 THEN 1 ELSE 2 END;"
+
+/* This also cleans an unfinished result/RPC left by a body decoding error.
+ * Exactly one state row must arrive, and all result sets are consumed. */
+static int ll_tds_tx_query(ll_tdsconn *c, const char *sql, uint32_t *state) {
+    c->err[0] = 0;
+    c->msg[0] = 0;
+    if (dbcancel(c->dbproc) == FAIL) return 0;
+    if (dbrpcinit(c->dbproc, (char *)"", DBRPCRESET) == FAIL) return 0;
+    ll_tds_rpc_vals_clear(c);
+    if (dbcmd(c->dbproc, sql) == FAIL || dbsqlexec(c->dbproc) == FAIL) return 0;
+    RETCODE result, row;
+    unsigned rows = 0;
+    while ((result = dbresults(c->dbproc)) != NO_MORE_RESULTS) {
+        if (result == FAIL) return 0;
+        while ((row = dbnextrow(c->dbproc)) != NO_MORE_ROWS) {
+            if (row == FAIL) return 0;
+            DBINT value = -1;
+            if (row != REG_ROW || ++rows != 1 || dbnumcols(c->dbproc) != 1 ||
+                dbdatlen(c->dbproc, 1) == 0 ||
+                dbconvert(c->dbproc, dbcoltype(c->dbproc, 1), dbdata(c->dbproc, 1),
+                    dbdatlen(c->dbproc, 1), SYBINT4, (BYTE *)&value, sizeof(value)) == -1 ||
+                value < 0 || value > 2) {
+                snprintf(c->err, sizeof(c->err), "invalid transaction state response");
+                return 0;
+            }
+            *state = (uint32_t)value;
+        }
+    }
+    if (rows != 1) {
+        snprintf(c->err, sizeof(c->err), "missing transaction state response");
+        return 0;
+    }
+    return 1;
+}
+
+LEAN_EXPORT lean_obj_res ll_tds_tx_state(b_lean_obj_arg conn, lean_obj_arg w) {
+    (void)w;
+    ll_tdsconn *c = tdsconn_of(conn);
+    if (!c->dbproc || DBDEAD(c->dbproc))
+        return lean_io_result_mk_ok(lean_box_uint32(3));
+    uint32_t state;
+    if (!ll_tds_tx_query(c, LL_TDS_TX_STATE, &state))
+        return ll_tds_err(c, "transaction state");
+    return lean_io_result_mk_ok(lean_box_uint32(state));
+}
+
+LEAN_EXPORT lean_obj_res ll_tds_tx_control(b_lean_obj_arg conn, uint32_t op,
+                                           lean_obj_arg w) {
+    (void)w;
+    ll_tdsconn *c = tdsconn_of(conn);
+    lean_obj_res bad = ll_tds_check_conn(c, "transaction control");
+    if (bad) return bad;
+    if (op > 2) {
+        snprintf(c->err, sizeof(c->err), "invalid transaction control operation");
+        return ll_tds_err(c, "transaction control");
+    }
+    const char *sql = op == 0
+        ? "IF @@TRANCOUNT<>0 OR XACT_STATE()<>0 THROW 50000, 'Transaction already active', 1; "
+          "BEGIN TRANSACTION; " LL_TDS_TX_STATE
+        : op == 1
+        ? "IF @@TRANCOUNT<>1 OR XACT_STATE()<>1 THROW 50000, 'Transaction is not committable', 1; "
+          "COMMIT TRANSACTION; " LL_TDS_TX_STATE
+        : "IF @@TRANCOUNT>0 ROLLBACK TRANSACTION; " LL_TDS_TX_STATE;
+    uint32_t state;
+    if (!ll_tds_tx_query(c, sql, &state))
+        return ll_tds_err(c, op == 0 ? "BEGIN" : op == 1 ? "COMMIT" : "ROLLBACK");
+    if (state != (op == 0 ? 1u : 0u)) {
+        snprintf(c->err, sizeof(c->err), "control returned an unexpected transaction state");
+        return ll_tds_err(c, "transaction control");
+    }
     return lean_io_result_mk_ok(lean_box(0));
 }
 

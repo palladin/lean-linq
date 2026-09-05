@@ -1,6 +1,7 @@
 import LeanLinq.Driver.Sqlite
 import Tests.DriverSweep
 import Tests.DriverRegressions
+import Tests.TransactionDriver
 
 /-! # Native SQLite driver — differential test (`lake exe sqlitedriver`)
 
@@ -30,6 +31,12 @@ def main : IO UInt32 := do
   let path := "/tmp/leanlinq-driver.db"
   if ← System.FilePath.pathExists path then IO.FS.removeFile path
   let conn ← Sqlite.connect path
+  TransactionDriver.run .sqlite {
+    withTransaction := fun action => conn.withTransaction action
+    execRaw := conn.execRaw
+    query := fun q => conn.query q
+    update := fun u => conn.execUpdate u
+    runDb := fun p => p.execIOAll conn }
   conn.execRaw (setupSql .sqlite)
   let ops : DriverOps := {
     query := fun q => conn.query q seedParams
@@ -56,6 +63,9 @@ def main : IO UInt32 := do
   unless ← checkWholeTableFanOut (← wholeTableFanOut.execIOAll conn seedParams) do
     failures := failures + 1
   conn.close
+  TransactionDriver.checkClosed (fun action => conn.withTransaction action)
+    (conn.execRaw "SELECT 1") (discard (conn.query TransactionDriver.rows))
+    (discard (conn.execUpdate (TransactionDriver.bump 1)))
   if failures == 0 then
     IO.println s!"driver(sqlite): {passed} cases match the evaluator (typed), {skipped} skipped — all green"
     return 0

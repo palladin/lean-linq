@@ -11,6 +11,8 @@
 #include <lean/lean.h>
 #include <sqlite3.h>
 #include <pthread.h>
+#include <stdatomic.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +21,7 @@
 
 typedef struct {
     sqlite3 *db;
+    atomic_bool managed_tx;
 } ll_conn;
 
 typedef struct {
@@ -95,6 +98,7 @@ LEAN_EXPORT lean_obj_res ll_sqlite3_open(b_lean_obj_arg path, lean_obj_arg /* wo
     }
     ll_conn *c = (ll_conn *)malloc(sizeof(ll_conn));
     c->db = db;
+    atomic_init(&c->managed_tx, false);
     return lean_io_result_mk_ok(lean_alloc_external(conn_class(), c));
 }
 
@@ -113,6 +117,7 @@ LEAN_EXPORT lean_obj_res ll_sqlite3_close(b_lean_obj_arg conn, lean_obj_arg w) {
 LEAN_EXPORT lean_obj_res ll_sqlite3_changes(b_lean_obj_arg conn, lean_obj_arg w) {
     (void)w;
     sqlite3 *db = conn_of(conn)->db;
+    if (!db) return ll_io_err("sqlite3 changes: connection is closed");
     return lean_io_result_mk_ok(lean_box_uint32((uint32_t)sqlite3_changes(db)));
 }
 
@@ -129,6 +134,46 @@ LEAN_EXPORT lean_obj_res ll_sqlite3_exec_raw(b_lean_obj_arg conn, b_lean_obj_arg
         sqlite3_free(errmsg);
         return ll_io_err(buf);
     }
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+/* The atomic guard prevents overlapping managed scopes; it does not make
+ * arbitrary concurrent operations on this connection safe. */
+LEAN_EXPORT lean_obj_res ll_sqlite3_tx_claim(b_lean_obj_arg conn, lean_obj_arg w) {
+    (void)w;
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&conn_of(conn)->managed_tx, &expected, true))
+        return ll_io_err("sqlite3 transaction: managed transaction already active");
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+LEAN_EXPORT lean_obj_res ll_sqlite3_tx_release(b_lean_obj_arg conn, lean_obj_arg w) {
+    (void)w;
+    atomic_store(&conn_of(conn)->managed_tx, false);
+    return lean_io_result_mk_ok(lean_box(0));
+}
+
+/* 0 idle, 1 active, 2 aborted, 3 unusable. Some SQLite errors automatically
+ * roll back; get_autocommit observes that instead of trusting BEGIN history. */
+LEAN_EXPORT lean_obj_res ll_sqlite3_tx_state(b_lean_obj_arg conn, lean_obj_arg w) {
+    (void)w;
+    sqlite3 *db = conn_of(conn)->db;
+    uint32_t state = !db ? 3 : sqlite3_get_autocommit(db) ? 0 : 1;
+    return lean_io_result_mk_ok(lean_box_uint32(state));
+}
+
+/* 0 BEGIN, 1 COMMIT, 2 ROLLBACK. Controls never retry. */
+LEAN_EXPORT lean_obj_res ll_sqlite3_tx_control(b_lean_obj_arg conn, uint32_t op,
+                                               lean_obj_arg w) {
+    (void)w;
+    sqlite3 *db = conn_of(conn)->db;
+    if (!db) return ll_io_err("sqlite3 transaction: connection is closed");
+    if (op > 2) return ll_io_err("sqlite3 transaction: invalid control operation");
+    const char *sql = op == 0 ? "BEGIN" : op == 1 ? "COMMIT" : "ROLLBACK";
+    if (sqlite3_exec(db, sql, NULL, NULL, NULL) != SQLITE_OK)
+        return ll_io_err_db(db, sql);
+    if ((sqlite3_get_autocommit(db) != 0) != (op != 0))
+        return ll_io_err("sqlite3 transaction: control returned an unexpected state");
     return lean_io_result_mk_ok(lean_box(0));
 }
 

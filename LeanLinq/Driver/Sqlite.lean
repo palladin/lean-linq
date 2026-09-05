@@ -1,5 +1,6 @@
 import LeanLinq
 import LeanLinq.Driver.TextCell
+import LeanLinq.Driver.Transaction
 
 /-! # Native SQLite driver
 
@@ -40,6 +41,37 @@ opaque Conn.close (conn : @&Conn) : IO Unit
 queries — results are discarded. -/
 @[extern "ll_sqlite3_exec_raw"]
 opaque Conn.execRaw (conn : @&Conn) (sql : @&String) : IO Unit
+
+@[extern "ll_sqlite3_tx_claim"]
+private opaque claimTransaction (conn : @&Conn) : IO Unit
+
+@[extern "ll_sqlite3_tx_release"]
+private opaque releaseTransaction (conn : @&Conn) : IO Unit
+
+@[extern "ll_sqlite3_tx_state"]
+private opaque transactionStateRaw (conn : @&Conn) : IO UInt32
+
+@[extern "ll_sqlite3_tx_control"]
+private opaque transactionControl (conn : @&Conn) (operation : UInt32) : IO Unit
+
+/-- Run a top-level transaction at the engine's default isolation level.
+The connection must be used exclusively throughout the action. Existing
+transactions and nested managed scopes are rejected. Transaction controls
+and state checks are separate from a `Db` body's operation bill. -/
+def Conn.withTransaction (conn : Conn) (action : IO α) : IO α :=
+  Driver.withTransaction {
+    claim := claimTransaction conn
+    release := releaseTransaction conn
+    state := do
+      match ← transactionStateRaw conn with
+      | 0 => return .idle
+      | 1 => return .active
+      | 2 => return .aborted
+      | _ => return .unusable
+    begin := transactionControl conn 0
+    commit := transactionControl conn 1
+    rollback := transactionControl conn 2
+    close := conn.close } action
 
 @[extern "ll_sqlite3_prepare"]
 private opaque prepareRaw (conn : Conn) (sql : @&String) : IO Stmt
@@ -221,7 +253,7 @@ end Sqlite
 handles in memory, one statement each. SQLite is in-process, so a "round"
 costs a statement, not a network wait. -/
 private def Sqlite.ops (conn : Sqlite.Conn) (ps : ParamEnv c.params) :
-    {β : Type} → DbE c β → IO β
+    {β : Type} → DbOp c β → IO β
   | _, .fetch q => conn.query q ps
   | _, .fetchCell sc => conn.queryCell sc ps
   | _, .insert (inst := _) i => conn.execInsert i ps
@@ -229,6 +261,14 @@ private def Sqlite.ops (conn : Sqlite.Conn) (ps : ParamEnv c.params) :
   | _, .delete (inst := _) d => conn.execDelete d ps
   | _, .insertSelect (inst := _) st => conn.execInsertSelect st ps
   | _, .insertValues (inst := _) st => conn.execInsertValues st ps
+  | _, .raise message => throw (IO.userError message)
+
+private def Sqlite.scopedOps (conn : Sqlite.Conn) (ps : ParamEnv c.params) :
+    {β : Type} → DbE c β → IO β
+  | _, .op e => Sqlite.ops conn ps e
+  | _, .transaction body =>
+      conn.withTransaction (FreerD.foldM (E := DbOp c) (m := IO)
+        (fun e => Sqlite.ops conn ps e) body)
 
 /-- Interpret a `Db` program against a live connection — the same tree
 `runWith` interprets in memory, through the generic fold. The budget
@@ -245,12 +285,16 @@ def DbP.execIO {w : Wp α} (f : DbP c α w) (conn : Sqlite.Conn) (budget : Nat)
         | exact Grade.le_refl _
         | (apply Grade.nat_le_nat; omega)
         | assumption) : IO α :=
-  FreerD.foldM (E := DbE c) (fun e => Sqlite.ops conn ps e) f
+  FreerD.foldM (E := DbE c) (m := IO) (fun e => Sqlite.scopedOps conn ps e) f
 
 /-- The unbounded door over the wire: no budget, obligation-free — the
 explicit opt-out, same as the in-memory `execAll`. -/
 def DbP.execIOAll {w : Wp α} (f : DbP c α w) (conn : Sqlite.Conn)
     (ps : ParamEnv c.params := by exact .nil) : IO α :=
-  FreerD.foldM (E := DbE c) (fun e => Sqlite.ops conn ps e) f
+  FreerD.foldM (E := DbE c) (m := IO) (fun e => Sqlite.scopedOps conn ps e) f
+
+namespace FreerD
+export DbP (execIO execIOAll)
+end FreerD
 
 end LeanLinq

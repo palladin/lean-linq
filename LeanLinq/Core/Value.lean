@@ -46,11 +46,11 @@ currency): a strict cell is `some`, a nullable cell is itself. -/
   | ⟨_, true⟩, cell => cell
   | ⟨_, false⟩, cell => some cell
 
-/-- Exceptional conditions during evaluation — the statement-aborting
-channel, kept separate from SQL NULL (engines abort on these; they do not
-produce NULL cells). `internal` marks states unreachable for queries built
-through the public surface. -/
+/-- Errors abort evaluation or database programs; they are separate from SQL
+NULL. `userError` is an explicit host-program error. `internal` marks states
+unreachable for queries built through the public surface. -/
 inductive EvalError where
+  | userError (message : String)
   | divByZero
   | noClock                              -- `now` evaluated without a clock in `EvalEnv`
   | unsupported (fn : String) (t : SqlPrim)   -- e.g. ROUND on double: not implemented

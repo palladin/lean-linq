@@ -75,9 +75,9 @@ any driver to execute, and ships **native drivers for all four engines** — SQL
 `brew install mysql-client`), and SQL Server (FreeTDS, `sp_executesql` RPC): typed queries in, typed rows
 out, parameters bound natively — see "Executing for real" below.
 
-## `db!` — database programs with the round-trip bill in the type
+## `db!` — database programs with operation budgets
 
-`Db` prices round trips in the type (`fetch` = 1, data-dependent `bind` =
+`Db` prices query/write operations in the type (`fetch` = 1, data-dependent `bind` =
 `+`, per-row `for` = body grade × collection length — a derived bind-chain), and
 execution demands a budget plus a proof — the philosophy being that everything is
 priced and the *proof* is the gate. A grade **is its collapse** — a function
@@ -182,6 +182,96 @@ the same brackets both ways. Over the wire the doors are per-driver:
 `f.execMs conn budget` (SQL Server), and `f.execMy conn budget` (MySQL) — each
 with a budget-unchecked `…All` variant.
 All interpret sequentially, one statement per round.
+
+### Transactions
+
+A `transaction { ... }` block groups part of a `db!` program into one native
+transaction. Its result reaches the surrounding program only after commit;
+an exception rolls back the block and skips its continuation.
+
+```lean
+def updateTogether (first second : UpdateStmt MyDb "Customers" CustomersS) :
+    Db MyDb 3 ((Nat × Nat) × List (Values CustomersS)) := db! {
+  let changed ← transaction {
+    let a ← first.execUpdate
+    let b ← second.execUpdate
+    return (a, b)
+  }
+  let after ← (Query.from' (ts := MyDb) customers).execQuery
+  return (changed, after)
+}
+```
+
+The final query runs after the transaction has committed.
+
+Reusable transaction bodies have type `TxDb c r α`; `Db.transaction` turns one
+into `Db c r α`. The generic `FreerD` monad and its folds are unchanged:
+`DbOp` contains ordinary database operations and explicit errors; `DbE` adds a transaction effect
+whose body uses only `DbOp`. The underlying `DbM mode c r α` distinguishes
+`.inside` and `.outside`: ordinary query/write operations work in either mode, while the
+transaction constructor produces only an outside program. Nested transactions
+are therefore rejected during Lean compilation, including through helper
+functions and raw constructors. Helpers used in both contexts can be polymorphic
+in `mode`; an existing helper explicitly annotated `Db` is outside-only.
+
+The existing native execution methods (`execIO`, `execPg`, `execMs`, `execMy`)
+interpret transaction blocks automatically. Each connection also exposes
+`conn.withTransaction do ...` for ordinary `IO` code. Both forms use the engine's
+default isolation mode and reject an already-active transaction. The connection
+must be used exclusively throughout the block; the managed transaction guard
+rejects nested or overlapping wrappers but does not synchronize ordinary queries.
+Raw transaction-control commands, implicitly committing DDL, and nontransactional
+tables are outside the atomicity contract. MySQL tables should use InnoDB.
+
+**Budgets count the body's query/write operations.** The block above costs two
+operations, plus one for the query after it; BEGIN, COMMIT/ROLLBACK, and driver
+state checks are additional control work outside that bill. Native commit failures are reported, including
+uncertain outcomes when acknowledgement is lost. Failed cleanup retires an
+unusable connection and reports both the original error and cleanup failure;
+the driver does not automatically retry the transaction.
+
+The evaluator's `runOutcomeSt` exposes the result, final table environment, and
+attempted operation count, including on failure. A failed transaction restores
+its complete entry environment while retaining writes committed before that
+block. `DbP.transaction_failure` proves this rollback rule for the evaluator;
+success adequacy and budget proofs continue to count all body operations.
+Savepoints and configurable isolation levels are not yet implemented.
+
+### User-raised errors
+
+`Db.raise message` works both inside and outside a transaction, with a message
+computed by ordinary Lean code. Inside a transaction it triggers rollback;
+outside it stops the program while preserving earlier writes. In either case,
+the remaining program does not execute.
+
+```lean
+def updateChecked (first second : UpdateStmt MyDb "Customers" CustomersS) :
+    Db MyDb 2 (Nat × Nat) := db! {
+  let changed ← transaction {
+    let a ← first.execUpdate
+    let _checked ← if a == 1 then Db.pure ()
+      else Db.raise s!"Expected one updated customer, got {a}"
+    let b ← second.execUpdate
+    return (a, b)
+  }
+  return changed
+}
+
+-- The same operation can abort a program without any transaction.
+def cancelled (reason : String) : Db MyDb 0 Unit := db! {
+  raise reason
+  return ()
+}
+```
+
+The `raise message` clause calls `Db.raise message`. Raising costs zero database
+operations and emits no SQL; preceding query/write operations keep their bill.
+Its Lean result type is `Unit`, but it never returns normally during execution.
+Following clauses are still typechecked and included in the conservative bill.
+The evaluator returns `EvalError.userError message`, and native execution raises
+an `IO.userError` carrying the message. The transaction wrapper performs any
+required rollback before propagating it. `runOutcomeSt` retains the resulting
+table state and attempted operation count even when the program raises.
 
 ## Building
 
@@ -603,8 +693,9 @@ corpus sweeps, independent edge-case regressions, and four-engine integration te
 Known limitations: trailing `orderBy` after
 `distinct`/`limit` is pipeline-only (the comprehension fuses ordering before
 them). Integer AVG semantics differ by engine, including in HAVING predicates.
-Transactions currently require explicit raw BEGIN/COMMIT/ROLLBACK statements;
-queries materialize all result rows, and PostgreSQL Db execution is sequential.
-Possible next steps: transaction helpers, sized native budgets, COALESCE/casts,
+Transaction blocks support top-level scopes; savepoints and configurable isolation
+levels remain future work. Queries materialize all result rows, and PostgreSQL Db
+execution is sequential.
+Possible next steps: sized native budgets, COALESCE/casts,
 UNION ALL, returned/generated keys and upsert, followed by CTEs, window functions,
 streaming, prepared-statement reuse, and applicative pipeline batching.

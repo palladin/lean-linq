@@ -344,7 +344,7 @@ anywhere. -/
 
 example {res : {p : List (Values [("Id", SqlType.long), ("Name", SqlType.string)])
         × TableEnv PlayCtx.tables × Nat //
-      ∀ k₀, Wp.sp (dbWp (DbE.fetch (adults.limit 10)))
+      ∀ k₀, Wp.sp (dbOpWp (DbOp.fetch (adults.limit 10)))
         p.1 (TableEnv.sizes demoEnv) k₀ (TableEnv.sizes p.2.1) (k₀ + p.2.2)}}
     (_h : ((adults.limit 10).execQuery).runWithP .nil none demoEnv = .ok res) :
     res.val.1.length ≤ 10 :=
@@ -458,6 +458,108 @@ example {res : {p : Nat × TableEnv PlayCtx.tables × Nat //
     simp only [gradeEvalNorm, Nat.mul_one]
   rw [hg] at hn
   omega
+
+/-! ## Scoped transactions
+
+Only the two UPDATEs below share a transaction; the SELECTs before and after
+are outside it. The bill is 4 = SELECT + UPDATE + UPDATE + SELECT. BEGIN,
+COMMIT/ROLLBACK, and driver state checks are additional control work.
+If the transaction body fails, it rolls back and the final SELECT does not run. -/
+
+namespace TransactionExample
+
+abbrev AccountS : Schema := [("Id", .int), ("Balance", .int)]
+abbrev C : Ctx := { tables := [("Accounts", AccountS)] }
+def accounts : Table "Accounts" AccountS := ⟨⟩
+
+def changeBalance (id amount : Int) : UpdateStmt C "Accounts" AccountS :=
+  accounts.update
+    |>.setWith "Balance" (fun a => a["Balance"] + SqlExpr.int amount)
+    |>.where' (fun a => a["Id"] ==. SqlExpr.int id)
+
+def allAccounts : Query C AccountS :=
+  Query.from' (ts := C) accounts
+    |>.orderBy (fun a => [a["Id"].asc])
+
+def program : Db C 4 (List (Values AccountS) × List (Values AccountS)) := db! {
+  let before ← allAccounts.execQuery
+
+  let _changed ← transaction {
+    let first ← (changeBalance 1 (-10)).execUpdate
+    let second ← (changeBalance 2 10).execUpdate
+    return (first, second)
+  }
+
+  let after ← allAccounts.execQuery
+  return (before, after)
+}
+
+def demoEnv : TableEnv C.tables :=
+  .cons [.cons 1 (.cons 100 .nil), .cons 2 (.cons 50 .nil)] .nil
+
+-- Run the pure model: balances before [100, 50], after [90, 60].
+#eval (program.exec 4 demoEnv).map fun (before, after) =>
+  (before.map (fun (a : Values AccountS) => a["Balance"]),
+   after.map (fun (a : Values AccountS) => a["Balance"]))
+
+-- Preview each statement's SQLite SQL and bindings. The native driver sends
+-- separate commands in this order on success:
+-- SELECT; BEGIN; UPDATE; UPDATE; COMMIT; SELECT.
+-- Each UPDATE has its own :p0/:p1 bindings; the same SELECT runs before/after.
+#eval allAccounts.toSql .sqlite
+#eval (changeBalance 1 (-10)).toSql .sqlite
+#eval (changeBalance 2 10).toSql .sqlite
+
+/-! ## Raising application errors
+
+`Db.raise` accepts any computed message and works in either scope. A user
+condition can raise just like an engine failure; no special rollback API is
+needed. Raising performs no database operation and costs zero. -/
+
+def checkedProgram : Db C 2 (Nat × Nat) := transaction {
+  let first ← (changeBalance 1 (-10)).execUpdate
+  let _checked ← if first == 1 then Db.pure ()
+    else Db.raise s!"Expected one source account, got {first}"
+  let second ← (changeBalance 2 10).execUpdate
+  return (first, second)
+}
+
+#eval checkedProgram.exec 2 demoEnv   -- Except.ok (1, 1)
+
+-- Outside a transaction, an error retains the first write.
+def raiseOutside (reason : String) : Db C 1 Unit := db! {
+  let _updated ← (changeBalance 1 (-10)).execUpdate
+  raise reason
+  return ()
+}
+
+-- Preserve the outside write, undo both inside writes, skip the last update.
+-- The bill includes all four writes; only three are attempted before failure.
+def raiseInside (reason : String) : Db C 4 Unit := db! {
+  let _before ← (changeBalance 1 (-5)).execUpdate
+  let _changed ← transaction {
+    let _first ← (changeBalance 1 (-10)).execUpdate
+    let _second ← (changeBalance 2 10).execUpdate
+    raise reason
+    return ()
+  }
+  let _after ← (changeBalance 2 10).execUpdate
+  return ()
+}
+
+private def describeOutcome (outcome : DbOutcome C Unit) :
+    Except EvalError Unit × List Int × Nat :=
+  match outcome.state with
+  | .cons rows .nil =>
+      (outcome.result, rows.map (fun (a : Values AccountS) => a["Balance"]),
+       outcome.count)
+
+-- Error with balances [90, 50], one attempted write.
+#eval describeOutcome ((raiseOutside "Cancelled by user").runOutcomeSt .nil none demoEnv)
+-- Error with balances [95, 50], three attempted writes.
+#eval describeOutcome ((raiseInside "Business rule rejected the change").runOutcomeSt .nil none demoEnv)
+
+end TransactionExample
 
 /-! ## The type system at work — uncomment any line for the error
 
