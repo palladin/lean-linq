@@ -806,6 +806,7 @@ def DbP.runOutcomeSt (ps : ParamEnv c.params) (now : Option String)
   | .outside => foldDbOutcome (DbE.applyOutcome ps now) x env
   | .inside => foldDbOutcome (DbOp.applyOutcome ps now) x env
 
+set_option backward.isDefEq.respectTransparency false in
 /-- Full-state rollback and skipped continuation for a failed transaction.
 This failure rule is separate from the success-only `Wp.sp` contract. -/
 theorem DbP.transaction_failure {α β : Type} {bodyWp : Wp β}

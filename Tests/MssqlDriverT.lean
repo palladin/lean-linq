@@ -2,6 +2,7 @@ import LeanLinq.Driver.Mssql
 import Tests.DriverSweep
 import Tests.DriverRegressions
 import Tests.TransactionDriver
+import Tests.SchemaDriver
 
 /-! # Native SQL Server driver — differential test (`lake exe mssqldriver`)
 
@@ -19,6 +20,22 @@ def msPort := 14333
 def msUser := "sa"
 def msPass := "Test123!Strong"
 
+private def concurrentCreation (conn : Ms.Conn) : IO Unit := do
+  conn.execRaw "DROP TABLE IF EXISTS ddl_concurrent"
+  let connections ← (List.range 4).mapM fun _ =>
+    Ms.connect msHost msPort msUser msPass (db := "testdb")
+  let gate ← IO.Promise.new
+  let tasks ← connections.mapM fun worker => IO.asTask (prio := .dedicated) do
+    try
+      discard <| IO.wait gate.result!
+      worker.createTable (⟨⟩ : Table "ddl_concurrent" [("id", .int)])
+        (primaryKey := [.column "id"])
+    finally worker.close
+  gate.resolve ()
+  for task in tasks do IO.ofExcept task.get
+  conn.execRaw "INSERT INTO ddl_concurrent VALUES (1); DROP TABLE ddl_concurrent"
+  IO.println "DDL(sqlServer): concurrent creation passed on four connections"
+
 def main : IO UInt32 := do
   -- probe against master (also creates testdb on first contact, like the
   -- CLI harness's probe)
@@ -32,6 +49,14 @@ def main : IO UInt32 := do
     IO.eprintln "[mssqldriver] SQL Server unreachable — skipped (is `docker compose up -d --wait` running?)"
     return 0
   let conn ← Ms.connect msHost msPort msUser msPass (db := "testdb")
+  concurrentCreation conn
+  conn.createTable (⟨⟩ : Table "ddl_string_convenience" [("id", .string)])
+    (primaryKey := [.column "id"]) (stringLengths := [.column "id" 16])
+  SchemaDriver.run .sqlServer {
+    create := fun statement valid => conn.execCreateTable statement valid
+    query := fun q => conn.query q
+    insert := fun statement => conn.execInsertValues statement
+    execRaw := conn.execRaw }
   TransactionDriver.run .sqlServer {
     withTransaction := fun action => conn.withTransaction action
     execRaw := conn.execRaw

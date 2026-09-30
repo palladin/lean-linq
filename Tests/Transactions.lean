@@ -98,8 +98,10 @@ def outsideHelper : Db C 2 (Nat × Nat) := committed
 def rawCommitted : Db C 2 (Nat × Nat) :=
   FreerD.liftE (spec := dbWp) (DbE.transaction twoWrites)
 #guard (rawCommitted.runCount ee).toOption == some ((2, 1), 2)
+set_option backward.isDefEq.respectTransparency false in
 example : Db C 2 (Nat × Nat) :=
   DbP.relax (mode := .outside) (FreerD.liftE (spec := dbWp) (DbE.transaction twoWrites))
+set_option backward.isDefEq.respectTransparency false in
 #check_failure (DbP.relax (mode := .outside)
   (FreerD.liftE (spec := dbWp) (DbE.transaction twoWrites)) :
   Db C 1 (Nat × Nat))

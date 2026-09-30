@@ -2,6 +2,7 @@ import LeanLinq.Driver.Postgres
 import Tests.DriverSweep
 import Tests.DriverRegressions
 import Tests.TransactionDriver
+import Tests.PgSchema
 
 /-! # Native PostgreSQL driver — differential test (`lake exe pgdriver`)
 
@@ -23,6 +24,7 @@ def main : IO UInt32 := do
       IO.eprintln "[pgdriver] PostgreSQL unreachable — skipped (is `docker compose up -d --wait` running?)"
       return 0
   | some conn =>
+      PgSchemaTests.run conn
       TransactionDriver.run .postgres {
         withTransaction := fun action => conn.withTransaction action
         execRaw := conn.execRaw

@@ -42,6 +42,24 @@ all result sets are drained. -/
 @[extern "ll_tds_exec_raw"]
 opaque Conn.execRaw (conn : @&Conn) (sql : @&String) : IO Unit
 
+/-- Execute typed table creation for SQL Server.
+This does not validate or migrate an existing table. -/
+def Conn.execCreateTable (conn : Conn) (statement : CreateTable name schema)
+    (valid : statement.validFor .sqlServer = true := by decide) : IO Unit :=
+  conn.execRaw (statement.toSql .sqlServer valid)
+
+/-- Create a table from the schema already used by its typed queries. -/
+def Conn.createTable (conn : Conn) (table : Table name schema)
+    (primaryKey : List (PrimaryKeyColumn schema) := []) (ifNotExists := true)
+    (stringLengths : List (StringLength schema) := [])
+    (schemaValid : DDL.validSchema name schema = true := by decide)
+    (primaryKeyDistinct : (primaryKey.map PrimaryKeyColumn.name).Nodup := by decide)
+    (stringLengthsDistinct : (stringLengths.map StringLength.name).Nodup := by decide)
+    (valid : (table.create primaryKey ifNotExists stringLengths schemaValid
+      primaryKeyDistinct stringLengthsDistinct).validFor .sqlServer = true := by decide) : IO Unit :=
+  conn.execCreateTable (table.create primaryKey ifNotExists stringLengths schemaValid
+    primaryKeyDistinct stringLengthsDistinct) valid
+
 @[extern "ll_tds_tx_claim"]
 private opaque claimTransaction (conn : @&Conn) : IO Unit
 

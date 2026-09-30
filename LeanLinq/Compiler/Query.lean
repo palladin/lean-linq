@@ -560,14 +560,13 @@ list. Grouped terminals own their projection; input modes also suppress their
 dead ordering. -/
 def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec s → CompileM String
   | .yield r, acc, k => do
-      let sel ← match k with
-        | .defaultSel | .inputSel => do
+      let sel ← (match k, r with
+        | .defaultSel, r | .inputSel, r => do
             pure (String.intercalate ", " (← r.selectList))
-        | .countSel => pure "COUNT(*)"
-        | .scalarInputSel => match r with
-          | .cons e .nil => do
+        | .countSel, _ => pure "COUNT(*)"
+        | .scalarInputSel, .cons e .nil => do
               let value ← valueWrap e.isPredicate (← e.compile)
-              pure s!"{value} AS {← quote "value"}"
+              pure s!"{value} AS {← quote "value"}")
       let head := if acc.distinct then "SELECT DISTINCT" else "SELECT"
       let orderClause :=
         if acc.orders.isEmpty then ""
@@ -584,10 +583,10 @@ def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec s → CompileM 
       let items ← r.selectList keys
       let ksStr := String.intercalate ", " (← boundKeys.groupByItems)
       let hvStr ← hv.compileClause keys
-      let ownOb ← match k with
+      let ownOb ← (match k with
         | .inputSel | .scalarInputSel => pure ""
         | _ => if ord.isEmpty then pure "" else do
-            pure s!" ORDER BY {String.intercalate ", " (← ord.compileItems keys)}"
+            pure s!" ORDER BY {String.intercalate ", " (← ord.compileItems keys)}")
       let head := if acc.distinct then "SELECT DISTINCT" else "SELECT"
       let innerItems ← (← get).groupItems.toList.mapM fun (name, sql) => do
         pure s!"{sql} AS {← quote name}"
@@ -599,7 +598,7 @@ def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec s → CompileM 
       rest.compileSpine { acc with wheres := acc.wheres.push w } k
   | .order ks rest, acc, k => do
       if ks.isEmpty then return ← rest.compileSpine acc k
-      match k with
+      match (dependent := true) k with
       | .countSel => rest.compileSpine acc .countSel
       | .inputSel => rest.compileSpine acc .inputSel
       | .scalarInputSel => rest.compileSpine acc .scalarInputSel
