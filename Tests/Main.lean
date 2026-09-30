@@ -13,6 +13,7 @@ import Tests.AggregateDml
 import Tests.Transactions
 import Tests.Raise
 import Tests.TransactionLifecycle
+import Tests.DDL
 
 /-! # Golden-test runner
 

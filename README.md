@@ -488,6 +488,72 @@ customers.delete (ts := MyDb) |>.where' (fun c => c["Age"] <. 18)
 -- DELETE FROM "Customers" AS "a0" WHERE ("a0"."Age" < :p0)
 ```
 
+## Creating tables from typed schemas
+
+SQLite, PostgreSQL, MySQL, and SQL Server share the same typed table-creation API.
+Import the corresponding driver (`Sqlite`, `Postgres`, `Mysql`, or `Mssql`):
+
+```lean
+import LeanLinq.Driver.Postgres
+open LeanLinq
+
+abbrev Records : Schema := [("run", .string), ("key", .string), ("value", .string)]
+def records : Table "cloud_records" Records := ⟨⟩
+
+def initialize (conn : Pg.Conn) : IO Unit :=
+  conn.createTable records
+    (primaryKey := [.column "run", .column "key"])
+    (stringLengths := [.column "run" 64, .column "key" 128])
+```
+
+The same call works with `Sqlite.Conn`, `Mysql.Conn`, and `Ms.Conn`.
+`Table.create` builds a `CreateTable name schema` statement without a connection.
+Use `.toSql dialect` (or `.toSqlite`, `.toPostgres`, `.toMysql`, `.toMssql`)
+to render it, and `conn.execCreateTable statement` to execute it.
+
+Each `PrimaryKeyColumn schema` contains a typed reference to a non-nullable
+column. Each `StringLength schema` references a string column, including nullable
+strings. Names resolve with the same compile-time lookup as queries; duplicate
+keys/bounds, missing columns, wrong column types, and zero bounds are rejected.
+All identifiers are quoted, and dialect identifier limits are checked.
+String primary keys require explicit bounds on MySQL and SQL Server.
+
+| Schema primitive | SQLite | PostgreSQL | MySQL | SQL Server |
+| --- | --- | --- | --- | --- |
+| `.int` | INT | INTEGER | INTEGER | INTEGER |
+| `.long` | INT | BIGINT | BIGINT | BIGINT |
+| `.double` | REAL | DOUBLE PRECISION | DOUBLE | FLOAT(53) |
+| `.decimal` | NUMERIC | NUMERIC | DECIMAL(38,3) | DECIMAL(38,3) |
+| `.string` | TEXT | TEXT | LONGTEXT | NVARCHAR(MAX) |
+| `.bool` | INTEGER | BOOLEAN | BOOLEAN | BIT |
+| `.dateTime` | TEXT | TIMESTAMP WITHOUT TIME ZONE | DATETIME(6) | DATETIME2(6) |
+| `.guid` | TEXT | UUID | CHAR(36) | UNIQUEIDENTIFIER |
+
+A string bound selects `VARCHAR(n)` on PostgreSQL/MySQL, `NVARCHAR(n)` on
+SQL Server, and `TEXT CHECK (length(column) <= n)` on SQLite. Bounds count
+characters except on SQL Server, where they count UTF-16 code units.
+SQLite uses `INT` to avoid the implicit ID generation of `INTEGER PRIMARY KEY`.
+Decimals follow the library's milli-unit convention; SQLite NUMERIC affinity
+retains SQLite's floating-point precision limits.
+
+MySQL creation selects InnoDB, DYNAMIC rows, and utf8mb4. Key-size checks assume
+the standard 16 KiB or larger InnoDB page size and allow at most 16 columns /
+3,072 bytes. SQL Server checks the complete clustered key against 32 columns /
+900 bytes. Use strict MySQL SQL mode so oversized values fail instead of being
+truncated. Server permissions, collations, row-size limits, and value ranges
+remain database concerns; a typed schema is not a schema migration.
+
+Creation is idempotent by default; pass `(ifNotExists := false)` to require a new
+table. SQL Server uses TRY/CATCH and suppresses only error 2714 when the named
+table exists, including concurrent creation. The other engines use their native
+`IF NOT EXISTS`. Neither approach validates an existing table's schema. Defaults,
+foreign keys, secondary indexes, and schema-qualified names are not included yet.
+
+Dialect rules: [SQLite CREATE TABLE](https://sqlite.org/lang_createtable.html),
+[PostgreSQL CREATE TABLE](https://www.postgresql.org/docs/16/sql-createtable.html),
+[MySQL InnoDB limits](https://dev.mysql.com/doc/refman/8.4/en/innodb-limits.html),
+[SQL Server limits](https://learn.microsoft.com/en-us/sql/sql-server/maximum-capacity-specifications-for-sql-server).
+
 ## Executing for real: the native drivers
 
 `import LeanLinq.Driver.Sqlite` (a separate lib target — the core library stays

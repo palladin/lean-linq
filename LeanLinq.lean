@@ -4,6 +4,7 @@ import LeanLinq.Core.Monad
 import LeanLinq.Core.Expr
 import LeanLinq.Core.Schema
 import LeanLinq.Core.Table
+import LeanLinq.DDL
 import LeanLinq.Core.Query
 import LeanLinq.Core.Grouped
 import LeanLinq.Notation

@@ -2,6 +2,7 @@ import LeanLinq.Driver.Sqlite
 import Tests.DriverSweep
 import Tests.DriverRegressions
 import Tests.TransactionDriver
+import Tests.SchemaDriver
 
 /-! # Native SQLite driver — differential test (`lake exe sqlitedriver`)
 
@@ -31,6 +32,13 @@ def main : IO UInt32 := do
   let path := "/tmp/leanlinq-driver.db"
   if ← System.FilePath.pathExists path then IO.FS.removeFile path
   let conn ← Sqlite.connect path
+  conn.createTable (⟨⟩ : Table "ddl_string_convenience" [("id", .string)])
+    (primaryKey := [.column "id"]) (stringLengths := [.column "id" 16])
+  SchemaDriver.run .sqlite {
+    create := fun statement valid => conn.execCreateTable statement valid
+    query := fun q => conn.query q
+    insert := fun statement => conn.execInsertValues statement
+    execRaw := conn.execRaw }
   TransactionDriver.run .sqlite {
     withTransaction := fun action => conn.withTransaction action
     execRaw := conn.execRaw

@@ -2,6 +2,7 @@ import LeanLinq.Driver.Mysql
 import Tests.DriverSweep
 import Tests.DriverRegressions
 import Tests.TransactionDriver
+import Tests.SchemaDriver
 
 /-! # Native MySQL driver — differential test (`lake exe mysqldriver`)
 
@@ -22,6 +23,13 @@ def main : IO UInt32 := do
       IO.eprintln "[mysqldriver] MySQL unreachable — skipped (is `docker compose up -d --wait` running?)"
       return 0
   | some conn =>
+  conn.createTable (⟨⟩ : Table "ddl_string_convenience" [("id", .string)])
+    (primaryKey := [.column "id"]) (stringLengths := [.column "id" 16])
+  SchemaDriver.run .mysql {
+    create := fun statement valid => conn.execCreateTable statement valid
+    query := fun q => conn.query q
+    insert := fun statement => conn.execInsertValues statement
+    execRaw := conn.execRaw }
   TransactionDriver.run .mysql {
     withTransaction := fun action => conn.withTransaction action
     execRaw := conn.execRaw

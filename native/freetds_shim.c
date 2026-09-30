@@ -479,6 +479,9 @@ LEAN_EXPORT lean_obj_res ll_tds_col_text(b_lean_obj_arg conn, uint32_t i,
     if (!data) return lean_io_result_mk_ok(lean_mk_string(""));
     int type = dbcoltype(c->dbproc, col);
     DBINT len = dbdatlen(c->dbproc, col);
+    /* dbconvert(..., SYBCHAR, positive capacity) pads a zero-length input
+     * with spaces. NULL was handled above; an empty value must stay empty. */
+    if (len == 0) return lean_io_result_mk_ok(lean_mk_string(""));
     /* UCS-2 → UTF-8 expands at most 1.5×; fixed-width types (money,
      * datetime, decimal) render well under 256 — 2×len + 64 covers all */
     size_t cap = (size_t)(len > 0 ? (size_t)len * 2 + 64 : 0);
