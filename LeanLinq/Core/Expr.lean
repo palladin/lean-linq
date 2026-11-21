@@ -407,7 +407,7 @@ instance : FlagFits true true := ⟨id, id⟩
 literal); a user parameter with such a name would silently alias a
 literal's placeholder in the compiled SQL, so the door refuses them. -/
 def _root_.String.isReservedParamName (s : String) : Bool :=
-  match s.data with
+  match s.toList with
   | 'p' :: rest => !rest.isEmpty && rest.all Char.isDigit
   | _ => false
 
