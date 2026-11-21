@@ -66,7 +66,7 @@ theorem le_trans {w₁ w₂ w₃ : Wp α} (h₁ : w₁.le w₂) (h₂ : w₂.le 
 themselves needed, because `le` quantifies over every post. -/
 theorem bind_le_bind_left {w₁ w₂ : Wp α} (f : α → Wp β) (h : w₁.le w₂) :
     (w₁.bind f).le (w₂.bind f) :=
-  fun post σ k hw => h _ σ k hw
+  fun _ σ k hw => h _ σ k hw
 
 end Wp
 

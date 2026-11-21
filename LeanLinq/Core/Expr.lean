@@ -75,6 +75,9 @@ the whole AST is one mutual family, so a correlated subquery is simply a
 This is what binders at the opaque atom (`ρ s → …`) buy: the mutual
 occurrences all sit in positive positions. Construct them with
 `SqlExpr.inQuery`/`.exists'`/`ScalarQuery.embed`. -/
+-- Constructor binders such as `inst` are named so that patterns can match them by name
+-- (`.fromT (inst := i) ..`), which the unused-variables linter can't see.
+set_option linter.unusedVariables false in
 mutual
 
 /-- Intrinsically-typed SQL expressions (see the section comment above).

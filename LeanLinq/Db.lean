@@ -76,6 +76,9 @@ namespace LeanLinq
 
 /-! ## The effect signature -/
 
+-- Constructor binders such as `inst` are named so that patterns can match them by name
+-- (`.insert (inst := _) i`), which the unused-variables linter can't see.
+set_option linter.unusedVariables false in
 /-- Seven query/write operations, plus a user error that issues no statement.
 The signature is *data* — `dbOpWp` gives each op its graded spec, the
 model gives each op a certified handler, and the drivers give each op
@@ -580,7 +583,7 @@ parents still cost bill 1. This is how N+1 collapses to 1+1. -/
 def DbP.fetchFor {mode : ScopeMode} [SqlLit t] (keys : List t.interp)
     (mk : (∀ {ρ}, List (SqlExprP ρ c ⟨t, true⟩)) → Query c s) :
     DbM mode c 1 (List (Values s)) :=
-  DbP.map id (DbP.fetch (mk fun {ρ} => keys.map fun k => .widen (SqlLit.lit k)))
+  DbP.map id (DbP.fetch (mk fun {_} => keys.map fun k => .widen (SqlLit.lit k)))
 
 /-- Fetch at most `n` rows, **with the bound in the type**: applies
 `LIMIT n` to the query and returns a length-refined list — the evidence
@@ -893,7 +896,7 @@ theorem sizes_of_insert {n : String} {s : Schema} [inst : HasTable c.tables n s]
     TableEnv.sizes env' n ≤ TableEnv.sizes env n + 1 ∧ k = 1 := by
   unfold InsertStmt.applyCount at h
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure,
-      Functor.map, Except.map, throw, throwThe, MonadExceptOf.throw] at h
+      throw, throwThe, MonadExceptOf.throw] at h
   split at h
   · contradiction
   · split at h
@@ -922,7 +925,7 @@ theorem sizes_of_update {n : String} {s : Schema} [inst : HasTable c.tables n s]
     k ≤ TableEnv.sizes env n := by
   unfold UpdateStmt.applyCount at h
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure,
-      Functor.map, Except.map, throw, throwThe, MonadExceptOf.throw] at h
+      throw, throwThe, MonadExceptOf.throw] at h
   split at h
   · contradiction
   · split at h
@@ -952,8 +955,7 @@ theorem sizes_of_delete {n : String} {s : Schema} [inst : HasTable c.tables n s]
     TableEnv.sizes env' n ≤ TableEnv.sizes env n ∧
     TableEnv.sizes env n ≤ TableEnv.sizes env' n + k := by
   unfold DeleteStmt.applyCount at h
-  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure,
-      Functor.map, Except.map, throw, throwThe, MonadExceptOf.throw] at h
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   split at h
   all_goals first
     | contradiction
@@ -979,8 +981,7 @@ theorem sizes_of_insertSelect {n : String} {s : Schema}
     TableEnv.sizes env' n ≤ TableEnv.sizes env n + k ∧
     k ≤ (Query.gcard st.source).eval (TableEnv.sizes env) := by
   unfold InsertSelectStmt.applyCount at h
-  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure,
-      Functor.map, Except.map, throw, throwThe, MonadExceptOf.throw] at h
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   split at h
   all_goals first
     | contradiction
@@ -1011,7 +1012,7 @@ theorem sizes_of_insertValues {n : String} {s : Schema}
     k = st.rows.length := by
   unfold InsertValuesStmt.applyCount at h
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure,
-      Functor.map, Except.map, throw, throwThe, MonadExceptOf.throw] at h
+      throw, throwThe, MonadExceptOf.throw] at h
   split at h
   · contradiction
   · injection h with h
