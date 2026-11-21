@@ -25,3 +25,13 @@ def countAdults : Db AppCtx 1 Nat := db! {
   let rows ← adults.execQuery
   return rows.length
 }
+
+/-! Table creation takes a default `by decide` proof that the statement fits
+the dialect, which has to reduce from inside a module. -/
+
+def peopleTable : Table "people" [("Id", .int)] := ⟨⟩
+
+example : String := peopleTable.create.toSqlite
+example : String := peopleTable.create.toPostgres
+example : String := peopleTable.create.toMysql
+example : String := peopleTable.create.toMssql

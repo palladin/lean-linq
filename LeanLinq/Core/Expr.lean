@@ -360,14 +360,14 @@ abbrev SpineQ : Ctx → Terminal → Schema → Type := SpineQP AliasOf
 abbrev QueryA : Ctx → Schema → Type := QueryP AliasOf
 abbrev ScalarA : Ctx → SqlType → Type := ScalarQueryP AliasOf
 
-private def RowP.ofAtomAux (a : ρ s') : (s : Schema) → RowP ρ ts s
+def RowP.ofAtomAux (a : ρ s') : (s : Schema) → RowP ρ ts s
   | [] => .nil
   | (nm, c) :: s => .cons (.field c a nm) (RowP.ofAtomAux a s)
 
 /-- The row a binder's atom stands for: every column a `field` reference
 through the atom. The smart constructors wrap raw binders with this, so
 surface lambdas receive rows while the AST stores only the opaque atom. -/
-@[no_expose] def RowP.ofAtom {s : Schema} (a : ρ s) : RowP ρ ts s :=
+def RowP.ofAtom {s : Schema} (a : ρ s) : RowP ρ ts s :=
   RowP.ofAtomAux a s
 
 /-- Total positional lookup in ordinary and grouped expression rows. -/

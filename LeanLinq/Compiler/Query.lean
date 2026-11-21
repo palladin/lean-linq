@@ -16,7 +16,7 @@ def JoinKind.token : JoinKind → String
 
 /-- A FROM item: `isJoin` marks JOIN clauses (attached with a space) versus
 plain sources (comma-separated). -/
-private def renderFroms (froms : Array (Bool × String)) : String :=
+def renderFroms (froms : Array (Bool × String)) : String :=
   match froms.toList with
   | [] => ""
   | (_, first) :: rest =>
@@ -24,7 +24,7 @@ private def renderFroms (froms : Array (Bool × String)) : String :=
       acc ++ (if isJoin then " " else ", ") ++ s) ""
     s!" FROM {first}{tail}"
 
-private def renderWheres (wheres : Array String) : String :=
+def renderWheres (wheres : Array String) : String :=
   if wheres.isEmpty then ""
   else s!" WHERE {String.intercalate " AND " wheres.toList}"
 
@@ -88,7 +88,7 @@ inductive SelSpec : Schema → Type where
 /-- The SELECT list of a boundary derived table: every column of the
 marker row `alias.col AS col` — rendered textually (a marker `field`
 compiles to exactly this), keeping the walk's recursion structural. -/
-private def aliasSelect (alias : String) : Schema → CompileM (List String)
+def aliasSelect (alias : String) : Schema → CompileM (List String)
   | [] => pure []
   | (nm, _) :: s => do
       return s!"{← quote alias}.{← quote nm} AS {← quote nm}" :: (← aliasSelect alias s)
@@ -145,21 +145,21 @@ def GroupCompileEnv.get (env : GroupCompileEnv ks) (ref : KeyRef ks c) : Compile
 def GroupCompileEnv.isPredicate (env : GroupCompileEnv ks) {c : SqlType} (ref : KeyRef ks c) : Bool :=
   (env.get ref).isPredicate
 
-private def projectGroupValue (alias sql : String) : CompileM String := do
+def projectGroupValue (alias sql : String) : CompileM String := do
   let name := s!"g{(← get).groupItems.size}"
   modify fun st => { st with groupItems := st.groupItems.push (name, sql) }
   return s!"{← quote alias}.{← quote name}"
 
 /-- MySQL must retain the derived projection through prepared comparisons and
 aggregate arguments instead of merging it into the containing statement. -/
-private def projectionBarrier : CompileM String := do
+def projectionBarrier : CompileM String := do
   return if (← read) == .mysql then " LIMIT 18446744073709551615" else ""
 
 mutual
 
 /-- Render an expression to SQL text for the ambient dialect, allocating a
 named parameter for every literal (never inlining values). -/
-@[no_expose] def SqlExprP.compile : SqlExpr ts c → CompileM String
+def SqlExprP.compile : SqlExpr ts c → CompileM String
   | .intC i        => pushParam (.int i)
   | .longC i       => pushParam (.long i)
   | .doubleC f     => pushParam (.double f)
@@ -290,7 +290,7 @@ named parameter for every literal (never inlining values). -/
           | .year => s!"(YEAR({y}) - YEAR({x}))"
 
 
-@[no_expose] def GroupedExprP.compile (keys : GroupCompileEnv ks) :
+def GroupedExprP.compile (keys : GroupCompileEnv ks) :
     GroupedExprP AliasOf ts ks c → CompileM String
   | .intC i        => pushParam (.int i)
   | .longC i       => pushParam (.long i)
@@ -420,20 +420,20 @@ named parameter for every literal (never inlining values). -/
           | .month => s!"((YEAR({y}) - YEAR({x})) * 12 + (MONTH({y}) - MONTH({x})))"
           | .year => s!"(YEAR({y}) - YEAR({x}))"
 
-@[no_expose] def SqlExprP.compileList :
+def SqlExprP.compileList :
     List ((p : SqlType) × SqlExpr ts p) → CompileM (List String)
   | [] => pure []
   | ⟨_, e⟩ :: es => return (← valueWrap e.isPredicate (← e.compile)) :: (← SqlExprP.compileList es)
 
 /-- Render a projected row as a SELECT list: `expr AS name` per column. -/
-@[no_expose] def RowP.selectList : {s : Schema} → Row ts s → CompileM (List String)
+def RowP.selectList : {s : Schema} → Row ts s → CompileM (List String)
   | [], .nil => pure []
   | (name, _) :: _, .cons e r => do
       let item ← valueWrap e.isPredicate (← e.compile)
       let rest ← r.selectList
       return s!"{item} AS {← quote name}" :: rest
 
-@[no_expose] def compileOrderKeyItems : List (OrderKey ts) → CompileM (List String)
+def compileOrderKeyItems : List (OrderKey ts) → CompileM (List String)
   | [] => pure []
   | ⟨_, e, dir⟩ :: ks => do
       let db ← read
@@ -446,7 +446,7 @@ named parameter for every literal (never inlining values). -/
       return item :: (← compileOrderKeyItems ks)
 
 /-- Render each key once as a local projected column; lookup remains total. -/
-@[no_expose] def RowP.compileGroupKeys (alias : String) : Row ts ks → CompileM (GroupKeyEnv ks)
+def RowP.compileGroupKeys (alias : String) : Row ts ks → CompileM (GroupKeyEnv ks)
   | .nil => pure .nil
   | .cons e rest => do
       let scalarSql ← withProjectedSource do valueWrap e.isPredicate (← e.compile)
@@ -454,27 +454,27 @@ named parameter for every literal (never inlining values). -/
       let tail ← rest.compileGroupKeys alias
       return .cons { sql, isPredicate := false } tail
 
-@[no_expose] def GroupedExprsP.compileList (keys : GroupCompileEnv ks) :
+def GroupedExprsP.compileList (keys : GroupCompileEnv ks) :
     GroupedExprsP AliasOf ts ks → CompileM (List String)
   | .nil => pure []
   | .cons e rest => do
       return (← valueWrap (e.isPredicate keys.isPredicate) (← e.compile keys)) ::
         (← rest.compileList keys)
 
-@[no_expose] def GroupedRowP.selectList (keys : GroupCompileEnv ks) :
+def GroupedRowP.selectList (keys : GroupCompileEnv ks) :
     {s : Schema} → GroupedRowP AliasOf ts ks s → CompileM (List String)
   | [], .nil => pure []
   | (name, _) :: _, .cons e rest => do
       let item ← valueWrap (e.isPredicate keys.isPredicate) (← e.compile keys)
       return s!"{item} AS {← quote name}" :: (← rest.selectList keys)
 
-@[no_expose] def GroupedHavingP.compileClause (keys : GroupCompileEnv ks) :
+def GroupedHavingP.compileClause (keys : GroupCompileEnv ks) :
     GroupedHavingP AliasOf ts ks → CompileM String
   | .none => pure ""
   | .some e => do
       return s!" HAVING {← predWrap (e.isPredicate keys.isPredicate) (← e.compile keys)}"
 
-@[no_expose] def GroupedOrdersP.compileItems (keys : GroupCompileEnv ks) :
+def GroupedOrdersP.compileItems (keys : GroupCompileEnv ks) :
     GroupedOrdersP AliasOf ts ks → CompileM (List String)
   | .nil => pure []
   | .cons e dir rest => do
@@ -486,7 +486,7 @@ named parameter for every literal (never inlining values). -/
 
 /-- Compile a full query. Aggregate inputs discard dead ordering through
 projection/DISTINCT boundaries; LIMIT restores ordering needed to choose rows. -/
-@[no_expose] def QueryP.compileStmt (dropOrders : Bool := false) : QueryA ts s → CompileM String
+def QueryP.compileStmt (dropOrders : Bool := false) : QueryA ts s → CompileM String
   | .spine sp => sp.compileSpine {} (if dropOrders then .inputSel else .defaultSel)
   -- spines assemble with the DISTINCT flag …
   | .distinctC (.spine sp) =>
@@ -562,7 +562,7 @@ WHERE conjuncts until the terminal, then assemble one flat SELECT. The third
 argument (`SelSpec`) tells a *plain* terminal what to render as its SELECT
 list. Grouped terminals own their projection; input modes also suppress their
 dead ordering. -/
-@[no_expose] def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec s → CompileM String
+def SpineQP.compileSpine : SpineQ ts g s → StmtAcc → SelSpec s → CompileM String
   | .yield r, acc, k => do
       let sel ← (match k, r with
         | .defaultSel, r | .inputSel, r => do
@@ -635,7 +635,7 @@ dead ordering. -/
         { acc with froms := acc.froms.push (false, item) } k
 
 /-- Compile a scalar aggregate query. -/
-@[no_expose] def ScalarQueryP.compileScalar : ScalarA ts c → CompileM String
+def ScalarQueryP.compileScalar : ScalarA ts c → CompileM String
   | .countQ sp => sp.compileSpine {} .countSel
   | .aggQ op sp => do
       -- Preserve the query's input projection before applying the aggregate.
@@ -664,7 +664,7 @@ export QueryP (compileStmt)
 end Query
 
 
-private def runCompile (m : CompileM String) (db : DatabaseType) : CompiledSql :=
+def runCompile (m : CompileM String) (db : DatabaseType) : CompiledSql :=
   let (sql, st) := Id.run ((m.run db).run {})
   { sql, params := st.params }
 
@@ -677,7 +677,7 @@ def runCompileChecked (m : CompileM String) (db : DatabaseType) : Except Compile
 
 /-- Low-level, unchecked SQL rendering retained for inspection and compatibility.
 Use `toSqlChecked` for executable SQL; native drivers use the checked path. -/
-@[no_expose] def Query.toSql (q : Query ts s) (db : DatabaseType := .sqlite) : CompiledSql :=
+def Query.toSql (q : Query ts s) (db : DatabaseType := .sqlite) : CompiledSql :=
   runCompile (q AliasOf).compileStmt db
 
 /-- Compile a query, reporting unsupported correlated FROM sources explicitly. -/
@@ -695,7 +695,7 @@ export Query (toSql toSqlChecked toSqlite toSqlServer toPostgres)
 end QueryB
 
 /-- Compile a scalar query for the given dialect. -/
-@[no_expose] def ScalarQuery.toSql (sq : ScalarQuery ts c) (db : DatabaseType := .sqlite) : CompiledSql :=
+def ScalarQuery.toSql (sq : ScalarQuery ts c) (db : DatabaseType := .sqlite) : CompiledSql :=
   runCompile (sq AliasOf).compileScalar db
 
 def ScalarQuery.toSqlChecked (sq : ScalarQuery ts c) (db : DatabaseType := .sqlite) : Except CompileError CompiledSql :=

@@ -45,7 +45,7 @@ def CmpOp.holds (op : CmpOp) (o : Ordering) : Bool :=
   | .gt => o == .gt
   | .ge => o != .lt
 
-private def intArith (op : ArithOp) (a b : Int) : Except EvalError (Nullable .int) :=
+def intArith (op : ArithOp) (a b : Int) : Except EvalError (Nullable .int) :=
   match op with
   | .add => pure (some (a + b))
   | .sub => pure (some (a - b))
@@ -57,7 +57,7 @@ rescales and division pre-scales; integer and decimal division truncate
 toward zero (`Int.tdiv` — SQL's direction, not Lean's Euclidean `/`);
 division by zero is an `EvalError`, not NULL — for doubles too (the
 PostgreSQL/SQL Server behavior; SQLite yields NULL instead). -/
-@[no_expose] def SqlPrim.arithV : (t : SqlPrim) → ArithOp → t.interp → t.interp →
+def SqlPrim.arithV : (t : SqlPrim) → ArithOp → t.interp → t.interp →
     Except EvalError (Nullable t)
   | .int, op, a, b => intArith op a b
   | .long, op, a, b => intArith op a b
@@ -75,14 +75,14 @@ PostgreSQL/SQL Server behavior; SQLite yields NULL instead). -/
       | .div => if b == 0 then .error .divByZero else pure (some ((a * 1000).tdiv b))
   | t, op, _, _ => .error (.unsupported s!"arith {repr op}" t)
 
-private def SqlPrim.sumV : (t : SqlPrim) → List t.interp → Except EvalError (Nullable t)
+def SqlPrim.sumV : (t : SqlPrim) → List t.interp → Except EvalError (Nullable t)
   | .int, vs => pure (some (vs.foldl (· + ·) 0))
   | .long, vs => pure (some (vs.foldl (· + ·) 0))
   | .double, vs => pure (some (vs.foldl (· + ·) 0))
   | .decimal, vs => pure (some (vs.foldl (· + ·) 0))
   | t, _ => .error (.unsupported "SUM" t)
 
-private def SqlPrim.avgV : (t : SqlPrim) → List t.interp → Except EvalError (Nullable t)
+def SqlPrim.avgV : (t : SqlPrim) → List t.interp → Except EvalError (Nullable t)
   | .int, vs => pure (some ((vs.foldl (· + ·) 0).tdiv vs.length))
   | .long, vs => pure (some ((vs.foldl (· + ·) 0).tdiv vs.length))
   | .double, vs => pure (some (vs.foldl (· + ·) 0 / Float.ofNat vs.length))
@@ -92,7 +92,7 @@ private def SqlPrim.avgV : (t : SqlPrim) → List t.interp → Except EvalError 
 /-- Fold an aggregate over the non-NULL values of a group (SQL semantics:
 NULLs are ignored, an all-NULL/empty group aggregates to NULL). MIN/MAX use
 the column order, so they work for every type; SUM/AVG only for numeric. -/
-@[no_expose] def SqlPrim.aggV : (t : SqlPrim) → Aggregate t → List t.interp → Except EvalError (Nullable t)
+def SqlPrim.aggV : (t : SqlPrim) → Aggregate t → List t.interp → Except EvalError (Nullable t)
   | _, _, [] => pure none
   | t, .min, v :: vs =>
       pure (some (vs.foldl (fun acc x => if t.cmpV x acc == .lt then x else acc) v))

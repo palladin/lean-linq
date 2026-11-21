@@ -19,15 +19,15 @@ def validSchema (name : String) (schema : Schema) : Bool :=
   validName name && !schema.isEmpty && decide (schema.map Prod.fst).Nodup &&
     schema.all (fun column => validName column.1)
 
-private def utf16Length (s : String) : Nat :=
+def utf16Length (s : String) : Nat :=
   s.toList.foldl (fun n c => n + if c.toNat > 0xffff then 2 else 1) 0
 
 /-- Dialect identifier limits. Temporary SQL Server tables are outside this
 API; MySQL metadata identifiers only support BMP characters. -/
-@[no_expose] def nameFits (db : DatabaseType) (name : String) : Bool :=
+def nameFits (db : DatabaseType) (name : String) : Bool :=
   match db with
   | .sqlite => true
-  | .postgres => name.toUTF8.size ≤ 63
+  | .postgres => name.utf8ByteSize ≤ 63
   | .sqlServer => utf16Length name ≤ 128
   | .mysql => name.length ≤ 64 && name.toList.getLast? != some ' ' &&
       name.toList.all (fun c => c.toNat ≤ 0xffff)
@@ -36,7 +36,7 @@ def namesFit (db : DatabaseType) (name : String) (schema : Schema) : Bool :=
   nameFits db name && schema.all (fun column => nameFits db column.1) &&
     (db != .sqlServer || name.toList.head? != some '#')
 
-private def columnType (db : DatabaseType) (type : SqlPrim) (length : Option Nat) : String :=
+def columnType (db : DatabaseType) (type : SqlPrim) (length : Option Nat) : String :=
   match db, type with
   | .sqlite, .int | .sqlite, .long => "INT"
   | .sqlite, .double => "REAL"
@@ -124,7 +124,7 @@ def Table.create (_ : Table name schema) (primaryKey : List (PrimaryKeyColumn sc
 def CreateTable.stringLength (statement : CreateTable name schema) (column : String) : Option Nat :=
   (statement.stringLengths.find? (·.name == column)).map (·.length)
 
-private def keyBytes (db : DatabaseType) (statement : CreateTable name schema)
+def keyBytes (db : DatabaseType) (statement : CreateTable name schema)
     (column : PrimaryKeyColumn schema) : Nat :=
   match column.type with
   | .int => 4
@@ -137,7 +137,7 @@ private def keyBytes (db : DatabaseType) (statement : CreateTable name schema)
 /-- Static dialect checks. MySQL targets InnoDB/DYNAMIC with utf8mb4 and
 the standard 16 KiB (or larger) page size. SQL Server uses a clustered PK.
 Server permissions, collations, row limits and existing objects still apply. -/
-@[no_expose] def CreateTable.validFor (statement : CreateTable name schema) (db : DatabaseType) : Bool :=
+def CreateTable.validFor (statement : CreateTable name schema) (db : DatabaseType) : Bool :=
   DDL.namesFit db name schema &&
   statement.stringLengths.all (fun column => column.length ≤ match db with
     | .sqlite => 1000000000
@@ -156,7 +156,7 @@ Server permissions, collations, row limits and existing objects still apply. -/
 are checked before SQL can be generated. Creation never validates or migrates
 an existing table. SQL Server catches only the existing-table error, including
 when another initializer creates the same table concurrently. -/
-@[no_expose] def CreateTable.toSql (statement : CreateTable name schema) (db : DatabaseType)
+def CreateTable.toSql (statement : CreateTable name schema) (db : DatabaseType)
     (_valid : statement.validFor db = true := by decide) : String :=
   let quote := db.quoteIdent
   let columns := schema.map fun (name, type) =>

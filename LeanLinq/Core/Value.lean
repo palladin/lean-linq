@@ -339,9 +339,9 @@ def civilFromDays (z : Int) : Int × Int × Int :=
   let m := mp + (if mp < 10 then 3 else -9)
   (yoe + era * 400 + (if m ≤ 2 then 1 else 0), m, d)
 
-private def pad2 (n : Int) : String := if n < 10 then s!"0{n}" else s!"{n}"
+def pad2 (n : Int) : String := if n < 10 then s!"0{n}" else s!"{n}"
 
-private def padYear (n : Int) : String :=
+def padYear (n : Int) : String :=
   let digits := toString n.natAbs
   let padded := String.ofList (List.replicate (4 - digits.length) '0') ++ digits
   if n < 0 then "-" ++ padded else padded
@@ -351,7 +351,7 @@ date-only strings) — date arithmetic preserves it, as engines do. -/
 def timeOfDay (s : String) : String :=
   if s.length ≥ 19 then ((s.drop 11).take 8).toString else "00:00:00"
 
-@[no_expose] def fmtDateTime (ymd : Int × Int × Int) (time : String := "00:00:00") : String :=
+def fmtDateTime (ymd : Int × Int × Int) (time : String := "00:00:00") : String :=
   s!"{padYear ymd.1}-{pad2 ymd.2.1}-{pad2 ymd.2.2} {time}"
 
 def isLeapYear (y : Int) : Bool :=
@@ -415,7 +415,7 @@ def sqlSubstring (s : String) (start len : Int) : String :=
 
 /-! ## Display -/
 
-private def cellRepr : (t : SqlPrim) → Nullable t → String
+def cellRepr : (t : SqlPrim) → Nullable t → String
   | _, none => "NULL"
   | .int, some i => toString i
   | .long, some i => toString i
@@ -426,12 +426,12 @@ private def cellRepr : (t : SqlPrim) → Nullable t → String
   | .dateTime, some s => s.quote
   | .guid, some g => g.quote
 
-private def Values.reprCells : {s : List (String × SqlType)} → Values s → List String
+def Values.reprCells : {s : List (String × SqlType)} → Values s → List String
   | _, .nil => []
   | _, .cons (c := c) cell r =>
       cellRepr c.ty (SqlType.toNullable cell) :: r.reprCells
 
-@[no_expose] instance : Repr (Values s) :=
+instance : Repr (Values s) :=
   ⟨fun v _ => .text ("(" ++ String.intercalate ", " v.reprCells ++ ")")⟩
 
 end LeanLinq

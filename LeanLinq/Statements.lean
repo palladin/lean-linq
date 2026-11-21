@@ -75,7 +75,7 @@ def DeleteStmt.where' (d : DeleteStmt ts n s)
     (p : Row ts s → SqlExpr ts ⟨.bool, nb⟩) : DeleteStmt ts n s :=
   { d with where? := some (fun r => (p r).anyNull) }
 
-private def whereClause {s : Schema} (alias : String)
+def whereClause {s : Schema} (alias : String)
     (p? : Option (Row ts s → SqlExpr ts ⟨.bool, true⟩)) :
     CompileM String :=
   match p? with
@@ -87,7 +87,7 @@ def InsertStmt.compile (i : InsertStmt ts n s) : CompileM String := do
   let vals ← i.values.mapM fun (_, ⟨_, e⟩) => e.compileValue
   return s!"INSERT INTO {← quote n} ({String.intercalate ", " cols}) VALUES ({String.intercalate ", " vals})"
 
-@[no_expose] def UpdateStmt.compile (u : UpdateStmt ts n s) : CompileM String := do
+def UpdateStmt.compile (u : UpdateStmt ts n s) : CompileM String := do
   -- Reserve the target binding before compiling nested queries, whose source
   -- aliases must remain distinct even when their columns have the same names.
   let alias ← freshAlias
@@ -103,7 +103,7 @@ def InsertStmt.compile (i : InsertStmt ts n s) : CompileM String := do
   else
     return s!"UPDATE {target} AS {targetAlias} SET {String.intercalate ", " sets}{filter}"
 
-@[no_expose] def DeleteStmt.compile (d : DeleteStmt ts n s) : CompileM String := do
+def DeleteStmt.compile (d : DeleteStmt ts n s) : CompileM String := do
   let alias ← freshAlias
   let target ← quote n
   let targetAlias ← quote alias
@@ -157,7 +157,7 @@ def Table.insertAll (_ : Table n s) (rows : List (Values s)) :
     InsertValuesStmt ts n s :=
   ⟨rows⟩
 
-private def compileValuesRow : (s : Schema) → Values s → CompileM (List String)
+def compileValuesRow : (s : Schema) → Values s → CompileM (List String)
   | [], .nil => pure []
   | (_, c) :: rest, .cons cell r => do
       let item ← match c, cell with
@@ -168,7 +168,7 @@ private def compileValuesRow : (s : Schema) → Values s → CompileM (List Stri
         | ⟨t, false⟩, cell => pushParam (SqlValue.ofCell t cell)
       return item :: (← compileValuesRow rest r)
 
-@[no_expose] def InsertValuesStmt.compile (st : InsertValuesStmt ts n s) : CompileM String := do
+def InsertValuesStmt.compile (st : InsertValuesStmt ts n s) : CompileM String := do
   let cols ← s.mapM fun (nm, _) => quote nm
   let rows ← st.rows.mapM fun r => do
     return s!"({String.intercalate ", " (← compileValuesRow s r)})"

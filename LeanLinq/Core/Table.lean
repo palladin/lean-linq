@@ -61,14 +61,14 @@ class HasTable (ts : List (String × Schema)) (n : String) (s : outParam Schema)
   sizes_set_drop : ∀ (env : TableEnv ts) (rs : List (Values s)) (m : String),
     env.sizes m ≤ TableEnv.sizes (set env rs) m + ((rows env).length - rs.length)
 
-private theorem le_sizes_head {n : String} {s : Schema} {ts : List (String × Schema)}
+theorem le_sizes_head {n : String} {s : Schema} {ts : List (String × Schema)}
     (rs : List (Values s)) (env : TableEnv ts) :
     rs.length ≤ TableEnv.sizes (.cons rs env : TableEnv ((n, s) :: ts)) n := by
   show rs.length ≤ if n = n then Nat.max rs.length (env.sizes n) else env.sizes n
   rw [ite_eq_left rfl]
   exact Nat.le_max_left ..
 
-private theorem le_sizes_tail {n n' : String} {s' : Schema}
+theorem le_sizes_tail {n n' : String} {s' : Schema}
     {ts : List (String × Schema)} {k : Nat}
     (rs : List (Values s')) (env : TableEnv ts) (hk : k ≤ env.sizes n) :
     k ≤ TableEnv.sizes (.cons rs env : TableEnv ((n', s') :: ts)) n := by
@@ -84,7 +84,7 @@ private theorem sizes_cons {n : String} {s : Schema} {ts : List (String × Schem
     TableEnv.sizes (.cons rs env : TableEnv ((n, s) :: ts)) m =
       if m = n then Nat.max rs.length (env.sizes m) else env.sizes m := rfl
 
-@[no_expose] instance (priority := high) : HasTable ((n, s) :: ts) n s where
+instance (priority := high) : HasTable ((n, s) :: ts) n s where
   rows | .cons rs _ => rs
   set | .cons _ env, rs => .cons rs env
   rows_sizes | .cons rs env => le_sizes_head rs env
@@ -127,7 +127,7 @@ private theorem sizes_cons {n : String} {s : Schema} {ts : List (String × Schem
           · exact Nat.le_trans (Nat.le_max_right ..) (Nat.le_add_right ..)
         · exact Nat.le_add_right ..
 
-@[no_expose] instance [h : HasTable ts n s] : HasTable ((n', s') :: ts) n s where
+instance [h : HasTable ts n s] : HasTable ((n', s') :: ts) n s where
   rows | .cons _ env => h.rows env
   set | .cons rs env, rs' => .cons rs (h.set env rs')
   rows_sizes | .cons rs env => le_sizes_tail rs env (h.rows_sizes env)

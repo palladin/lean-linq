@@ -17,7 +17,7 @@ structural recursion over an indexed family needs the index to be a
 *variable*, so we recurse at `SpineQ ts g₀ s` carrying the proof
 `g₀ = .plain` and discharge the `groupYield` case with it (`nomatch` on
 `.grouped = .plain` — impossibility proved, not handled). -/
-private def _root_.LeanLinq.SpineQP.bindAux {ρ : Schema → Type} :
+def _root_.LeanLinq.SpineQP.bindAux {ρ : Schema → Type} :
     {g₀ : Terminal} → {s : Schema} → SpineQP ρ ts g₀ s →
     g₀ = .plain → (RowP ρ ts s → SpineQP ρ ts g s') → SpineQP ρ ts g s'
   | _, _, .yield r,         _, k => k r
@@ -46,7 +46,7 @@ spines have no `bind` — a `groupYield` terminal cannot appear at index
 
 Total: `SpineQ` is a reflexive inductive, so structural recursion's inductive
 hypothesis covers `f r` for every `r`. -/
-@[no_expose] def _root_.LeanLinq.SpineQP.bind {ρ : Schema → Type} (sp : SpineQP ρ ts .plain s)
+def _root_.LeanLinq.SpineQP.bind {ρ : Schema → Type} (sp : SpineQP ρ ts .plain s)
     (k : RowP ρ ts s → SpineQP ρ ts g s') : SpineQP ρ ts g s' :=
   SpineQP.bindAux sp rfl k
 
@@ -224,15 +224,15 @@ def offset (q : QueryP ρ ts s) (n : Nat) : QueryP ρ ts s :=
 cannot express it), so spine operands are stripped at construction — the
 compiler then emits them flat, and boundary operands (nested set ops,
 LIMIT, DISTINCT, grouped) as derived tables. -/
-private def asSetOperand : QueryP ρ ts s → QueryP ρ ts s
+def asSetOperand : QueryP ρ ts s → QueryP ρ ts s
   | .spine sp => .spine sp.dropOrders
   | q => q
 
-@[no_expose] def union (q₁ q₂ : QueryP ρ ts s) : QueryP ρ ts s :=
+def union (q₁ q₂ : QueryP ρ ts s) : QueryP ρ ts s :=
   .setOpC .union (asSetOperand q₁) (asSetOperand q₂)
-@[no_expose] def intersect (q₁ q₂ : QueryP ρ ts s) : QueryP ρ ts s :=
+def intersect (q₁ q₂ : QueryP ρ ts s) : QueryP ρ ts s :=
   .setOpC .intersect (asSetOperand q₁) (asSetOperand q₂)
-@[no_expose] def except (q₁ q₂ : QueryP ρ ts s) : QueryP ρ ts s :=
+def except (q₁ q₂ : QueryP ρ ts s) : QueryP ρ ts s :=
   .setOpC .except (asSetOperand q₁) (asSetOperand q₂)
 
 end QueryP

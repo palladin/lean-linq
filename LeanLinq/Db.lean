@@ -774,7 +774,7 @@ structure DbOutcome (c : Ctx) (α : Type) where
 
 /-- Database interpretation counts the operations reported by each handler.
 The generic free monad and its single-effect folds remain unchanged. -/
-private def foldDbOutcome {E : Type → Type 1} {spec : EffWp E}
+def foldDbOutcome {E : Type → Type 1} {spec : EffWp E}
     (h : {β : Type} → E β → TableEnv c.tables → DbOutcome c β) :
     {α : Type} → {w : Wp α} → FreerD E spec α w →
     TableEnv c.tables → DbOutcome c α
@@ -788,7 +788,7 @@ private def foldDbOutcome {E : Type → Type 1} {spec : EffWp E}
           { rest with count := first.count + rest.count }
   | _, _, .weaken _ x, env => foldDbOutcome h x env
 
-private def DbOp.applyOutcome (ps : ParamEnv c.params) (now : Option String)
+def DbOp.applyOutcome (ps : ParamEnv c.params) (now : Option String)
     {β : Type} (e : DbOp c β) (env : TableEnv c.tables) : DbOutcome c β :=
   match DbOp.applyOp ps now e env with
   | .error err => ⟨.error err, env, e.cost⟩
@@ -796,7 +796,7 @@ private def DbOp.applyOutcome (ps : ParamEnv c.params) (now : Option String)
 
 /-- A failed body restores the complete entry state. The continuation is owned
 by the surrounding free bind, so it runs only after this handler succeeds. -/
-private def DbE.applyOutcome (ps : ParamEnv c.params) (now : Option String) :
+def DbE.applyOutcome (ps : ParamEnv c.params) (now : Option String) :
     {β : Type} → DbE c β → TableEnv c.tables → DbOutcome c β
   | _, .op e, env => DbOp.applyOutcome ps now e env
   | _, .transaction body, env =>
@@ -807,7 +807,7 @@ private def DbE.applyOutcome (ps : ParamEnv c.params) (now : Option String) :
 
 /-- The model retains state on failure: a failed transaction restores its
 entry state, whereas a later outside failure retains the committed body. -/
-@[no_expose] def DbP.runOutcomeSt (ps : ParamEnv c.params) (now : Option String)
+def DbP.runOutcomeSt (ps : ParamEnv c.params) (now : Option String)
     {mode : ScopeMode} {α : Type} {w : Wp α}
     (x : DbPM mode c α w) (env : TableEnv c.tables) : DbOutcome c α :=
   match mode with
@@ -1097,7 +1097,7 @@ def DbOp.certApply (ps : ParamEnv c.params) (now : Option String) :
 ordinary operations cost one; transactions reuse the unchanged generic
 certified fold over their scope-free body signature. Every successful base
 effect costs one; `raise` always fails and has no successful certificate. -/
-private def DbE.certApply (ps : ParamEnv c.params) (now : Option String) :
+def DbE.certApply (ps : ParamEnv c.params) (now : Option String) :
     {β : Type} → (e : DbE c β) → (env : TableEnv c.tables) →
     Except EvalError {p : β × TableEnv c.tables × Nat //
       ∀ k, (dbWp e).sp p.1 (TableEnv.sizes env) k
@@ -1111,7 +1111,7 @@ private def DbE.certApply (ps : ParamEnv c.params) (now : Option String) :
 /-- Database adequacy composes the handler's actual body-operation count.
 Transaction success has exactly the body's spec; failure atomicity is stated
 separately by `transaction_failure`. The generic Freer folds are unchanged. -/
-@[no_expose] def DbP.runWithP (ps : ParamEnv c.params) (now : Option String) :
+def DbP.runWithP (ps : ParamEnv c.params) (now : Option String) :
     {α : Type} → {w : Wp α} → DbP c α w → (env : TableEnv c.tables) →
     Except EvalError {p : α × TableEnv c.tables × Nat //
       ∀ k₀, w.sp p.1 (TableEnv.sizes env) k₀ (TableEnv.sizes p.2.1)
