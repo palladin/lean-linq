@@ -61,7 +61,7 @@ private theorem le_sizes_head {n : String} {s : Schema} {ts : List (String × Sc
     (rs : List (Values s)) (env : TableEnv ts) :
     rs.length ≤ TableEnv.sizes (.cons rs env : TableEnv ((n, s) :: ts)) n := by
   show rs.length ≤ if n = n then Nat.max rs.length (env.sizes n) else env.sizes n
-  rw [if_pos rfl]
+  rw [ite_eq_left rfl]
   exact Nat.le_max_left ..
 
 private theorem le_sizes_tail {n n' : String} {s' : Schema}
@@ -70,10 +70,10 @@ private theorem le_sizes_tail {n n' : String} {s' : Schema}
     k ≤ TableEnv.sizes (.cons rs env : TableEnv ((n', s') :: ts)) n := by
   show k ≤ if n = n' then Nat.max rs.length (env.sizes n) else env.sizes n
   by_cases hq : n = n'
-  · rw [if_pos hq]
+  · rw [ite_eq_left hq]
     subst hq
     exact Nat.le_trans hk (Nat.le_max_right ..)
-  · rwa [if_neg hq]
+  · rwa [ite_eq_right hq]
 
 private theorem sizes_cons {n : String} {s : Schema} {ts : List (String × Schema)}
     (rs : List (Values s)) (env : TableEnv ts) (m : String) :
@@ -87,7 +87,7 @@ instance (priority := high) : HasTable ((n, s) :: ts) n s where
   sizes_set_other
     | .cons rs env, rs', m, hm => by
         simp only []
-        rw [sizes_cons, sizes_cons, if_neg hm, if_neg hm]
+        rw [sizes_cons, sizes_cons, ite_eq_right hm, ite_eq_right hm]
   sizes_set_mono
     | .cons rs env, rs', m, hlen => by
         simp only []
