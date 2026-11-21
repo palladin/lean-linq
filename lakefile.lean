@@ -1,100 +1,46 @@
 import Lake
-open Lake DSL
+open System Lake DSL
 
--- Link arguments for the system database libraries (sqlite3, libpq). The
--- toolchain's bundled linker has its own sysroot and cannot see the macOS
--- SDK or Homebrew kegs, so their library directories are resolved at
--- configuration time (`xcrun`, `brew --prefix libpq`); on Linux the system
--- linker finds both (libsqlite3-dev, libpq-dev).
+/-!
+Each driver is its own `lean_lib`, which names its C shim and its system
+client library in `moreLinkObjs`. Lake links those into every program that
+imports the driver, in this package or another, and looks the client library
+up only then. So `import LeanLinq` needs no client library at all, and a
+program that imports one driver needs only that driver's.
+-/
+
+/-- The standard output of a command, trimmed, or `none` if it can't run. -/
+def commandOutput? (cmd : String) (args : Array String) : IO (Option String) := do
+  try
+    let out ← IO.Process.output { cmd, args }
+    if out.exitCode == 0 then
+      return some out.stdout.trimAscii.toString
+    return none
+  catch _ =>
+    return none
+
+/-- A Homebrew keg's directory, for macOS. -/
+def brewPrefix? (keg : String) : IO (Option String) :=
+  commandOutput? "brew" #["--prefix", keg]
+
+-- Link arguments for this package's own programs. They hold no database
+-- library, so Lake can load the package with none installed.
 open Lean Elab Term in
-elab "dbLinkArgs%" : term => do
-  let base := #["-lsqlite3", "-lpq", "-lsybdb", "-lmysqlclient"]
+elab "platformLinkArgs%" : term => do
   let args ←
     if System.Platform.isOSX then do
+      -- The toolchain's bundled linker has its own sysroot and cannot read
+      -- the macOS SDK's stubs, so use the matching Apple linker.
       let sdk ← IO.Process.output { cmd := "xcrun", args := #["--show-sdk-path"] }
-      let pq ← IO.Process.output { cmd := "brew", args := #["--prefix", "libpq"] }
-      let tds ← IO.Process.output { cmd := "brew", args := #["--prefix", "freetds"] }
-      let my ← IO.Process.output { cmd := "brew", args := #["--prefix", "mysql-client"] }
-      -- Use the matching Apple linker for SDK stubs that bundled lld may not support.
-      pure (#["--ld-path=/usr/bin/ld", "-L" ++ sdk.stdout.trimAscii.toString ++ "/usr/lib",
-              "-L" ++ pq.stdout.trimAscii.toString ++ "/lib",
-              "-L" ++ tds.stdout.trimAscii.toString ++ "/lib",
-              "-L" ++ my.stdout.trimAscii.toString ++ "/lib"] ++ base)
-    else do
-      -- The bundled ld.lld does not search system library dirs, and adding
-      -- broad -L paths hijacks libc resolution (the toolchain's Scrt1.o
-      -- wants the bundled glibc, not the system's — __libc_csu_* vanished
-      -- in glibc 2.34). So: link the two libraries by explicit file path,
-      -- leaving every other search untouched.
-      let mut dirs := #["/usr/lib/x86_64-linux-gnu", "/usr/lib/aarch64-linux-gnu",
-                        "/usr/lib64", "/usr/lib"]
-      try
-        let out ← IO.Process.output { cmd := "pg_config", args := #["--libdir"] }
-        dirs := dirs.push out.stdout.trimAscii.toString
-      catch _ => pure ()
-      let find (names : List String) (what : String) : TermElabM String := do
-        for d in dirs do
-          for n in names do
-            if ← System.FilePath.pathExists (d ++ "/" ++ n) then
-              return d ++ "/" ++ n
-        throwError "lakefile: {what} not found (install the -dev package); searched {dirs}"
-      let sqlite ← find ["libsqlite3.so", "libsqlite3.so.0"] "libsqlite3"
-      let pq ← find ["libpq.so", "libpq.so.5"] "libpq"
-      let tds ← find ["libsybdb.so", "libsybdb.so.5"] "libsybdb (freetds)"
-      let my ← find ["libmysqlclient.so", "libmysqlclient.so.21"] "libmysqlclient"
+      pure #["--ld-path=/usr/bin/ld", "-L" ++ sdk.stdout.trimAscii.toString ++ "/usr/lib"]
+    else
       -- The system .so files carry glibc symbol versions newer than the
       -- toolchain's bundled glibc can satisfy at link time; at run time the
       -- system loader resolves them against the system glibc (same distro,
       -- always sufficient). Tell the linker to trust runtime for shlib
       -- references instead of failing on what it cannot see.
-      pure #[sqlite, pq, tds, my, "-Wl,--allow-shlib-undefined"]
+      pure #["-Wl,--allow-shlib-undefined"]
   return Lean.toExpr args
-
--- Include directory for libpq headers, resolved the same way (Linux:
--- `pg_config --includedir`, falling back to the Debian default).
-open Lean Elab Term in
-elab "pqIncludeDir%" : term => do
-  let dir ←
-    if System.Platform.isOSX then do
-      let pq ← IO.Process.output { cmd := "brew", args := #["--prefix", "libpq"] }
-      pure (pq.stdout.trimAscii.toString ++ "/include")
-    else do
-      try
-        let out ← IO.Process.output { cmd := "pg_config", args := #["--includedir"] }
-        pure out.stdout.trimAscii.toString
-      catch _ =>
-        pure "/usr/include/postgresql"
-  return Lean.toExpr dir
-
-def pqIncludeDir : String := pqIncludeDir%
-
--- FreeTDS include directory (sybdb.h): brew keg on macOS, /usr/include on Linux.
-open Lean Elab Term in
-elab "tdsIncludeDir%" : term => do
-  let dir ←
-    if System.Platform.isOSX then do
-      let tds ← IO.Process.output { cmd := "brew", args := #["--prefix", "freetds"] }
-      pure (tds.stdout.trimAscii.toString ++ "/include")
-    else
-      pure "/usr/include"
-  return Lean.toExpr dir
-
-def tdsIncludeDir : String := tdsIncludeDir%
-
-open Lean Elab Term in
-elab "mysqlIncludeDir%" : term => do
-  let dir ←
-    if System.Platform.isOSX then do
-      let my ← IO.Process.output { cmd := "brew", args := #["--prefix", "mysql-client"] }
-      pure (my.stdout.trimAscii.toString ++ "/include/mysql")
-    else do
-      try
-        let out ← IO.Process.output { cmd := "mysql_config", args := #["--variable=pkgincludedir"] }
-        pure out.stdout.trimAscii.toString
-      catch _ => pure "/usr/include/mysql"
-  return Lean.toExpr dir
-
-def mysqlIncludeDir : String := mysqlIncludeDir%
 
 package «lean-linq» where
   version := v!"0.1.0"
@@ -103,8 +49,123 @@ package «lean-linq» where
   homepage := "https://github.com/palladin/lean-linq"
   license := "MIT"
   testDriver := "tests"
-  moreLinkArgs := dbLinkArgs%
+  moreLinkArgs := platformLinkArgs%
 
+/-! ## System client libraries
+
+Each is linked by its explicit file path. The bundled `ld.lld` does not search
+system library directories, and adding broad `-L` paths hijacks libc
+resolution (the toolchain's `Scrt1.o` wants the bundled glibc, not the
+system's — `__libc_csu_*` vanished in glibc 2.34). A path leaves every other
+search untouched. -/
+
+/-- The directories a Linux client library may live in. -/
+def linuxLibDirs : Array FilePath :=
+  #["/usr/lib/x86_64-linux-gnu", "/usr/lib/aarch64-linux-gnu", "/usr/lib64", "/usr/lib"]
+
+/-- The first of `names` found in `dirs`, as the library `what`. -/
+def findLibrary (what : String) (dirs : Array FilePath) (names : Array String) : IO FilePath := do
+  for dir in dirs do
+    for name in names do
+      if ← (dir / name).pathExists then
+        return dir / name
+  throw <| IO.userError
+    s!"lean-linq: {what} not found (install its development package); searched {dirs}"
+
+/-- A client library: `linuxNames` in the Linux directories and `extraDir`, or
+on macOS `macName` in the Homebrew keg `keg`. -/
+def clientLibrary (what : String) (linuxNames : Array String) (keg macName : String)
+    (extraDir : IO (Option String) := pure none) : IO FilePath := do
+  if System.Platform.isOSX then
+    let some dir ← brewPrefix? keg
+      | throw <| IO.userError s!"lean-linq: {what} not found (`brew install {keg}`)"
+    findLibrary what #[(dir : FilePath) / "lib"] #[macName]
+  else
+    let extra := ((← extraDir).map fun dir => #[(dir : FilePath)]).getD #[]
+    findLibrary what (linuxLibDirs ++ extra) linuxNames
+
+/-- SQLite's library. On macOS the system copy exists only as a stub in the SDK,
+which Lean's bundled linker can't read, so a program in another package would
+need Apple's linker to use it. Homebrew's copy is a real library that either
+linker reads, so it comes first. -/
+def sqliteLibrary : IO FilePath := do
+  if System.Platform.isOSX then
+    if let some keg ← brewPrefix? "sqlite" then
+      let lib := (keg : FilePath) / "lib" / "libsqlite3.dylib"
+      if ← lib.pathExists then
+        return lib
+    let some sdk ← commandOutput? "xcrun" #["--show-sdk-path"]
+      | throw <| IO.userError "lean-linq: `xcrun --show-sdk-path` failed"
+    findLibrary "libsqlite3" #[(sdk : FilePath) / "usr" / "lib"] #["libsqlite3.tbd"]
+  else
+    findLibrary "libsqlite3" linuxLibDirs #["libsqlite3.so", "libsqlite3.so.0"]
+
+target libsqlite3 : FilePath :=
+  Job.async do
+    sqliteLibrary
+
+target libpq : FilePath :=
+  Job.async do
+    clientLibrary "libpq" #["libpq.so", "libpq.so.5"] "libpq" "libpq.dylib"
+      (commandOutput? "pg_config" #["--libdir"])
+
+target libsybdb : FilePath :=
+  Job.async do
+    clientLibrary "libsybdb (freetds)" #["libsybdb.so", "libsybdb.so.5"] "freetds" "libsybdb.dylib"
+
+target libmysqlclient : FilePath :=
+  Job.async do
+    clientLibrary "libmysqlclient" #["libmysqlclient.so", "libmysqlclient.so.21"] "mysql-client"
+      "libmysqlclient.dylib"
+
+/-! ## C shims
+
+Each wraps a client API into Lean-ABI functions. They compile with the
+*system* C compiler (which knows where the client headers live — the
+toolchain's bundled clang is `-nostdinc`), with Lean's include dir added for
+`lean.h`. -/
+
+/-- Builds `native/<name>.c` into a static library, with `includeDir` on the
+include path if it gives one. -/
+def buildShim (pkg : Package) (name : String) (includeDir : IO (Option String) := pure none) :
+    FetchM (Job FilePath) := do
+  let src ← inputTextFile <| pkg.dir / "native" / s!"{name}.c"
+  let leanInclude := (← getLeanInstall).includeDir
+  let clientInclude := ((← includeDir).map fun dir => #["-I", dir]).getD #[]
+  let o ← buildO (pkg.buildDir / "native" / s!"{name}.o") src
+    (#["-I", leanInclude.toString] ++ clientInclude) #["-O2"] "cc"
+  buildStaticLib (pkg.staticLibDir / nameToStaticLib name) #[o]
+
+target sqlite3_shim pkg : FilePath :=
+  buildShim pkg "sqlite3_shim" do
+    -- The header that matches the library `sqliteLibrary` picks on macOS.
+    if System.Platform.isOSX then
+      if let some keg ← brewPrefix? "sqlite" then
+        if ← ((keg : FilePath) / "include" / "sqlite3.h").pathExists then
+          return some (keg ++ "/include")
+    return none
+
+target libpq_shim pkg : FilePath :=
+  buildShim pkg "libpq_shim" do
+    if System.Platform.isOSX then
+      return (← brewPrefix? "libpq").map (· ++ "/include")
+    return (← commandOutput? "pg_config" #["--includedir"]).getD "/usr/include/postgresql"
+
+target mysql_shim pkg : FilePath :=
+  buildShim pkg "mysql_shim" do
+    if System.Platform.isOSX then
+      return (← brewPrefix? "mysql-client").map (· ++ "/include/mysql")
+    return (← commandOutput? "mysql_config" #["--variable=pkgincludedir"]).getD "/usr/include/mysql"
+
+target freetds_shim pkg : FilePath :=
+  buildShim pkg "freetds_shim" do
+    if System.Platform.isOSX then
+      return (← brewPrefix? "freetds").map (· ++ "/include")
+    return some "/usr/include"
+
+/-! ## Libraries -/
+
+/-- The core library. It has no native code and needs no client library. -/
 @[default_target]
 lean_lib LeanLinq
 
@@ -113,10 +174,29 @@ lean_lib LeanLinq
 @[default_target]
 lean_lib Playground
 
-/-- The native SQLite driver — a separate target so the core library stays
-FFI-free (`import LeanLinq` never pulls native code). -/
-lean_lib Driver where
-  globs := #[.submodules `LeanLinq.Driver]
+/-- What the drivers share. It has no native code. -/
+lean_lib DriverCommon where
+  roots := #[`LeanLinq.Driver.TextCell, `LeanLinq.Driver.Transaction, `LeanLinq.Driver.Wire]
+
+/-- The SQLite driver, `import LeanLinq.Driver.Sqlite`. -/
+lean_lib SqliteDriver where
+  roots := #[`LeanLinq.Driver.Sqlite]
+  moreLinkObjs := #[sqlite3_shim, libsqlite3]
+
+/-- The PostgreSQL driver, `import LeanLinq.Driver.Postgres`. -/
+lean_lib PostgresDriver where
+  roots := #[`LeanLinq.Driver.Postgres]
+  moreLinkObjs := #[libpq_shim, libpq]
+
+/-- The SQL Server driver, `import LeanLinq.Driver.Mssql`. -/
+lean_lib MssqlDriver where
+  roots := #[`LeanLinq.Driver.Mssql]
+  moreLinkObjs := #[freetds_shim, libsybdb]
+
+/-- The MySQL driver, `import LeanLinq.Driver.Mysql`. -/
+lean_lib MysqlDriver where
+  roots := #[`LeanLinq.Driver.Mysql]
+  moreLinkObjs := #[mysql_shim, libmysqlclient]
 
 lean_lib Tests where
   globs := #[.submodules `Tests]
@@ -138,38 +218,3 @@ lean_exe mssqldriver where
 
 lean_exe mysqldriver where
   root := `Tests.MysqlDriverT
-
-/-- C shim wrapping the sqlite3 API into Lean-ABI functions. Compiled with
-the *system* C compiler (which knows where `sqlite3.h` lives — the
-toolchain's bundled clang is `-nostdinc`), with Lean's include dir added
-for `lean.h`. -/
-extern_lib sqlite3_shim pkg := do
-  let src ← inputTextFile <| pkg.dir / "native" / "sqlite3_shim.c"
-  let oFile := pkg.buildDir / "native" / "sqlite3_shim.o"
-  let leanInclude := (← getLeanInstall).includeDir
-  let o ← buildO oFile src #["-I", leanInclude.toString] #["-O2"] "cc"
-  buildStaticLib (pkg.staticLibDir / nameToStaticLib "sqlite3_shim") #[o]
-
-extern_lib libpq_shim pkg := do
-  let src ← inputTextFile <| pkg.dir / "native" / "libpq_shim.c"
-  let oFile := pkg.buildDir / "native" / "libpq_shim.o"
-  let leanInclude := (← getLeanInstall).includeDir
-  let o ← buildO oFile src
-    #["-I", leanInclude.toString, "-I", pqIncludeDir] #["-O2"] "cc"
-  buildStaticLib (pkg.staticLibDir / nameToStaticLib "libpq_shim") #[o]
-
-extern_lib mysql_shim pkg := do
-  let src ← inputTextFile <| pkg.dir / "native" / "mysql_shim.c"
-  let oFile := pkg.buildDir / "native" / "mysql_shim.o"
-  let leanInclude := (← getLeanInstall).includeDir
-  let o ← buildO oFile src
-    #["-I", leanInclude.toString, "-I", mysqlIncludeDir] #["-O2"] "cc"
-  buildStaticLib (pkg.staticLibDir / nameToStaticLib "mysql_shim") #[o]
-
-extern_lib freetds_shim pkg := do
-  let src ← inputTextFile <| pkg.dir / "native" / "freetds_shim.c"
-  let oFile := pkg.buildDir / "native" / "freetds_shim.o"
-  let leanInclude := (← getLeanInstall).includeDir
-  let o ← buildO oFile src
-    #["-I", leanInclude.toString, "-I", tdsIncludeDir] #["-O2"] "cc"
-  buildStaticLib (pkg.staticLibDir / nameToStaticLib "freetds_shim") #[o]
