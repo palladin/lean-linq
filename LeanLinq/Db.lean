@@ -1,8 +1,13 @@
-import LeanLinq.Eval.Query
-import LeanLinq.Eval.Statements
-import LeanLinq.Theorems
-import LeanLinq.Core.Grade
-import LeanLinq.Freer
+module
+
+public meta import Lean
+public import LeanLinq.Eval.Query
+public import LeanLinq.Eval.Statements
+public import LeanLinq.Theorems
+public import LeanLinq.Core.Grade
+public import LeanLinq.Freer
+
+@[expose] public section
 
 /-! # `Db` — database programs with the round-trip bill in the type
 
@@ -275,7 +280,7 @@ defs, `gcard`'s recursion, the pointwise constructors — unfolded by
 defeq). The rewrite carries no proof: every step is `rfl`. -/
 
 open Lean Meta in
-private partial def gradeNatNorm (e : Expr) : MetaM Expr := do
+private meta partial def gradeNatNorm (e : Expr) : MetaM Expr := do
   let e ← whnfCore e
   let f := e.getAppFn
   let some n := f.constName? | return e
@@ -769,7 +774,7 @@ structure DbOutcome (c : Ctx) (α : Type) where
 
 /-- Database interpretation counts the operations reported by each handler.
 The generic free monad and its single-effect folds remain unchanged. -/
-private def foldDbOutcome {E : Type → Type 1} {spec : EffWp E}
+def foldDbOutcome {E : Type → Type 1} {spec : EffWp E}
     (h : {β : Type} → E β → TableEnv c.tables → DbOutcome c β) :
     {α : Type} → {w : Wp α} → FreerD E spec α w →
     TableEnv c.tables → DbOutcome c α
@@ -783,7 +788,7 @@ private def foldDbOutcome {E : Type → Type 1} {spec : EffWp E}
           { rest with count := first.count + rest.count }
   | _, _, .weaken _ x, env => foldDbOutcome h x env
 
-private def DbOp.applyOutcome (ps : ParamEnv c.params) (now : Option String)
+def DbOp.applyOutcome (ps : ParamEnv c.params) (now : Option String)
     {β : Type} (e : DbOp c β) (env : TableEnv c.tables) : DbOutcome c β :=
   match DbOp.applyOp ps now e env with
   | .error err => ⟨.error err, env, e.cost⟩
@@ -791,7 +796,7 @@ private def DbOp.applyOutcome (ps : ParamEnv c.params) (now : Option String)
 
 /-- A failed body restores the complete entry state. The continuation is owned
 by the surrounding free bind, so it runs only after this handler succeeds. -/
-private def DbE.applyOutcome (ps : ParamEnv c.params) (now : Option String) :
+def DbE.applyOutcome (ps : ParamEnv c.params) (now : Option String) :
     {β : Type} → DbE c β → TableEnv c.tables → DbOutcome c β
   | _, .op e, env => DbOp.applyOutcome ps now e env
   | _, .transaction body, env =>
@@ -1092,7 +1097,7 @@ def DbOp.certApply (ps : ParamEnv c.params) (now : Option String) :
 ordinary operations cost one; transactions reuse the unchanged generic
 certified fold over their scope-free body signature. Every successful base
 effect costs one; `raise` always fails and has no successful certificate. -/
-private def DbE.certApply (ps : ParamEnv c.params) (now : Option String) :
+def DbE.certApply (ps : ParamEnv c.params) (now : Option String) :
     {β : Type} → (e : DbE c β) → (env : TableEnv c.tables) →
     Except EvalError {p : β × TableEnv c.tables × Nat //
       ∀ k, (dbWp e).sp p.1 (TableEnv.sizes env) k
@@ -1232,7 +1237,7 @@ open Lean in
 /-- `let ys ← for x in xs do body` also parses as plain `let ys ← term`
 (term-position `for`), so the parser emits a `choice` node — resolve it
 in favor of the dedicated loop clause. -/
-def resolveClause (c : Syntax) : Syntax :=
+meta def resolveClause (c : Syntax) : Syntax :=
   if c.getKind == Lean.choiceKind then
     (c.getArgs.find? (·.isOfKind ``fetchForAll)).getD c[0]
   else c
@@ -1247,7 +1252,7 @@ priced by the fetch's own contract (`k * q.gcard`). The binder spelling
 is the syntactic marker; `x`'s binder disappears, so any other use of
 `x` is an unknown-identifier error (fetch it separately if you need the
 rows too). -/
-private partial def fuseBoundedLoops : List Syntax → MacroM (List Syntax)
+private meta partial def fuseBoundedLoops : List Syntax → MacroM (List Syntax)
   | [] => return []
   | [c] => return [c]
   | c1 :: c2 :: rest => do
@@ -1270,7 +1275,7 @@ a constant continuation bill. A generic helper's mode remains generic. -/
 syntax (name := defaultDbMode) "db_mode% " term : term
 
 open Lean Elab Term Meta in
-@[term_elab defaultDbMode] def elabDefaultDbMode : TermElab := fun stx expected => withSynthesize do
+@[term_elab defaultDbMode] meta def elabDefaultDbMode : TermElab := fun stx expected => withSynthesize do
   let body ← elabTerm stx[1] expected
   let ty ← whnf (← inferType body)
   if ty.isAppOfArity ``FreerD 4 then
@@ -1282,7 +1287,7 @@ open Lean Elab Term Meta in
   return body
 
 open Lean in
-@[macro fetchProg] def expandFetch : Lean.Macro := fun stx => do
+@[macro fetchProg] meta def expandFetch : Lean.Macro := fun stx => do
   let clauses ← fuseBoundedLoops (stx[2].getSepArgs.map resolveClause).toList
   match clauses.reverse with
   | [] => Macro.throwError "db! must end with a `return` clause"
@@ -1329,7 +1334,7 @@ scoped syntax (name := transactionBlock)
   "transaction " "{" withoutPosition(sepByIndentSemicolon(fetchClause)) "}" : term
 
 open Lean in
-@[macro transactionBlock] def expandTransaction : Lean.Macro := fun stx => do
+@[macro transactionBlock] meta def expandTransaction : Lean.Macro := fun stx => do
   let body := Syntax.node stx.getHeadInfo ``fetchProg
     #[mkAtom "db!", mkAtom "{", stx[2], mkAtom "}"]
   `(LeanLinq.DbP.transaction $(⟨body⟩))

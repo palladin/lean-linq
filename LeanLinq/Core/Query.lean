@@ -1,5 +1,9 @@
-import LeanLinq.Core.Schema
-import LeanLinq.Core.Grade
+module
+
+public import LeanLinq.Core.Schema
+public import LeanLinq.Core.Grade
+
+@[expose] public section
 
 namespace LeanLinq
 
@@ -13,7 +17,7 @@ structural recursion over an indexed family needs the index to be a
 *variable*, so we recurse at `SpineQ ts g₀ s` carrying the proof
 `g₀ = .plain` and discharge the `groupYield` case with it (`nomatch` on
 `.grouped = .plain` — impossibility proved, not handled). -/
-private def _root_.LeanLinq.SpineQP.bindAux {ρ : Schema → Type} :
+def _root_.LeanLinq.SpineQP.bindAux {ρ : Schema → Type} :
     {g₀ : Terminal} → {s : Schema} → SpineQP ρ ts g₀ s →
     g₀ = .plain → (RowP ρ ts s → SpineQP ρ ts g s') → SpineQP ρ ts g s'
   | _, _, .yield r,         _, k => k r
@@ -220,7 +224,7 @@ def offset (q : QueryP ρ ts s) (n : Nat) : QueryP ρ ts s :=
 cannot express it), so spine operands are stripped at construction — the
 compiler then emits them flat, and boundary operands (nested set ops,
 LIMIT, DISTINCT, grouped) as derived tables. -/
-private def asSetOperand : QueryP ρ ts s → QueryP ρ ts s
+def asSetOperand : QueryP ρ ts s → QueryP ρ ts s
   | .spine sp => .spine sp.dropOrders
   | q => q
 

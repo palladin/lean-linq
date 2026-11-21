@@ -1,4 +1,8 @@
-import LeanLinq
+module
+
+public import LeanLinq
+
+public section
 
 /-! # Shared text-format cell codecs
 

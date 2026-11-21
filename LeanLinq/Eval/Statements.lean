@@ -1,4 +1,8 @@
-import LeanLinq.Statements
+module
+
+public import LeanLinq.Statements
+
+@[expose] public section
 
 /-! # Statement evaluation
 
@@ -19,7 +23,7 @@ namespace LeanLinq
 value — unreachable for `HasCol`-checked statements). A write boundary:
 NULL into a NOT NULL column is a loud error (unreachable through the
 flag-checked builders). -/
-private def Values.setCol (name : String) (t' : SqlPrim) (cell : Nullable t') :
+def Values.setCol (name : String) (t' : SqlPrim) (cell : Nullable t') :
     {s : Schema} → Values s → Except EvalError (Values s)
   | _, .nil => pure .nil
   | _, .cons (name := nc) (c := cc) old r =>
@@ -32,7 +36,7 @@ private def Values.setCol (name : String) (t' : SqlPrim) (cell : Nullable t') :
 /-- Build the inserted row in schema order: an unmentioned NULL-capable
 column is NULL; an unmentioned NOT NULL column is a loud error — never a
 silent NULL. -/
-private def buildInsertRow (ee : EvalEnv ts)
+def buildInsertRow (ee : EvalEnv ts)
     (vs : List (String × ((p : SqlType) × SqlExpr ts p))) :
     (s : Schema) → Except EvalError (Values s)
   | [] => pure .nil

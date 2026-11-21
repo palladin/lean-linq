@@ -1,5 +1,9 @@
-import LeanLinq.Core.Query
-import LeanLinq.Notation
+module
+
+public import LeanLinq.Core.Query
+public import LeanLinq.Notation
+
+public section
 
 /-! Grouped expressions form a separate, phase-indexed language. Only named
 keys, aggregate results, and literals enter it; no ordinary row expression
@@ -66,17 +70,17 @@ instance [SqlNumeric t] : Add (GroupExprP κ ρ ts ks ⟨t, n⟩) := ⟨arith .a
 instance [SqlNumeric t] : Sub (GroupExprP κ ρ ts ks ⟨t, n⟩) := ⟨arith .sub⟩
 instance [SqlNumeric t] : Mul (GroupExprP κ ρ ts ks ⟨t, n⟩) := ⟨arith .mul⟩
 instance [SqlNumeric t] : Div (GroupExprP κ ρ ts ks ⟨t, n⟩) := ⟨arith .div⟩
-instance : OfNat (GroupExprP κ ρ ts ks ⟨.int, n⟩) k := ⟨atFlag n ⟨.intC k⟩⟩
-instance : OfNat (GroupExprP κ ρ ts ks ⟨.long, n⟩) k := ⟨atFlag n ⟨.longC k⟩⟩
+@[no_expose] instance : OfNat (GroupExprP κ ρ ts ks ⟨.int, n⟩) k := ⟨atFlag n ⟨.intC k⟩⟩
+@[no_expose] instance : OfNat (GroupExprP κ ρ ts ks ⟨.long, n⟩) k := ⟨atFlag n ⟨.longC k⟩⟩
 instance : Neg (GroupExprP κ ρ ts ks ⟨.int, n⟩) := ⟨fun e => 0 - e⟩
-instance : OfScientific (GroupExprP κ ρ ts ks ⟨.decimal, n⟩) :=
+@[no_expose] instance : OfScientific (GroupExprP κ ρ ts ks ⟨.decimal, n⟩) :=
   ⟨fun m sign e => atFlag n ⟨.decimalC (scientificDigits m sign e)⟩⟩
-instance : OfScientific (GroupExprP κ ρ ts ks ⟨.double, n⟩) :=
+@[no_expose] instance : OfScientific (GroupExprP κ ρ ts ks ⟨.double, n⟩) :=
   ⟨fun m sign e => atFlag n ⟨.doubleC (OfScientific.ofScientific m sign e)⟩⟩
-instance : Coe String (GroupExprP κ ρ ts ks ⟨.string, true⟩) := ⟨fun v => ⟨.widen (.stringC v)⟩⟩
-instance : Coe Bool (GroupExprP κ ρ ts ks ⟨.bool, true⟩) := ⟨fun v => ⟨.widen (.boolC v)⟩⟩
-instance (priority := high) : Coe String (GroupExprP κ ρ ts ks ⟨.string, false⟩) := ⟨fun v => ⟨.stringC v⟩⟩
-instance (priority := high) : Coe Bool (GroupExprP κ ρ ts ks ⟨.bool, false⟩) := ⟨fun v => ⟨.boolC v⟩⟩
+@[no_expose] instance : Coe String (GroupExprP κ ρ ts ks ⟨.string, true⟩) := ⟨fun v => ⟨.widen (.stringC v)⟩⟩
+@[no_expose] instance : Coe Bool (GroupExprP κ ρ ts ks ⟨.bool, true⟩) := ⟨fun v => ⟨.widen (.boolC v)⟩⟩
+@[no_expose] instance (priority := high) : Coe String (GroupExprP κ ρ ts ks ⟨.string, false⟩) := ⟨fun v => ⟨.stringC v⟩⟩
+@[no_expose] instance (priority := high) : Coe Bool (GroupExprP κ ρ ts ks ⟨.bool, false⟩) := ⟨fun v => ⟨.boolC v⟩⟩
 
 def concat (a b : GroupExprP κ ρ ts ks ⟨.string, n⟩) : GroupExprP κ ρ ts ks ⟨.string, n⟩ :=
   ⟨.concat a.raw b.raw⟩

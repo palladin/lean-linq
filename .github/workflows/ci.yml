@@ -31,8 +31,13 @@ jobs:
           path: .lake
           key: lake-${{ runner.os }}-${{ hashFiles('lean-toolchain', 'lake-manifest.json', 'lakefile.lean') }}
 
+      # Warnings fail the build, as they do for a project that builds with --wfail.
       - name: Build
-        run: lake build
+        run: lake build --wfail
+
+      - name: Build a downstream package in the module system, with --wfail
+        working-directory: downstream/module
+        run: lake build --wfail
 
       - name: Unit golden tests (SQL text + params, 4 dialects)
         run: lake test

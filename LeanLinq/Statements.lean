@@ -1,4 +1,8 @@
-import LeanLinq.Compiler.Query
+module
+
+public import LeanLinq.Compiler.Query
+
+@[expose] public section
 
 /-! # Data-modification statements: INSERT / UPDATE / DELETE
 
@@ -71,7 +75,7 @@ def DeleteStmt.where' (d : DeleteStmt ts n s)
     (p : Row ts s → SqlExpr ts ⟨.bool, nb⟩) : DeleteStmt ts n s :=
   { d with where? := some (fun r => (p r).anyNull) }
 
-private def whereClause {s : Schema} (alias : String)
+def whereClause {s : Schema} (alias : String)
     (p? : Option (Row ts s → SqlExpr ts ⟨.bool, true⟩)) :
     CompileM String :=
   match p? with
@@ -153,7 +157,7 @@ def Table.insertAll (_ : Table n s) (rows : List (Values s)) :
     InsertValuesStmt ts n s :=
   ⟨rows⟩
 
-private def compileValuesRow : (s : Schema) → Values s → CompileM (List String)
+def compileValuesRow : (s : Schema) → Values s → CompileM (List String)
   | [], .nil => pure []
   | (_, c) :: rest, .cons cell r => do
       let item ← match c, cell with

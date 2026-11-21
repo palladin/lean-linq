@@ -1,6 +1,10 @@
-import LeanLinq
-import LeanLinq.Driver.TextCell
-import LeanLinq.Driver.Transaction
+module
+
+public import LeanLinq
+public import LeanLinq.Driver.TextCell
+public import LeanLinq.Driver.Transaction
+
+public section
 
 /-! # Native SQL Server driver (FreeTDS DB-Library)
 

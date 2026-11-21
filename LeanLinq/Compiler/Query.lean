@@ -1,6 +1,10 @@
-import LeanLinq.Core.Query
-import LeanLinq.Compiler.Expr
-import LeanLinq.Eval.Query
+module
+
+public import LeanLinq.Core.Query
+public import LeanLinq.Compiler.Expr
+public import LeanLinq.Eval.Query
+
+@[expose] public section
 
 namespace LeanLinq
 
@@ -12,7 +16,7 @@ def JoinKind.token : JoinKind → String
 
 /-- A FROM item: `isJoin` marks JOIN clauses (attached with a space) versus
 plain sources (comma-separated). -/
-private def renderFroms (froms : Array (Bool × String)) : String :=
+def renderFroms (froms : Array (Bool × String)) : String :=
   match froms.toList with
   | [] => ""
   | (_, first) :: rest =>
@@ -20,7 +24,7 @@ private def renderFroms (froms : Array (Bool × String)) : String :=
       acc ++ (if isJoin then " " else ", ") ++ s) ""
     s!" FROM {first}{tail}"
 
-private def renderWheres (wheres : Array String) : String :=
+def renderWheres (wheres : Array String) : String :=
   if wheres.isEmpty then ""
   else s!" WHERE {String.intercalate " AND " wheres.toList}"
 
@@ -84,7 +88,7 @@ inductive SelSpec : Schema → Type where
 /-- The SELECT list of a boundary derived table: every column of the
 marker row `alias.col AS col` — rendered textually (a marker `field`
 compiles to exactly this), keeping the walk's recursion structural. -/
-private def aliasSelect (alias : String) : Schema → CompileM (List String)
+def aliasSelect (alias : String) : Schema → CompileM (List String)
   | [] => pure []
   | (nm, _) :: s => do
       return s!"{← quote alias}.{← quote nm} AS {← quote nm}" :: (← aliasSelect alias s)
@@ -141,14 +145,14 @@ def GroupCompileEnv.get (env : GroupCompileEnv ks) (ref : KeyRef ks c) : Compile
 def GroupCompileEnv.isPredicate (env : GroupCompileEnv ks) {c : SqlType} (ref : KeyRef ks c) : Bool :=
   (env.get ref).isPredicate
 
-private def projectGroupValue (alias sql : String) : CompileM String := do
+def projectGroupValue (alias sql : String) : CompileM String := do
   let name := s!"g{(← get).groupItems.size}"
   modify fun st => { st with groupItems := st.groupItems.push (name, sql) }
   return s!"{← quote alias}.{← quote name}"
 
 /-- MySQL must retain the derived projection through prepared comparisons and
 aggregate arguments instead of merging it into the containing statement. -/
-private def projectionBarrier : CompileM String := do
+def projectionBarrier : CompileM String := do
   return if (← read) == .mysql then " LIMIT 18446744073709551615" else ""
 
 mutual
@@ -660,7 +664,7 @@ export QueryP (compileStmt)
 end Query
 
 
-private def runCompile (m : CompileM String) (db : DatabaseType) : CompiledSql :=
+def runCompile (m : CompileM String) (db : DatabaseType) : CompiledSql :=
   let (sql, st) := Id.run ((m.run db).run {})
   { sql, params := st.params }
 

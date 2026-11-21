@@ -1,4 +1,8 @@
-import LeanLinq.Core.Schema
+module
+
+public import LeanLinq.Core.Schema
+
+@[expose] public section
 
 /-! Typed table creation. Column names, primitive types, and nullability come
 from the same schema used by queries. Constraints refer to that schema.
@@ -15,7 +19,7 @@ def validSchema (name : String) (schema : Schema) : Bool :=
   validName name && !schema.isEmpty && decide (schema.map Prod.fst).Nodup &&
     schema.all (fun column => validName column.1)
 
-private def utf16Length (s : String) : Nat :=
+def utf16Length (s : String) : Nat :=
   s.toList.foldl (fun n c => n + if c.toNat > 0xffff then 2 else 1) 0
 
 /-- Dialect identifier limits. Temporary SQL Server tables are outside this
@@ -23,7 +27,7 @@ API; MySQL metadata identifiers only support BMP characters. -/
 def nameFits (db : DatabaseType) (name : String) : Bool :=
   match db with
   | .sqlite => true
-  | .postgres => name.toUTF8.size ≤ 63
+  | .postgres => name.utf8ByteSize ≤ 63
   | .sqlServer => utf16Length name ≤ 128
   | .mysql => name.length ≤ 64 && name.toList.getLast? != some ' ' &&
       name.toList.all (fun c => c.toNat ≤ 0xffff)
@@ -32,7 +36,7 @@ def namesFit (db : DatabaseType) (name : String) (schema : Schema) : Bool :=
   nameFits db name && schema.all (fun column => nameFits db column.1) &&
     (db != .sqlServer || name.toList.head? != some '#')
 
-private def columnType (db : DatabaseType) (type : SqlPrim) (length : Option Nat) : String :=
+def columnType (db : DatabaseType) (type : SqlPrim) (length : Option Nat) : String :=
   match db, type with
   | .sqlite, .int | .sqlite, .long => "INT"
   | .sqlite, .double => "REAL"
@@ -120,7 +124,7 @@ def Table.create (_ : Table name schema) (primaryKey : List (PrimaryKeyColumn sc
 def CreateTable.stringLength (statement : CreateTable name schema) (column : String) : Option Nat :=
   (statement.stringLengths.find? (·.name == column)).map (·.length)
 
-private def keyBytes (db : DatabaseType) (statement : CreateTable name schema)
+def keyBytes (db : DatabaseType) (statement : CreateTable name schema)
     (column : PrimaryKeyColumn schema) : Nat :=
   match column.type with
   | .int => 4

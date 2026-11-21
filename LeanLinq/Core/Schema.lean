@@ -1,5 +1,9 @@
-import Lean
-import LeanLinq.Core.Expr
+module
+
+public meta import Lean
+public import LeanLinq.Core.Expr
+
+@[expose] public section
 
 namespace LeanLinq
 
@@ -37,7 +41,7 @@ choice nodes during pattern elaboration. -/
 scoped syntax (name := rowLit) "![" term,+ "]" : term
 
 open Lean Elab Term Meta in
-@[term_elab rowLit] def elabRowLit : TermElab := fun stx expectedType? => do
+@[term_elab rowLit] meta def elabRowLit : TermElab := fun stx expectedType? => do
   let cells := stx[1].getSepArgs
   let family? ← match expectedType? with
     | some ty => do
@@ -135,7 +139,7 @@ arrays/lists still go via core `getElem`. -/
 scoped syntax:max (name := colGet) term noWs "[" term "]" : term
 
 open Lean Elab Term Meta in
-@[term_elab colGet] def elabColGet : TermElab := fun stx expectedType? => do
+@[term_elab colGet] meta def elabColGet : TermElab := fun stx expectedType? => do
   let r ← elabTerm stx[0] none
   let rTy ← whnf (← instantiateMVars (← inferType r))
   if rTy.getAppFn.isMVar then

@@ -1,4 +1,8 @@
-import LeanLinq.Core.Grade
+module
+
+public import LeanLinq.Core.Grade
+
+@[expose] public section
 
 /-! # The graded Freer Dijkstra monad
 

@@ -1,6 +1,10 @@
-import LeanLinq
-import LeanLinq.Driver.TextCell
-import LeanLinq.Driver.Transaction
+module
+
+public import LeanLinq
+public import LeanLinq.Driver.TextCell
+public import LeanLinq.Driver.Transaction
+
+public section
 
 /-! # Native SQLite driver
 
@@ -27,7 +31,7 @@ instance : Nonempty Conn := ConnP.property
 
 private opaque StmtP : NonemptyType
 private def Stmt : Type := StmtP.type
-instance : Nonempty Stmt := StmtP.property
+private instance : Nonempty Stmt := StmtP.property
 
 /-- Open (or create) a database file. `":memory:"` works as in sqlite. -/
 @[extern "ll_sqlite3_open"]

@@ -1,4 +1,8 @@
-import LeanLinq.Core.Schema
+module
+
+public import LeanLinq.Core.Schema
+
+@[expose] public section
 
 /-! # Value-level evaluation helpers
 
@@ -41,7 +45,7 @@ def CmpOp.holds (op : CmpOp) (o : Ordering) : Bool :=
   | .gt => o == .gt
   | .ge => o != .lt
 
-private def intArith (op : ArithOp) (a b : Int) : Except EvalError (Nullable .int) :=
+def intArith (op : ArithOp) (a b : Int) : Except EvalError (Nullable .int) :=
   match op with
   | .add => pure (some (a + b))
   | .sub => pure (some (a - b))
@@ -71,14 +75,14 @@ def SqlPrim.arithV : (t : SqlPrim) → ArithOp → t.interp → t.interp →
       | .div => if b == 0 then .error .divByZero else pure (some ((a * 1000).tdiv b))
   | t, op, _, _ => .error (.unsupported s!"arith {repr op}" t)
 
-private def SqlPrim.sumV : (t : SqlPrim) → List t.interp → Except EvalError (Nullable t)
+def SqlPrim.sumV : (t : SqlPrim) → List t.interp → Except EvalError (Nullable t)
   | .int, vs => pure (some (vs.foldl (· + ·) 0))
   | .long, vs => pure (some (vs.foldl (· + ·) 0))
   | .double, vs => pure (some (vs.foldl (· + ·) 0))
   | .decimal, vs => pure (some (vs.foldl (· + ·) 0))
   | t, _ => .error (.unsupported "SUM" t)
 
-private def SqlPrim.avgV : (t : SqlPrim) → List t.interp → Except EvalError (Nullable t)
+def SqlPrim.avgV : (t : SqlPrim) → List t.interp → Except EvalError (Nullable t)
   | .int, vs => pure (some ((vs.foldl (· + ·) 0).tdiv vs.length))
   | .long, vs => pure (some ((vs.foldl (· + ·) 0).tdiv vs.length))
   | .double, vs => pure (some (vs.foldl (· + ·) 0 / Float.ofNat vs.length))

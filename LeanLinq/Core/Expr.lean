@@ -1,4 +1,8 @@
-import LeanLinq.Core.Table
+module
+
+public import LeanLinq.Core.Table
+
+@[expose] public section
 
 namespace LeanLinq
 
@@ -356,7 +360,7 @@ abbrev SpineQ : Ctx → Terminal → Schema → Type := SpineQP AliasOf
 abbrev QueryA : Ctx → Schema → Type := QueryP AliasOf
 abbrev ScalarA : Ctx → SqlType → Type := ScalarQueryP AliasOf
 
-private def RowP.ofAtomAux (a : ρ s') : (s : Schema) → RowP ρ ts s
+def RowP.ofAtomAux (a : ρ s') : (s : Schema) → RowP ρ ts s
   | [] => .nil
   | (nm, c) :: s => .cons (.field c a nm) (RowP.ofAtomAux a s)
 

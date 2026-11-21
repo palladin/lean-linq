@@ -1,4 +1,9 @@
-import LeanLinq.Core.Grouped
+module
+
+public meta import Lean
+public import LeanLinq.Core.Grouped
+
+@[expose] public section
 
 /-! # C#-style LINQ comprehension syntax
 
@@ -77,13 +82,13 @@ scoped syntax (name := sqlQuery) "query! " (ident)? "{" withoutPosition(sepByInd
 
 open Lean
 
-private def sepTerms (stx : Syntax) : Syntax.TSepArray `term "," :=
+private meta def sepTerms (stx : Syntax) : Syntax.TSepArray `term "," :=
   .ofElems (stx.getSepArgs.map (⟨·⟩))
 
 /-- Fold the leading clauses (from/join/where/orderBy) right-to-left over the
 terminal. The fold is `SpineQ`-valued: each clause's terminal shape is known
 statically at expansion, so no run-time grouped/plain dispatch is needed. -/
-private def foldLeading (acc : Term) (c : Syntax) : MacroM Term := do
+private meta def foldLeading (acc : Term) (c : Syntax) : MacroM Term := do
   if c.isOfKind ``sqlFrom then
     `(LeanLinq.QuerySource.bind $(⟨c[3]⟩) (fun $(⟨c[1]⟩) => $acc))
   else if c.isOfKind ``sqlJoin then
@@ -101,7 +106,7 @@ private def foldLeading (acc : Term) (c : Syntax) : MacroM Term := do
 
 /-- Apply the trailing clauses (distinct / limit [offset] / offset) in
 written order. -/
-private def applyTrailing (acc : Term) (c : Syntax) : MacroM Term := do
+private meta def applyTrailing (acc : Term) (c : Syntax) : MacroM Term := do
   if c.isOfKind ``sqlDistinct then
     `(LeanLinq.QueryP.distinct $acc)
   else if c.isOfKind ``sqlLimit then
@@ -115,7 +120,7 @@ private def applyTrailing (acc : Term) (c : Syntax) : MacroM Term := do
   else
     Macro.throwErrorAt c "only `distinct`, `limit`, and `offset` may follow `select`"
 
-private def expandClauses (clauses : List Syntax) : MacroM Term := do
+private meta def expandClauses (clauses : List Syntax) : MacroM Term := do
   match clauses.findIdx? (·.isOfKind ``sqlSelect) with
   | none => Macro.throwError "query! must contain a `select` clause"
   | some i =>
@@ -172,7 +177,7 @@ open Lean.Elab Lean.Elab.Term Lean.Meta in
 expression-level subquery — possibly correlated, capturing outer binders
 at the ambient ρ) gets the raw tree; anywhere else the comprehension
 elaborates once under an abstract row interpretation — the ∀ρ bundle. -/
-@[term_elab sqlQuery] def elabQuery : TermElab := fun stx expectedType? => do
+@[term_elab sqlQuery] meta def elabQuery : TermElab := fun stx expectedType? => do
   let q ← liftMacroM <| expandClauses stx[3].getSepArgs.toList
   let perRho ← match expectedType? with
     | some exp => do

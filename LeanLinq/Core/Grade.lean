@@ -1,3 +1,7 @@
+module
+
+@[expose] public section
+
 /-! # `Grade` — round budgets, symbolic in table sizes
 
 The round-trip currency of `Db`: a grade **is its collapse** — a
