@@ -556,8 +556,17 @@ Dialect rules: [SQLite CREATE TABLE](https://sqlite.org/lang_createtable.html),
 
 ## Executing for real: the native drivers
 
-`import LeanLinq.Driver.Sqlite` (a separate lib target — the core library stays
-FFI-free) talks to the system sqlite3 library:
+Each driver is its own lib target, so the core library stays FFI-free:
+`import LeanLinq` needs no database client library, and a program needs only
+the client libraries of the drivers it imports. A program in another package
+that imports a driver links that driver's shim and client library with no link
+settings of its own (`downstream/postgres` is one, built in CI with only
+libpq's development files installed). On Linux a client library that uses
+newer glibc symbols than Lean's bundled glibc, such as SQLite's on Ubuntu
+24.04, also needs `-Wl,--allow-shlib-undefined` in that program's
+`moreLinkArgs`, since Lake keeps link arguments inside a package.
+
+`import LeanLinq.Driver.Sqlite` talks to the system sqlite3 library:
 
 ```lean
 open LeanLinq.Sqlite
