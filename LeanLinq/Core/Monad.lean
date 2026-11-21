@@ -1,4 +1,8 @@
-import LeanLinq.Core.Value
+module
+
+public import LeanLinq.Core.Value
+
+@[expose] public section
 
 namespace LeanLinq
 

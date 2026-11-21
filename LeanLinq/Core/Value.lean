@@ -1,4 +1,8 @@
-import LeanLinq.Core.Types
+module
+
+public import LeanLinq.Core.Types
+
+@[expose] public section
 
 /-! # Runtime values
 

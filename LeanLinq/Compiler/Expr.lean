@@ -1,4 +1,8 @@
-import LeanLinq.Core.Expr
+module
+
+public import LeanLinq.Core.Expr
+
+@[expose] public section
 
 namespace LeanLinq
 

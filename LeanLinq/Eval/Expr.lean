@@ -1,4 +1,8 @@
-import LeanLinq.Core.Schema
+module
+
+public import LeanLinq.Core.Schema
+
+@[expose] public section
 
 /-! # Value-level evaluation helpers
 

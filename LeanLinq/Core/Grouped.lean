@@ -1,5 +1,9 @@
-import LeanLinq.Core.Query
-import LeanLinq.Notation
+module
+
+public import LeanLinq.Core.Query
+public import LeanLinq.Notation
+
+@[expose] public section
 
 /-! Grouped expressions form a separate, phase-indexed language. Only named
 keys, aggregate results, and literals enter it; no ordinary row expression

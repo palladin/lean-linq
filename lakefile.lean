@@ -104,6 +104,8 @@ package «lean-linq» where
   license := "MIT"
   testDriver := "tests"
   moreLinkArgs := dbLinkArgs%
+  -- The sources are modules whose public definitions use private helpers.
+  leanOptions := #[⟨`backward.privateInPublic, true⟩]
 
 @[default_target]
 lean_lib LeanLinq

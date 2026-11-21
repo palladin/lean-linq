@@ -1,4 +1,8 @@
-import LeanLinq.Core.Table
+module
+
+public import LeanLinq.Core.Table
+
+@[expose] public section
 
 namespace LeanLinq
 

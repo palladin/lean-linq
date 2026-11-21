@@ -1,4 +1,8 @@
-import LeanLinq.Statements
+module
+
+public import LeanLinq.Statements
+
+@[expose] public section
 
 /-! # Statement evaluation
 

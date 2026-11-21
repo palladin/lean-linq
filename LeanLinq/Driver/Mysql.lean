@@ -1,7 +1,11 @@
-import LeanLinq
-import LeanLinq.Driver.TextCell
-import LeanLinq.Driver.Transaction
-import LeanLinq.Driver.Wire
+module
+
+public import LeanLinq
+public import LeanLinq.Driver.TextCell
+public import LeanLinq.Driver.Transaction
+public import LeanLinq.Driver.Wire
+
+@[expose] public section
 
 /-! # Native MySQL driver (libmysqlclient)
 

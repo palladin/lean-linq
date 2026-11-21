@@ -14,6 +14,7 @@ import Tests.Transactions
 import Tests.Raise
 import Tests.TransactionLifecycle
 import Tests.DDL
+import Tests.ModuleImport
 
 /-! # Golden-test runner
 

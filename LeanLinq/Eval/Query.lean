@@ -1,5 +1,9 @@
-import LeanLinq.Core.Query
-import LeanLinq.Eval.Expr
+module
+
+public import LeanLinq.Core.Query
+public import LeanLinq.Eval.Expr
+
+@[expose] public section
 
 /-! # Query evaluation — the denotational semantics
 

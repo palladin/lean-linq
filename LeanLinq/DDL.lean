@@ -1,4 +1,8 @@
-import LeanLinq.Core.Schema
+module
+
+public import LeanLinq.Core.Schema
+
+@[expose] public section
 
 /-! Typed table creation. Column names, primitive types, and nullability come
 from the same schema used by queries. Constraints refer to that schema.

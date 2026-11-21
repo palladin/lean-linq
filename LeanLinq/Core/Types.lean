@@ -1,3 +1,7 @@
+module
+
+@[expose] public section
+
 namespace LeanLinq
 
 /-- SQL column/expression types. -/

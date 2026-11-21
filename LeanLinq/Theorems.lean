@@ -1,4 +1,11 @@
-import LeanLinq.Eval.Query
+module
+
+public import LeanLinq.Eval.Query
+
+-- The proofs below unfold `List.filterAuxM`, whose body core does not expose.
+import all Init.Data.List.Control
+
+@[expose] public section
 
 /-! # Theorems about the executable semantics
 

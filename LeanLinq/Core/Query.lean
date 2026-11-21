@@ -1,5 +1,9 @@
-import LeanLinq.Core.Schema
-import LeanLinq.Core.Grade
+module
+
+public import LeanLinq.Core.Schema
+public import LeanLinq.Core.Grade
+
+@[expose] public section
 
 namespace LeanLinq
 

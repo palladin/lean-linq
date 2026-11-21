@@ -1,6 +1,10 @@
-import LeanLinq.Core.Query
-import LeanLinq.Compiler.Expr
-import LeanLinq.Eval.Query
+module
+
+public import LeanLinq.Core.Query
+public import LeanLinq.Compiler.Expr
+public import LeanLinq.Eval.Query
+
+@[expose] public section
 
 namespace LeanLinq
 

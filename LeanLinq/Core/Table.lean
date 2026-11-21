@@ -1,5 +1,9 @@
-import LeanLinq.Core.Monad
-import LeanLinq.Core.Grade
+module
+
+public import LeanLinq.Core.Monad
+public import LeanLinq.Core.Grade
+
+@[expose] public section
 
 namespace LeanLinq
 

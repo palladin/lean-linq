@@ -1,4 +1,8 @@
-import LeanLinq.Compiler.Query
+module
+
+public import LeanLinq.Compiler.Query
+
+@[expose] public section
 
 /-! # Data-modification statements: INSERT / UPDATE / DELETE
 
