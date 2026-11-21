@@ -351,7 +351,7 @@ date-only strings) — date arithmetic preserves it, as engines do. -/
 def timeOfDay (s : String) : String :=
   if s.length ≥ 19 then ((s.drop 11).take 8).toString else "00:00:00"
 
-def fmtDateTime (ymd : Int × Int × Int) (time : String := "00:00:00") : String :=
+@[no_expose] def fmtDateTime (ymd : Int × Int × Int) (time : String := "00:00:00") : String :=
   s!"{padYear ymd.1}-{pad2 ymd.2.1}-{pad2 ymd.2.2} {time}"
 
 def isLeapYear (y : Int) : Bool :=
@@ -431,7 +431,7 @@ private def Values.reprCells : {s : List (String × SqlType)} → Values s → L
   | _, .cons (c := c) cell r =>
       cellRepr c.ty (SqlType.toNullable cell) :: r.reprCells
 
-instance : Repr (Values s) :=
+@[no_expose] instance : Repr (Values s) :=
   ⟨fun v _ => .text ("(" ++ String.intercalate ", " v.reprCells ++ ")")⟩
 
 end LeanLinq

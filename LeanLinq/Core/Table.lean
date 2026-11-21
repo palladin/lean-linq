@@ -84,7 +84,7 @@ private theorem sizes_cons {n : String} {s : Schema} {ts : List (String × Schem
     TableEnv.sizes (.cons rs env : TableEnv ((n, s) :: ts)) m =
       if m = n then Nat.max rs.length (env.sizes m) else env.sizes m := rfl
 
-instance (priority := high) : HasTable ((n, s) :: ts) n s where
+@[no_expose] instance (priority := high) : HasTable ((n, s) :: ts) n s where
   rows | .cons rs _ => rs
   set | .cons _ env, rs => .cons rs env
   rows_sizes | .cons rs env => le_sizes_head rs env
@@ -127,7 +127,7 @@ instance (priority := high) : HasTable ((n, s) :: ts) n s where
           · exact Nat.le_trans (Nat.le_max_right ..) (Nat.le_add_right ..)
         · exact Nat.le_add_right ..
 
-instance [h : HasTable ts n s] : HasTable ((n', s') :: ts) n s where
+@[no_expose] instance [h : HasTable ts n s] : HasTable ((n', s') :: ts) n s where
   rows | .cons _ env => h.rows env
   set | .cons rs env, rs' => .cons rs (h.set env rs')
   rows_sizes | .cons rs env => le_sizes_tail rs env (h.rows_sizes env)

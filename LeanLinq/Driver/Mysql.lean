@@ -5,7 +5,7 @@ public import LeanLinq.Driver.TextCell
 public import LeanLinq.Driver.Transaction
 public import LeanLinq.Driver.Wire
 
-@[expose] public section
+public section
 
 /-! # Native MySQL driver (libmysqlclient)
 

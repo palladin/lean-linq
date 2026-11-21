@@ -46,7 +46,7 @@ spines have no `bind` — a `groupYield` terminal cannot appear at index
 
 Total: `SpineQ` is a reflexive inductive, so structural recursion's inductive
 hypothesis covers `f r` for every `r`. -/
-def _root_.LeanLinq.SpineQP.bind {ρ : Schema → Type} (sp : SpineQP ρ ts .plain s)
+@[no_expose] def _root_.LeanLinq.SpineQP.bind {ρ : Schema → Type} (sp : SpineQP ρ ts .plain s)
     (k : RowP ρ ts s → SpineQP ρ ts g s') : SpineQP ρ ts g s' :=
   SpineQP.bindAux sp rfl k
 
@@ -228,11 +228,11 @@ private def asSetOperand : QueryP ρ ts s → QueryP ρ ts s
   | .spine sp => .spine sp.dropOrders
   | q => q
 
-def union (q₁ q₂ : QueryP ρ ts s) : QueryP ρ ts s :=
+@[no_expose] def union (q₁ q₂ : QueryP ρ ts s) : QueryP ρ ts s :=
   .setOpC .union (asSetOperand q₁) (asSetOperand q₂)
-def intersect (q₁ q₂ : QueryP ρ ts s) : QueryP ρ ts s :=
+@[no_expose] def intersect (q₁ q₂ : QueryP ρ ts s) : QueryP ρ ts s :=
   .setOpC .intersect (asSetOperand q₁) (asSetOperand q₂)
-def except (q₁ q₂ : QueryP ρ ts s) : QueryP ρ ts s :=
+@[no_expose] def except (q₁ q₂ : QueryP ρ ts s) : QueryP ρ ts s :=
   .setOpC .except (asSetOperand q₁) (asSetOperand q₂)
 
 end QueryP

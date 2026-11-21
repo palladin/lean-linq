@@ -57,7 +57,7 @@ rescales and division pre-scales; integer and decimal division truncate
 toward zero (`Int.tdiv` — SQL's direction, not Lean's Euclidean `/`);
 division by zero is an `EvalError`, not NULL — for doubles too (the
 PostgreSQL/SQL Server behavior; SQLite yields NULL instead). -/
-def SqlPrim.arithV : (t : SqlPrim) → ArithOp → t.interp → t.interp →
+@[no_expose] def SqlPrim.arithV : (t : SqlPrim) → ArithOp → t.interp → t.interp →
     Except EvalError (Nullable t)
   | .int, op, a, b => intArith op a b
   | .long, op, a, b => intArith op a b
@@ -92,7 +92,7 @@ private def SqlPrim.avgV : (t : SqlPrim) → List t.interp → Except EvalError 
 /-- Fold an aggregate over the non-NULL values of a group (SQL semantics:
 NULLs are ignored, an all-NULL/empty group aggregates to NULL). MIN/MAX use
 the column order, so they work for every type; SUM/AVG only for numeric. -/
-def SqlPrim.aggV : (t : SqlPrim) → Aggregate t → List t.interp → Except EvalError (Nullable t)
+@[no_expose] def SqlPrim.aggV : (t : SqlPrim) → Aggregate t → List t.interp → Except EvalError (Nullable t)
   | _, _, [] => pure none
   | t, .min, v :: vs =>
       pure (some (vs.foldl (fun acc x => if t.cmpV x acc == .lt then x else acc) v))

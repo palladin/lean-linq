@@ -5,7 +5,7 @@ public import LeanLinq.Driver.TextCell
 public import LeanLinq.Driver.Transaction
 public import LeanLinq.Driver.Wire
 
-@[expose] public section
+public section
 
 /-! # Native PostgreSQL driver (libpq)
 
@@ -34,7 +34,7 @@ instance : Nonempty Conn := ConnP.property
 
 private opaque ResP : NonemptyType
 private def PgResult : Type := ResP.type
-instance : Nonempty PgResult := ResP.property
+private instance : Nonempty PgResult := ResP.property
 
 /-- Connect with a libpq conninfo string, e.g.
 `"host=127.0.0.1 port=5433 user=testuser password=testpass dbname=testdb"`. -/

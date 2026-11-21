@@ -2,7 +2,7 @@ module
 
 public import LeanLinq
 
-@[expose] public section
+public section
 
 /-! # Shared text-format cell codecs
 

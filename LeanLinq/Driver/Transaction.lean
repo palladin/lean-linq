@@ -1,6 +1,6 @@
 module
 
-@[expose] public section
+public section
 
 /-! Exception-safe native transaction lifecycle. Transaction controls and state
 checks are outside the `Db` body's operation bill. Connections must be used

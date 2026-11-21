@@ -807,7 +807,7 @@ private def DbE.applyOutcome (ps : ParamEnv c.params) (now : Option String) :
 
 /-- The model retains state on failure: a failed transaction restores its
 entry state, whereas a later outside failure retains the committed body. -/
-def DbP.runOutcomeSt (ps : ParamEnv c.params) (now : Option String)
+@[no_expose] def DbP.runOutcomeSt (ps : ParamEnv c.params) (now : Option String)
     {mode : ScopeMode} {α : Type} {w : Wp α}
     (x : DbPM mode c α w) (env : TableEnv c.tables) : DbOutcome c α :=
   match mode with
@@ -1111,7 +1111,7 @@ private def DbE.certApply (ps : ParamEnv c.params) (now : Option String) :
 /-- Database adequacy composes the handler's actual body-operation count.
 Transaction success has exactly the body's spec; failure atomicity is stated
 separately by `transaction_failure`. The generic Freer folds are unchanged. -/
-def DbP.runWithP (ps : ParamEnv c.params) (now : Option String) :
+@[no_expose] def DbP.runWithP (ps : ParamEnv c.params) (now : Option String) :
     {α : Type} → {w : Wp α} → DbP c α w → (env : TableEnv c.tables) →
     Except EvalError {p : α × TableEnv c.tables × Nat //
       ∀ k₀, w.sp p.1 (TableEnv.sizes env) k₀ (TableEnv.sizes p.2.1)

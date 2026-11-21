@@ -24,7 +24,7 @@ private def utf16Length (s : String) : Nat :=
 
 /-- Dialect identifier limits. Temporary SQL Server tables are outside this
 API; MySQL metadata identifiers only support BMP characters. -/
-def nameFits (db : DatabaseType) (name : String) : Bool :=
+@[no_expose] def nameFits (db : DatabaseType) (name : String) : Bool :=
   match db with
   | .sqlite => true
   | .postgres => name.toUTF8.size ≤ 63
@@ -137,7 +137,7 @@ private def keyBytes (db : DatabaseType) (statement : CreateTable name schema)
 /-- Static dialect checks. MySQL targets InnoDB/DYNAMIC with utf8mb4 and
 the standard 16 KiB (or larger) page size. SQL Server uses a clustered PK.
 Server permissions, collations, row limits and existing objects still apply. -/
-def CreateTable.validFor (statement : CreateTable name schema) (db : DatabaseType) : Bool :=
+@[no_expose] def CreateTable.validFor (statement : CreateTable name schema) (db : DatabaseType) : Bool :=
   DDL.namesFit db name schema &&
   statement.stringLengths.all (fun column => column.length ≤ match db with
     | .sqlite => 1000000000
@@ -156,7 +156,7 @@ def CreateTable.validFor (statement : CreateTable name schema) (db : DatabaseTyp
 are checked before SQL can be generated. Creation never validates or migrates
 an existing table. SQL Server catches only the existing-table error, including
 when another initializer creates the same table concurrently. -/
-def CreateTable.toSql (statement : CreateTable name schema) (db : DatabaseType)
+@[no_expose] def CreateTable.toSql (statement : CreateTable name schema) (db : DatabaseType)
     (_valid : statement.validFor db = true := by decide) : String :=
   let quote := db.quoteIdent
   let columns := schema.map fun (name, type) =>

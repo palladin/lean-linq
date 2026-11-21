@@ -2,7 +2,7 @@ module
 
 public import LeanLinq
 
-@[expose] public section
+public section
 
 /-! Placeholder translation for SQL emitted by the compiler. Quoted identifiers
 and string literals are SQL text, even when they contain a parameter's name. -/

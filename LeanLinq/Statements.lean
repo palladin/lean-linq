@@ -87,7 +87,7 @@ def InsertStmt.compile (i : InsertStmt ts n s) : CompileM String := do
   let vals ← i.values.mapM fun (_, ⟨_, e⟩) => e.compileValue
   return s!"INSERT INTO {← quote n} ({String.intercalate ", " cols}) VALUES ({String.intercalate ", " vals})"
 
-def UpdateStmt.compile (u : UpdateStmt ts n s) : CompileM String := do
+@[no_expose] def UpdateStmt.compile (u : UpdateStmt ts n s) : CompileM String := do
   -- Reserve the target binding before compiling nested queries, whose source
   -- aliases must remain distinct even when their columns have the same names.
   let alias ← freshAlias
@@ -103,7 +103,7 @@ def UpdateStmt.compile (u : UpdateStmt ts n s) : CompileM String := do
   else
     return s!"UPDATE {target} AS {targetAlias} SET {String.intercalate ", " sets}{filter}"
 
-def DeleteStmt.compile (d : DeleteStmt ts n s) : CompileM String := do
+@[no_expose] def DeleteStmt.compile (d : DeleteStmt ts n s) : CompileM String := do
   let alias ← freshAlias
   let target ← quote n
   let targetAlias ← quote alias
@@ -168,7 +168,7 @@ private def compileValuesRow : (s : Schema) → Values s → CompileM (List Stri
         | ⟨t, false⟩, cell => pushParam (SqlValue.ofCell t cell)
       return item :: (← compileValuesRow rest r)
 
-def InsertValuesStmt.compile (st : InsertValuesStmt ts n s) : CompileM String := do
+@[no_expose] def InsertValuesStmt.compile (st : InsertValuesStmt ts n s) : CompileM String := do
   let cols ← s.mapM fun (nm, _) => quote nm
   let rows ← st.rows.mapM fun r => do
     return s!"({String.intercalate ", " (← compileValuesRow s r)})"

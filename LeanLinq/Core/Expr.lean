@@ -367,7 +367,7 @@ private def RowP.ofAtomAux (a : ρ s') : (s : Schema) → RowP ρ ts s
 /-- The row a binder's atom stands for: every column a `field` reference
 through the atom. The smart constructors wrap raw binders with this, so
 surface lambdas receive rows while the AST stores only the opaque atom. -/
-def RowP.ofAtom {s : Schema} (a : ρ s) : RowP ρ ts s :=
+@[no_expose] def RowP.ofAtom {s : Schema} (a : ρ s) : RowP ρ ts s :=
   RowP.ofAtomAux a s
 
 /-- Total positional lookup in ordinary and grouped expression rows. -/

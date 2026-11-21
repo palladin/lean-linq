@@ -4,7 +4,7 @@ public import LeanLinq
 public import LeanLinq.Driver.TextCell
 public import LeanLinq.Driver.Transaction
 
-@[expose] public section
+public section
 
 /-! # Native SQL Server driver (FreeTDS DB-Library)
 
