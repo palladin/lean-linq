@@ -566,6 +566,13 @@ newer glibc symbols than Lean's bundled glibc, such as SQLite's on Ubuntu
 24.04, also needs `-Wl,--allow-shlib-undefined` in that program's
 `moreLinkArgs`, since Lake keeps link arguments inside a package.
 
+On macOS the SQLite driver links Homebrew's SQLite when it is installed
+(`brew install sqlite`), and a program in another package then needs no link
+settings (`downstream/sqlite` is one, built in CI on macOS and Linux). Without
+it the driver falls back to the stub in the macOS SDK, which Lean's bundled
+linker can't read. That program then selects Apple's linker with
+`--ld-path=/usr/bin/ld` in its `moreLinkArgs`.
+
 `import LeanLinq.Driver.Sqlite` talks to the system sqlite3 library:
 
 ```lean

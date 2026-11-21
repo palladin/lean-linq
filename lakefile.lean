@@ -84,9 +84,16 @@ def clientLibrary (what : String) (linuxNames : Array String) (keg macName : Str
     let extra := ((← extraDir).map fun dir => #[(dir : FilePath)]).getD #[]
     findLibrary what (linuxLibDirs ++ extra) linuxNames
 
-/-- SQLite's library. It ships with macOS, as a stub in the SDK. -/
+/-- SQLite's library. On macOS the system copy exists only as a stub in the SDK,
+which Lean's bundled linker can't read, so a program in another package would
+need Apple's linker to use it. Homebrew's copy is a real library that either
+linker reads, so it comes first. -/
 def sqliteLibrary : IO FilePath := do
   if System.Platform.isOSX then
+    if let some keg ← brewPrefix? "sqlite" then
+      let lib := (keg : FilePath) / "lib" / "libsqlite3.dylib"
+      if ← lib.pathExists then
+        return lib
     let some sdk ← commandOutput? "xcrun" #["--show-sdk-path"]
       | throw <| IO.userError "lean-linq: `xcrun --show-sdk-path` failed"
     findLibrary "libsqlite3" #[(sdk : FilePath) / "usr" / "lib"] #["libsqlite3.tbd"]
@@ -130,7 +137,13 @@ def buildShim (pkg : Package) (name : String) (includeDir : IO (Option String) :
   buildStaticLib (pkg.staticLibDir / nameToStaticLib name) #[o]
 
 target sqlite3_shim pkg : FilePath :=
-  buildShim pkg "sqlite3_shim"
+  buildShim pkg "sqlite3_shim" do
+    -- The header that matches the library `sqliteLibrary` picks on macOS.
+    if System.Platform.isOSX then
+      if let some keg ← brewPrefix? "sqlite" then
+        if ← ((keg : FilePath) / "include" / "sqlite3.h").pathExists then
+          return some (keg ++ "/include")
+    return none
 
 target libpq_shim pkg : FilePath :=
   buildShim pkg "libpq_shim" do

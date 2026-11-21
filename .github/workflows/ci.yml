@@ -91,3 +91,33 @@ jobs:
           lake build
           lake exe pgcheck
 
+  # The same check for the SQLite driver, on both platforms. On macOS the
+  # program has no link settings of its own.
+  downstream-sqlite:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SQLite's development files
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            brew list sqlite >/dev/null 2>&1 || brew install sqlite
+          else
+            dpkg -s libsqlite3-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y libsqlite3-dev; }
+          fi
+
+      - name: Install elan
+        run: |
+          curl -sSfL https://elan.lean-lang.org/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Build and run a downstream program that uses the SQLite driver
+        working-directory: downstream/sqlite
+        run: |
+          lake build
+          lake exe sqlitecheck
+
