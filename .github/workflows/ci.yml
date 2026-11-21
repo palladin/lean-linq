@@ -71,3 +71,58 @@ jobs:
       - name: Stop databases
         if: always()
         run: docker compose down -v
+
+  # A package outside lean-linq that imports one driver gets that driver's shim
+  # and client library from Lake, and needs no other client library installed.
+  downstream-postgres:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Keep only the PostgreSQL client development files
+        run: |
+          sudo apt-get remove -y libsqlite3-dev freetds-dev libmysqlclient-dev
+          dpkg -s libpq-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y libpq-dev; }
+
+      - name: Install elan
+        run: |
+          curl -sSfL https://github.com/leanprover/elan/releases/latest/download/elan-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          ./elan-init -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Build and run a downstream program that uses the PostgreSQL driver
+        working-directory: downstream/postgres
+        run: |
+          lake build
+          lake exe pgcheck
+
+  # The same check for the SQLite driver, on both platforms. On macOS the
+  # program has no link settings of its own.
+  downstream-sqlite:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SQLite's development files
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            brew list sqlite >/dev/null 2>&1 || brew install sqlite
+          else
+            dpkg -s libsqlite3-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y libsqlite3-dev; }
+          fi
+
+      - name: Install elan
+        run: |
+          curl -sSfL https://elan.lean-lang.org/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Build and run a downstream program that uses the SQLite driver
+        working-directory: downstream/sqlite
+        run: |
+          lake build
+          lake exe sqlitecheck
+
